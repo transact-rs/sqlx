@@ -86,7 +86,8 @@ See `default_host()` in the same source file as this method for the current beha
 If `sslrootcert` is not set, the default root certificates used depends on Cargo features:
 
 * If `tls-native-tls` is enabled, the system root certificates are used.
-* If `tls-rustls-ring-native-roots` is enabled, the system root certificates are used.
+* If `tls-rustls-ring-platform-verifier` or `tls-rustls-aws-lc-rs-platform-verifier`
+  is enabled, the system root certificates are used.
 * Otherwise, TLS roots are populated using the [`webpki-roots`] crate.
 
 ## Environment Variables
