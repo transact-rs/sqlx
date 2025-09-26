@@ -4,16 +4,13 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
 use rustls::{
-    client::{
-        danger::{ServerCertVerified, ServerCertVerifier},
-        WebPkiServerVerifier,
-    },
+    client::danger::{ServerCertVerified, ServerCertVerifier},
     crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider},
     pki_types::{
         pem::{self, PemObject},
         CertificateDer, PrivateKeyDer, ServerName, UnixTime,
     },
-    CertificateError, ClientConfig, ClientConnection, Error as TlsError, RootCertStore,
+    CertificateError, ClientConfig, ClientConnection, Error as TlsError,
 };
 
 use crate::error::Error;
@@ -92,14 +89,17 @@ where
     S: Socket,
 {
     #[cfg(all(
-        feature = "_tls-rustls-aws-lc-rs",
+        any(
+            feature = "_tls-rustls-aws-lc-rs",
+            feature = "_tls-rustls-aws-lc-rs-platform-verifier"
+        ),
         not(feature = "_tls-rustls-ring-webpki"),
-        not(feature = "_tls-rustls-ring-native-roots")
+        not(feature = "_tls-rustls-ring-platform-verifier"),
     ))]
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     #[cfg(any(
         feature = "_tls-rustls-ring-webpki",
-        feature = "_tls-rustls-ring-native-roots"
+        feature = "_tls-rustls-ring-platform-verifier"
     ))]
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
@@ -136,46 +136,53 @@ where
                 .with_custom_certificate_verifier(Arc::new(DummyTlsVerifier { provider }))
                 .with_no_client_auth()
         }
-    } else {
-        let mut cert_store = import_root_certs();
+    } else if tls_config.accept_invalid_hostnames {
+        #[cfg(feature = "rustls-platform-verifier")]
+        let verifier = rustls_platform_verifier::Verifier::new(config.crypto_provider().clone())
+            .map(Arc::new)
+            .map_err(Error::tls)?;
 
-        if let Some(ca) = tls_config.root_cert_path {
-            let data = ca.data().await?;
+        #[cfg(not(feature = "rustls-platform-verifier"))]
+        let verifier = rustls::client::WebPkiServerVerifier::builder(Arc::new(
+            load_root_certs(&tls_config).await?,
+        ))
+        .build()
+        .map_err(Error::tls)?;
 
-            for result in CertificateDer::pem_slice_iter(&data) {
-                let Ok(cert) = result else {
-                    return Err(Error::Tls(format!("Invalid certificate {ca}").into()));
-                };
-
-                cert_store.add(cert).map_err(|err| Error::Tls(err.into()))?;
-            }
-        }
-
-        if tls_config.accept_invalid_hostnames {
-            let verifier = WebPkiServerVerifier::builder(Arc::new(cert_store))
-                .build()
-                .map_err(|err| Error::Tls(err.into()))?;
-
-            if let Some(user_auth) = user_auth {
-                config
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
-                    .with_client_auth_cert(user_auth.0, user_auth.1)
-                    .map_err(Error::tls)?
-            } else {
-                config
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
-                    .with_no_client_auth()
-            }
-        } else if let Some(user_auth) = user_auth {
+        if let Some(user_auth) = user_auth {
             config
-                .with_root_certificates(cert_store)
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
                 .with_client_auth_cert(user_auth.0, user_auth.1)
                 .map_err(Error::tls)?
         } else {
             config
-                .with_root_certificates(cert_store)
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(NoHostnameTlsVerifier { verifier }))
+                .with_no_client_auth()
+        }
+    } else {
+        #[cfg(feature = "rustls-platform-verifier")]
+        if let Some(user_auth) = user_auth {
+            rustls_platform_verifier::BuilderVerifierExt::with_platform_verifier(config)
+                .map_err(Error::tls)?
+                .with_client_auth_cert(user_auth.0, user_auth.1)
+                .map_err(Error::tls)?
+        } else {
+            rustls_platform_verifier::BuilderVerifierExt::with_platform_verifier(config)
+                .map_err(Error::tls)?
+                .with_no_client_auth()
+        }
+
+        #[cfg(not(feature = "rustls-platform-verifier"))]
+        if let Some(user_auth) = user_auth {
+            config
+                .with_root_certificates(load_root_certs(&tls_config).await?)
+                .with_client_auth_cert(user_auth.0, user_auth.1)
+                .map_err(Error::tls)?
+        } else {
+            config
+                .with_root_certificates(load_root_certs(&tls_config).await?)
                 .with_no_client_auth()
         }
     };
@@ -196,7 +203,7 @@ where
 
 fn certs_from_pem(pem: Vec<u8>) -> Result<Vec<CertificateDer<'static>>, Error> {
     CertificateDer::pem_slice_iter(&pem)
-        .map(|result| result.map_err(|err| Error::Tls(err.into())))
+        .map(|result| result.map_err(Error::tls))
         .collect()
 }
 
@@ -208,32 +215,28 @@ fn private_key_from_pem(pem: Vec<u8>) -> Result<PrivateKeyDer<'static>, Error> {
     }
 }
 
-#[cfg(all(feature = "webpki-roots", not(feature = "rustls-native-certs")))]
-fn import_root_certs() -> RootCertStore {
-    RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned())
-}
+#[cfg(all(feature = "webpki-roots", not(feature = "rustls-platform-verifier")))]
+async fn load_root_certs(tls_config: &TlsConfig<'_>) -> Result<rustls::RootCertStore, Error> {
+    let mut cert_store =
+        rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(ca) = tls_config.root_cert_path {
+        let data = ca.data().await?;
 
-#[cfg(feature = "rustls-native-certs")]
-fn import_root_certs() -> RootCertStore {
-    let mut root_cert_store = RootCertStore::empty();
+        for result in CertificateDer::pem_slice_iter(&data) {
+            let Ok(cert) = result else {
+                return Err(Error::tls(format!("Invalid certificate {ca}")));
+            };
 
-    let load_results = rustls_native_certs::load_native_certs();
-    for e in load_results.errors {
-        log::warn!("Error loading native certificates: {e:?}");
-    }
-    for cert in load_results.certs {
-        if let Err(e) = root_cert_store.add(cert) {
-            log::warn!("rustls failed to parse native certificate: {e:?}");
+            cert_store.add(cert).map_err(Error::tls)?;
         }
     }
-
-    root_cert_store
+    Ok(cert_store)
 }
 
 // Not currently used but allows for a "tls-rustls-no-roots" feature.
-#[cfg(not(any(feature = "rustls-native-certs", feature = "webpki-roots")))]
-fn import_root_certs() -> RootCertStore {
-    RootCertStore::empty()
+#[cfg(not(any(feature = "rustls-platform-verifier", feature = "webpki-roots")))]
+async fn load_root_certs() -> Result<rustls::RootCertStore, Error> {
+    Ok(rustls::RootCertStore::empty())
 }
 
 #[derive(Debug)]
@@ -289,11 +292,14 @@ impl ServerCertVerifier for DummyTlsVerifier {
 }
 
 #[derive(Debug)]
-pub struct NoHostnameTlsVerifier {
-    verifier: Arc<WebPkiServerVerifier>,
+pub struct NoHostnameTlsVerifier<T> {
+    verifier: Arc<T>,
 }
 
-impl ServerCertVerifier for NoHostnameTlsVerifier {
+impl<T> ServerCertVerifier for NoHostnameTlsVerifier<T>
+where
+    T: ServerCertVerifier,
+{
     fn verify_server_cert(
         &self,
         end_entity: &CertificateDer<'_>,
