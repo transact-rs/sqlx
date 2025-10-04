@@ -5,25 +5,25 @@ use sqlx::{MySqlPool, PgPool};
 const PG_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("tests/postgres/migrations");
 const MYSQL_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("tests/mysql/migrations");
 
-const PG_USERS_DATABASE_URL: &'static str = "PG_USERS_DATABASE_URL";
-const MYSQL_COMMENTS_DATABASE_URL: &'static str = "MYSQL_COMMENTS_DATABASE_URL";
+const PG_2_DATABASE_URL: &'static str = "PG_2_DATABASE_URL";
+const MYSQL_2_DATABASE_URL: &'static str = "MYSQL_2_DATABASE_URL";
 
 #[sqlx::test(
     env(migrations = "tests/postgres/migrations"), // no database url var
     env(
         migrator = "PG_MIGRATOR",
         fixtures(path = "fixtures/postgres", scripts("users")),
-        var = "PG_USERS_DATABASE_URL", // rust path
+        var = "PG_2_DATABASE_URL", // rust path
     ),
     env(
         migrations = "tests/mysql/migrations",
         fixtures(path = "fixtures/mysql", scripts("posts")),
-        var("MYSQL_POSTS_DATABASE_URL"), // string literal
+        var("MYSQL_1_DATABASE_URL"), // string literal
     ),
     env(
         migrator = "MYSQL_MIGRATOR",
         fixtures(path = "fixtures/mysql", scripts("comments")),
-        var = "MYSQL_COMMENTS_DATABASE_URL", // rust path
+        var = "MYSQL_2_DATABASE_URL", // rust path
     ),
 )]
 async fn it_gets_from_invidual_environments(

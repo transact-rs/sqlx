@@ -752,20 +752,20 @@ jobs:
       - run: cargo build --features any,postgres,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }}
 
       - run: |
-          docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
-          docker exec postgres_${{ matrix.postgres }} bash -c "until pg_isready; do sleep 1; done"
+          docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_1_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
+          docker exec postgres_1_${{ matrix.postgres }} bash -c "until pg_isready; do sleep 1; done"
 
       - run: |
-          docker compose -f tests/docker-compose.yml run -d -p 5433:5432 --name postgres_users_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
-          docker exec postgres_users_${{ matrix.postgres }} bash -c "until pg_isready; do sleep 1; done"
+          docker compose -f tests/docker-compose.yml run -d -p 5433:5432 --name postgres_2_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
+          docker exec postgres_2_${{ matrix.postgres }} bash -c "until pg_isready; do sleep 1; done"
 
       - run: |
-          docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_posts_${{ matrix.mysql }} mysql_${{ matrix.mysql }}
-          docker exec mysql_posts_${{ matrix.mysql }} bash -c "until mysqladmin ping; do sleep 1; done"
+          docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_1_${{ matrix.mysql }} mysql_${{ matrix.mysql }}
+          docker exec mysql_1_${{ matrix.mysql }} bash -c "until mysqladmin ping; do sleep 1; done"
 
       - run: |
-          docker compose -f tests/docker-compose.yml run -d -p 3307:3306 --name mysql_comments_${{ matrix.mysql }} mysql_${{ matrix.mysql }}
-          docker exec mysql_comments_${{ matrix.mysql }} bash -c "until mysqladmin ping; do sleep 1; done"
+          docker compose -f tests/docker-compose.yml run -d -p 3307:3306 --name mysql_2_${{ matrix.mysql }} mysql_${{ matrix.mysql }}
+          docker exec mysql_2_${{ matrix.mysql }} bash -c "until mysqladmin ping; do sleep 1; done"
 
       # Create data dir for offline mode
       - run: mkdir .sqlx
@@ -778,9 +778,10 @@ jobs:
           --features any,postgres,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }}
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
-          PG_USERS_DATABASE_URL: postgres://postgres:password@localhost:5433/sqlx
-          MYSQL_POSTS_DATABASE_URL: mysql://root:password@localhost:3306/sqlx
-          MYSQL_COMMENTS_DATABASE_URL: mysql://root:password@localhost:3307/sqlx
+          PG_1_DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
+          PG_2_DATABASE_URL: postgres://postgres:password@localhost:5433/sqlx
+          MYSQL_1_DATABASE_URL: mysql://root:password@localhost:3306/sqlx
+          MYSQL_2_DATABASE_URL: mysql://root:password@localhost:3307/sqlx
           SQLX_OFFLINE_DIR: .sqlx
           RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}" --cfg mysql_${{ matrix.mysql }}
 
