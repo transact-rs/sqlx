@@ -47,7 +47,7 @@ impl TestSupport for Postgres {
     }
 
     async fn cleanup_test_dbs_by_url(url: &str) -> Result<Option<usize>, Error> {
-        let mut conn = PgConnection::connect(&url).await?;
+        let mut conn = PgConnection::connect(url).await?;
 
         let delete_db_names: Vec<String> = query_scalar("select db_name from _sqlx_test.databases")
             .fetch_all(&mut conn)
