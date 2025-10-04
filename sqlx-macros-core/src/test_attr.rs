@@ -105,22 +105,10 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
 
     match parsed_args_list.len() {
         0 => {
-            return Ok(quote! {
-                #(#attrs)*
-                #[::core::prelude::v1::test]
-                fn #name() #ret {
-                    async fn #name(#inputs) #ret {
-                        #body
-                    }
-
-                    let mut args = ::sqlx::testing::TestArgs::new(concat!(module_path!(), "::", stringify!(#name)));
-
-                    // We need to give a coercion site or else we get "unimplemented trait" errors.
-                    let f: fn(#(#fn_arg_types),*) -> _ = #name;
-
-                    ::sqlx::testing::TestFn::run_test(f, args)
-                }
-            });
+            return Err(Box::new(syn::Error::new_spanned(
+                args.first().unwrap(),
+                "BUG: unexpected args.",
+            )));
         }
         args_num @ 1..=4 => {
             use proc_macro2::Span;
@@ -139,13 +127,18 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
 
             let mut args = Vec::new();
             for (i, parsed_args) in parsed_args_list.iter().enumerate() {
-                let args_name = Ident::new(&format!("args{}", 1 + i), Span::call_site());
+                let args_name = Ident::new(&format!("args{}", i + 1), Span::call_site());
+                let test_path_suffix = if i == 0 {
+                    String::new()
+                } else {
+                    format!("_{}", i + 1)
+                };
                 let database_url_var = &parsed_args.database_url_var;
                 let migrations = &parsed_args.migrations;
                 let fixtures = parsed_args.fixtures.as_slice();
 
                 args.push(quote! {
-                    let mut #args_name = ::sqlx::testing::TestArgs::new(concat!(module_path!(), "::", stringify!(#name), "#{", #i, "}"));
+                    let mut #args_name = ::sqlx::testing::TestArgs::new(concat!(module_path!(), "::", stringify!(#name), #test_path_suffix));
                     #args_name.#migrations
                     #args_name.fixtures(&[#(#fixtures),*]);
                     #args_name.database_url_var(#database_url_var);
@@ -188,15 +181,20 @@ fn parse_attr_args(
 
     let mut parsed_args: Vec<ParsedArgs> = Vec::new();
 
+    if args.is_empty() {
+        let parsed = parse_one_attr_args(args, input, config)?;
+        return Ok(vec![parsed]);
+    }
+
     for arg in args {
         match arg {
             syn::Meta::List(list) if list.path.is_ident("env") => {
                 let args = parser.parse2(list.tokens.clone())?;
-                let parsed = parse_one_attr_args(args, input, config)?;
+                let parsed = parse_one_attr_args(&args, input, config)?;
                 parsed_args.push(parsed);
             }
             _ => {
-                let parsed = parse_one_attr_args(args.clone(), input, config)?;
+                let parsed = parse_one_attr_args(args, input, config)?;
                 return Ok(vec![parsed]);
             }
         }
@@ -207,7 +205,7 @@ fn parse_attr_args(
 
 #[cfg(feature = "migrate")]
 fn parse_one_attr_args(
-    args: AttributeArgs,
+    args: &AttributeArgs,
     input: &syn::ItemFn,
     config: &sqlx_core::config::Config,
 ) -> crate::Result<ParsedArgs> {
@@ -307,7 +305,7 @@ fn parse_one_attr_args(
 }
 
 #[cfg(feature = "migrate")]
-fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
+fn parse_args(attr_args: &AttributeArgs) -> syn::Result<Args> {
     use proc_macro2::Span;
     use syn::{
         parenthesized, parse::Parse, punctuated::Punctuated, token::Comma, Expr, Lit, LitStr, Meta,
@@ -376,7 +374,7 @@ fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
                     }
                 }
 
-                let Some(lit) = recurse_lit_lookup(value.value) else {
+                let Some(lit) = recurse_lit_lookup(value.value.clone()) else {
                     return Err(syn::Error::new_spanned(path, "expected string or `false`"));
                 };
 
