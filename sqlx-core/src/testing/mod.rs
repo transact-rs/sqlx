@@ -28,7 +28,7 @@ pub trait TestSupport: Database {
         args: &TestArgs,
     ) -> impl Future<Output = Result<TestContext<Self>, Error>> + Send + '_;
 
-    fn cleanup_test(db_name: &str) -> impl Future<Output = Result<(), Error>> + Send + '_;
+    fn cleanup_test(args: &TestArgs) -> impl Future<Output = Result<(), Error>> + Send + '_;
 
     /// Cleanup any test databases that are no longer in-use.
     ///
@@ -37,6 +37,13 @@ pub trait TestSupport: Database {
     /// The implementation may require `DATABASE_URL` to be set in order to manage databases.
     /// The user credentials it contains must have the privilege to create and drop databases.
     fn cleanup_test_dbs() -> impl Future<Output = Result<Option<usize>, Error>> + Send + 'static;
+
+    /// Cleanup any test databases that are no longer in-use.
+    ///
+    /// Returns a count of the databases deleted, if possible.
+    fn cleanup_test_dbs_by_url(
+        url: &str,
+    ) -> impl Future<Output = Result<Option<usize>, Error>> + Send + '_;
 
     /// Take a snapshot of the current state of the database (data only).
     ///
@@ -66,6 +73,7 @@ pub struct TestArgs {
     pub test_path: &'static str,
     pub migrator: Option<&'static Migrator>,
     pub fixtures: &'static [TestFixture],
+    pub database_url_var: &'static str,
 }
 
 pub trait TestFn {
@@ -158,6 +166,7 @@ impl TestArgs {
             test_path,
             migrator: None,
             fixtures: &[],
+            database_url_var: "DATABASE_URL",
         }
     }
 
@@ -165,8 +174,16 @@ impl TestArgs {
         self.migrator = Some(migrator);
     }
 
+    pub fn no_migrator(&mut self) {
+        self.migrator = None;
+    }
+
     pub fn fixtures(&mut self, fixtures: &'static [TestFixture]) {
         self.fixtures = fixtures;
+    }
+
+    pub fn database_url_var(&mut self, database_url_var: &'static str) {
+        self.database_url_var = database_url_var;
     }
 }
 
@@ -231,7 +248,7 @@ where
         let res = test_fn(test_context.pool_opts, test_context.connect_opts).await;
 
         if res.is_success() {
-            if let Err(e) = DB::cleanup_test(&DB::db_name(&args)).await {
+            if let Err(e) = DB::cleanup_test(&args).await {
                 eprintln!(
                     "failed to delete database {:?}: {}",
                     test_context.db_name, e
@@ -273,3 +290,227 @@ async fn setup_test_db<DB: Database>(
         .await
         .expect("failed to close setup connection");
 }
+
+macro_rules! impl_test_fn {
+    (
+        $name:ident;
+        $run_fn:ident;
+        $run_with_pool_fn:ident;
+        $(
+            (
+                $lt:lifetime $db:ident,
+                $args:ident, $testctx:ident, $testpath:ident,
+                $poolopts:ident, $connopts:ident,
+                $pool:ident, $conn:ident
+            ),
+        )*;
+    ) => {
+            pub trait $name {
+                type Output;
+
+                fn run_test(self, $($args: TestArgs,)*) -> Self::Output;
+            }
+
+            impl<$($db,)* Fut> $name for fn($(Pool<$db>,)*) -> Fut
+            where
+                $(
+                    $db: TestSupport + Database,
+                    $db::Connection: Migrate,
+                    for<$lt> &$lt mut $db::Connection: Executor<$lt, Database = $db>,
+                )*
+                Fut: Future,
+                Fut::Output: TestTermination,
+            {
+                type Output = Fut::Output;
+
+                fn run_test(self, $($args: TestArgs,)*) -> Self::Output {
+                    $run_with_pool_fn($($args,)* self)
+                }
+            }
+
+            impl<$($db,)* Fut> $name for fn($(PoolConnection<$db>,)*) -> Fut
+            where
+                $(
+                    $db: TestSupport + Database,
+                    $db::Connection: Migrate,
+                    for<$lt> &$lt mut $db::Connection: Executor<$lt, Database = $db>,
+                )*
+                Fut: Future,
+                Fut::Output: TestTermination,
+            {
+                type Output = Fut::Output;
+
+                fn run_test(self, $($args: TestArgs,)*) -> Self::Output {
+                    $run_with_pool_fn($($args,)* |$($pool,)*| async move {
+                        $(
+                            let $conn = $pool
+                            .acquire()
+                            .await
+                            .expect("failed to acquire test pool connection");
+                        )*
+
+
+                        let res = (self)($($conn,)*).await;
+
+                        $(
+                            $pool.close().await;
+                        )*
+
+                        res
+                    })
+                }
+            }
+
+            impl<$($db,)* Fut> $name
+                for fn(
+                    $(
+                        (PoolOptions<$db>, <$db::Connection as Connection>::Options),
+                    )*
+                ) -> Fut
+            where
+                $(
+                    $db: TestSupport + Database,
+                    $db::Connection: Migrate,
+                    for<$lt> &$lt mut $db::Connection: Executor<$lt, Database = $db>,
+                )*
+                Fut: Future,
+                Fut::Output: TestTermination,
+            {
+                type Output = Fut::Output;
+
+                fn run_test(self, $($args: TestArgs,)*) -> Self::Output {
+                    $run_fn($($args,)* self)
+                }
+            }
+
+            impl<Fut> $name for fn() -> Fut
+            where
+                Fut: Future,
+            {
+                type Output = Fut::Output;
+
+                fn run_test(self, $($args: TestArgs,)*) -> Self::Output {
+                    $(
+                        assert!(
+                            $args.fixtures.is_empty(),
+                            "fixtures cannot be applied for a bare function",
+                        );
+                    )*
+                    crate::rt::test_block_on(self())
+                }
+            }
+
+            fn $run_with_pool_fn<$($db,)* F, Fut>($($args: TestArgs,)* test_fn: F) -> Fut::Output
+            where
+                $(
+                    $db: TestSupport,
+                    $db::Connection: Migrate,
+                    for<$lt> &$lt mut $db::Connection: Executor<$lt, Database = $db>,
+                )*
+                F: FnOnce($(Pool<$db>,)*) -> Fut,
+                Fut: Future,
+                Fut::Output: TestTermination,
+            {
+                $(
+                    let $testpath: &'static str = $args.test_path;
+                )*
+
+                $run_fn::<$($db,)* _, _>(
+                    $($args,)*
+                    |$(($poolopts, $connopts),)*| async move {
+                        $(
+                            let $pool = $poolopts
+                                .connect_with($connopts)
+                                .await
+                                .expect("failed to connect test pool");
+                        )*
+
+                        let res = test_fn($($pool.clone(),)*).await;
+
+                        $(
+                            let close_timed_out = crate::rt::timeout(Duration::from_secs(10), $pool.close())
+                                .await
+                                .is_err();
+                            if close_timed_out {
+                                eprintln!("test {} held onto Pool after exiting", $testpath);
+                            }
+                        )*
+
+                        res
+                    },
+                )
+            }
+
+            fn $run_fn<$($db,)* F, Fut>($($args: TestArgs,)* test_fn: F) -> Fut::Output
+            where
+                $(
+                    $db: TestSupport,
+                    $db::Connection: Migrate,
+                    for<$lt> &$lt mut $db::Connection: Executor<$lt, Database = $db>,
+                )*
+                F: FnOnce(
+                    $((PoolOptions<$db>, <$db::Connection as Connection>::Options),)*
+                ) -> Fut,
+                Fut: Future,
+                Fut::Output: TestTermination,
+            {
+                crate::rt::test_block_on(async move {
+                    $(
+                        let $testctx = $db::test_context(&$args)
+                            .await
+                            .expect("failed to connect to setup test database");
+                        setup_test_db::<$db>(&$testctx.connect_opts, &$args).await;
+                    )*
+
+                    let res = test_fn(
+                        $(($testctx.pool_opts, $testctx.connect_opts),)*
+                    )
+                    .await;
+
+                    if res.is_success() {
+                        $(
+                            if let Err(e) = $db::cleanup_test(&$args).await {
+                                eprintln!(
+                                    "failed to delete database {:?}: {}",
+                                    $testctx.db_name, e
+                                );
+                            }
+                        )*
+                    }
+
+                    res
+                })
+            }
+
+        };
+}
+
+impl_test_fn!(
+    TestFn2;
+    run_test2;
+    run_test_with_pool2;
+    ('c DB1, args1, tc1, tp1, po1, co1, p1, c1),
+    ('d DB2, args2, tc2, tp2, po2, co2, p2, c2),
+    ;
+);
+
+impl_test_fn!(
+    TestFn3;
+    run_test3;
+    run_test_with_pool3;
+    ('c DB1, args1, tc1, tp1, po1, co1, p1, c1),
+    ('d DB2, args2, tc2, tp2, po2, co2, p2, c2),
+    ('d DB3, args3, tc3, tp3, po3, co3, p3, c3),
+    ;
+);
+
+impl_test_fn!(
+    TestFn4;
+    run_test4;
+    run_test_with_pool4;
+    ('c DB1, args1, tc1, tp1, po1, co1, p1, c1),
+    ('d DB2, args2, tc2, tp2, po2, co2, p2, c2),
+    ('d DB3, args3, tc3, tp3, po3, co3, p3, c3),
+    ('e DB4, args4, tc4, tp4, po4, co4, p4, c4),
+    ;
+);

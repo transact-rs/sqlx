@@ -468,3 +468,11 @@ required-features = ["postgres"]
 name = "postgres-rustsec"
 path = "tests/postgres/rustsec.rs"
 required-features = ["postgres", "macros", "migrate"]
+
+#
+# Mixed in Postgres and MySQL
+#
+[[test]]
+name = "mixed-test-attr"
+path = "tests/mixed/test-attr.rs"
+required-features = ["postgres", "mysql", "macros", "migrate"]
