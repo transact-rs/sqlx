@@ -53,13 +53,14 @@ pub(super) async fn maybe_upgrade<S: Socket>(
         }
     }
 
+    let hostname = options.tls_server_name.as_deref().unwrap_or(&options.host);
     let tls_config = TlsConfig {
         accept_invalid_certs: !matches!(
             options.ssl_mode,
             MySqlSslMode::VerifyCa | MySqlSslMode::VerifyIdentity
         ),
         accept_invalid_hostnames: !matches!(options.ssl_mode, MySqlSslMode::VerifyIdentity),
-        hostname: &options.host,
+        hostname,
         root_cert_path: options.ssl_ca.as_ref(),
         client_cert_path: options.ssl_client_cert.as_ref(),
         client_key_path: options.ssl_client_key.as_ref(),
