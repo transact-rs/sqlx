@@ -500,7 +500,7 @@ impl_test_fn!(
     run_test_with_pool3;
     ('c DB1, args1, tc1, tp1, po1, co1, p1, c1),
     ('d DB2, args2, tc2, tp2, po2, co2, p2, c2),
-    ('d DB3, args3, tc3, tp3, po3, co3, p3, c3),
+    ('e DB3, args3, tc3, tp3, po3, co3, p3, c3),
     ;
 );
 
@@ -510,7 +510,7 @@ impl_test_fn!(
     run_test_with_pool4;
     ('c DB1, args1, tc1, tp1, po1, co1, p1, c1),
     ('d DB2, args2, tc2, tp2, po2, co2, p2, c2),
-    ('d DB3, args3, tc3, tp3, po3, co3, p3, c3),
-    ('e DB4, args4, tc4, tp4, po4, co4, p4, c4),
+    ('e DB3, args3, tc3, tp3, po3, co3, p3, c3),
+    ('f DB4, args4, tc4, tp4, po4, co4, p4, c4),
     ;
 );
