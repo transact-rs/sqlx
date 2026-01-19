@@ -27,7 +27,7 @@ pub async fn authenticate(stream: &mut PgStream, options: &PgConnectOptions) -> 
     loop {
         let token = match stream.recv_expect().await? {
             Authentication::GssContinue(AuthenticationGss { token }) => token,
-            other => return Err(err_protocol!("expected GssContinue but receiver {other:?}")),
+            other => return Err(err_protocol!("expected GssContinue but received {other:?}")),
         };
         match ctx.step(&token).map_err(|e| Error::GssApi(e.into()))? {
             cross_krb5::Step::Finished((_context, last_token)) => {
