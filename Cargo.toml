@@ -61,7 +61,7 @@ features = ["_unstable-docs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["any", "macros", "migrate", "json"]
+default = ["any", "macros", "migrate", "json", "whoami"]
 
 derive = ["sqlx-macros/derive"]
 macros = ["derive", "sqlx-macros/macros", "sqlx-core/offline", "sqlx-mysql?/offline", "sqlx-postgres?/offline", "sqlx-sqlite?/offline"]
@@ -161,6 +161,7 @@ rust_decimal = ["sqlx-core/rust_decimal", "sqlx-macros?/rust_decimal", "sqlx-mys
 time = ["sqlx-core/time", "sqlx-macros?/time", "sqlx-mysql?/time", "sqlx-postgres?/time", "sqlx-sqlite?/time"]
 uuid = ["sqlx-core/uuid", "sqlx-macros?/uuid", "sqlx-mysql?/uuid", "sqlx-postgres?/uuid", "sqlx-sqlite?/uuid"]
 regexp = ["sqlx-sqlite?/regexp"]
+whoami = ["sqlx-postgres?/whoami"]
 bstr = ["sqlx-core/bstr"]
 
 [workspace.dependencies]
