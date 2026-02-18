@@ -14,6 +14,7 @@ any = ["sqlx-core/any"]
 json = ["dep:serde", "dep:serde_json", "sqlx-core/json"]
 migrate = ["sqlx-core/migrate", "dep:crc"]
 offline = ["json", "sqlx-core/offline", "smallvec/serde"]
+whoami = ["dep:whoami"]
 
 # Type Integration features
 bigdecimal = ["dep:bigdecimal", "dep:num-bigint", "sqlx-core/bigdecimal"]
@@ -64,7 +65,7 @@ num-bigint = { version = "0.4.3", optional = true }
 smallvec = { version = "1.13.1" }
 stringprep = "0.1.2"
 tracing = { version = "0.1.37", features = ["log"] }
-whoami = { version = "2.0.2", default-features = false }
+whoami = { version = "2.0.2", default-features = false, optional = true }
 
 dotenvy.workspace = true
 thiserror.workspace = true
