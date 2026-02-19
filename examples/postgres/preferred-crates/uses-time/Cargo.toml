@@ -9,9 +9,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-serde = "1"
-time = "0.3"
-uuid = "1"
+serde = "1.0.218"
+time = "0.3.37"
+uuid = "1.12.1"
 
 [dependencies.sqlx]
 workspace = true

@@ -56,7 +56,7 @@ _unstable-docs = [
 
 [dependencies.libsqlite3-sys]
 # See `sqlx-sqlite/src/lib.rs` for details.
-version = ">=0.30.0, <0.37.0"
+version = ">=0.30.1, <0.37.0"
 default-features = false
 features = [
     "pkg-config",
@@ -64,19 +64,19 @@ features = [
 ]
 
 [dependencies]
-futures-core = { version = "0.3.19", default-features = false }
-futures-channel = { version = "0.3.19", default-features = false, features = ["sink", "alloc", "std"] }
+futures-core = { version = "0.3.32", default-features = false }
+futures-channel = { version = "0.3.32", default-features = false, features = ["sink", "alloc", "std"] }
 # used by the SQLite worker thread to block on the async mutex that locks the database handle
-futures-executor = { version = "0.3.19" }
+futures-executor = { version = "0.3.32" }
 futures-intrusive = "0.5.0"
-futures-util = { version = "0.3.19", default-features = false, features = ["alloc", "sink"] }
+futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink"] }
 
 chrono = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 url = { version = "2.2.2" }
-percent-encoding = "2.1.0"
+percent-encoding = "2.3.0"
 form_urlencoded = "1.2.2"
 
 flume = { version = "0.12.0", default-features = false, features = ["async"] }
@@ -88,8 +88,8 @@ tracing = { version = "0.1.37", features = ["log"] }
 
 thiserror.workspace = true
 
-serde = { version = "1.0.145", features = ["derive"], optional = true }
-regex = { version = "1.5.5", optional = true }
+serde = { version = "1.0.218", features = ["derive"], optional = true }
+regex = { version = "1.6.0", optional = true }
 
 [dependencies.sqlx-core]
 workspace = true

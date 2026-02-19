@@ -5,14 +5,14 @@ edition = "2021"
 
 [dependencies]
 sqlx = { workspace = true, features = ["postgres", "time", "uuid", "macros", "sqlx-toml"] }
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1.20.1", features = ["rt", "sync"] }
 
 argon2 = { version = "0.5.3", features = ["password-hash"] }
 password-hash = { version = "0.5", features = ["std"] }
 
-uuid = { version = "1", features = ["serde"] }
-thiserror = "1"
-rand = "0.8"
+uuid = { version = "1.12.1", features = ["serde"] }
+thiserror = "1.0.40"
+rand = "0.8.5"
 
 time = { version = "0.3.37", features = ["serde"] }
 

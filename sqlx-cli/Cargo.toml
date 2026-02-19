@@ -26,16 +26,16 @@ name = "cargo-sqlx"
 path = "src/bin/cargo-sqlx.rs"
 
 [dependencies]
-dotenvy = "0.15.0"
-tokio = { version = "1.15.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }
-futures-util = { version = "0.3.19", features = ["alloc"] }
+dotenvy = "0.15.7"
+tokio = { version = "1.20.1", features = ["macros", "rt", "rt-multi-thread", "signal"] }
+futures-util = { version = "0.3.32", features = ["alloc"] }
 clap = { version = "4.3.10", features = ["derive", "env", "wrap_help"] }
 clap_complete = { version = "4.3.1", optional = true }
-chrono = { version = "0.4.19", default-features = false, features = ["clock"] }
-anyhow = "1.0.52"
+chrono = { version = "0.4.34", default-features = false, features = ["clock"] }
+anyhow = "1.0.58"
 console = "0.15.0"
 dialoguer = { version = "0.11", default-features = false }
-serde_json = "1.0.73"
+serde_json = "1.0.85"
 glob = "0.3.0"
 openssl = { version = "0.10.46", optional = true }
 cargo_metadata = "0.23.1"

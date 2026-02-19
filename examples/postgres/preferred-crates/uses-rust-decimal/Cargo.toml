@@ -9,9 +9,9 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-chrono = "0.4"
-rust_decimal = "1"
-uuid = "1"
+chrono = "0.4.34"
+rust_decimal = "1.36.0"
+uuid = "1.12.1"
 
 [dependencies.sqlx]
 workspace = true

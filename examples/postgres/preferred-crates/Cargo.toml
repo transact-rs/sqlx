@@ -11,10 +11,10 @@ authors.workspace = true
 [dependencies]
 dotenvy.workspace = true
 
-anyhow = "1"
-chrono = "0.4"
-serde = { version = "1", features = ["derive"] }
-uuid = { version = "1", features = ["serde"] }
+anyhow = "1.0.58"
+chrono = "0.4.34"
+serde = { version = "1.0.218", features = ["derive"] }
+uuid = { version = "1.12.1", features = ["serde"] }
 
 [dependencies.tokio]
 workspace = true

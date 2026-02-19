@@ -81,23 +81,23 @@ cfg-if = { workspace = true }
 crc = { version = "3", optional = true }
 crossbeam-queue = "0.3.2"
 either = "1.6.1"
-futures-core = { version = "0.3.19", default-features = false }
-futures-io = "0.3.24"
+futures-core = { version = "0.3.32", default-features = false }
+futures-io = "0.3.32"
 futures-intrusive = "0.5.0"
-futures-util = { version = "0.3.19", default-features = false, features = ["alloc", "sink", "io"] }
+futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
 log = { version = "0.4.18", default-features = false }
-memchr = { version = "2.4.1", default-features = false }
-percent-encoding = "2.1.0"
-serde = { version = "1.0.132", features = ["derive", "rc"], optional = true }
-serde_json = { version = "1.0.73", features = ["raw_value"], optional = true }
+memchr = { version = "2.5.0", default-features = false }
+percent-encoding = "2.3.0"
+serde = { version = "1.0.218", features = ["derive", "rc"], optional = true }
+serde_json = { version = "1.0.85", features = ["raw_value"], optional = true }
 toml = { version = "0.8.16", optional = true }
 sha2 = { version = "0.10.0", default-features = false, optional = true }
 #sqlformat = "0.2.0"
 tokio-stream = { version = "0.1.8", features = ["fs"], optional = true }
 tracing = { version = "0.1.37", features = ["log"] }
-smallvec = "1.7.0"
+smallvec = "1.10.0"
 url = { version = "2.2.2" }
-bstr = { version = "1.0", default-features = false, features = ["std"], optional = true }
+bstr = { version = "1.0.1", default-features = false, features = ["std"], optional = true }
 hashlink = "0.11.0"
 indexmap = "2.0"
 event-listener = "5.2.0"
@@ -106,7 +106,7 @@ hashbrown = "0.16.0"
 thiserror.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1.20.1", features = ["rt"] }
 
 [dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622

@@ -9,7 +9,7 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.20.1", features = ["rt-multi-thread", "macros"] }
 
 color-eyre = "0.6.3"
 dotenvy = "0.15.7"

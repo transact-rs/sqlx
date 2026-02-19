@@ -5,10 +5,10 @@ edition = "2021"
 workspace = "../../../"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = "1.0.58"
 sqlx = { path = "../../../", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
-clap = { version = "4", features = ["derive"] }
-tokio = { version = "1.20.0", features = ["rt", "macros"]}
-dotenvy = "0.15.0"
-async-trait = "0.1.41"
+clap = { version = "4.3.10", features = ["derive"] }
+tokio = { version = "1.20.1", features = ["rt", "macros"]}
+dotenvy = "0.15.7"
+async-trait = "0.1.43"
 mockall = "0.11"

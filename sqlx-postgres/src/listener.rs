@@ -336,7 +336,7 @@ impl PgListener {
     ///
     /// This is helpful if you want to retrieve all buffered notifications and process them in batches.
     pub fn next_buffered(&mut self) -> Option<PgNotification> {
-        if let Ok(Some(notification)) = self.buffer_rx.try_next() {
+        if let Ok(notification) = self.buffer_rx.try_recv() {
             Some(PgNotification(notification))
         } else {
             None

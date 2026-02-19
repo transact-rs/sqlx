@@ -10,8 +10,8 @@ authors.workspace = true
 
 [dependencies]
 sqlx = { path = "../../../", features = [ "sqlite", "runtime-tokio", "tls-native-tls", "sqlx-toml"] }
-tokio = { version = "1.20.0", features = ["rt", "macros"]}
-anyhow = "1.0"
+tokio = { version = "1.20.1", features = ["rt", "macros"]}
+anyhow = "1.0.58"
 
 [lints]
 workspace = true

@@ -5,7 +5,7 @@ edition = "2018"
 workspace = "../../../"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = "1.0.58"
 sqlx = { path = "../../../", features = [ "sqlite", "runtime-tokio", "tls-native-tls" ] }
-clap = { version = "4", features = ["derive"] }
-tokio = { version = "1.20.0", features = ["rt", "macros"]}
+clap = { version = "4.3.10", features = ["derive"] }
+tokio = { version = "1.20.1", features = ["rt", "macros"]}

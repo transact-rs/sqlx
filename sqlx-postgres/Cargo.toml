@@ -28,16 +28,16 @@ uuid = ["dep:uuid", "sqlx-core/uuid"]
 
 [dependencies]
 # Futures crates
-futures-channel = { version = "0.3.19", default-features = false, features = ["sink", "alloc", "std"] }
-futures-core = { version = "0.3.19", default-features = false }
-futures-util = { version = "0.3.19", default-features = false, features = ["alloc", "sink", "io"] }
+futures-channel = { version = "0.3.32", default-features = false, features = ["sink", "alloc", "std"] }
+futures-core = { version = "0.3.32", default-features = false }
+futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
 
 # Cryptographic Primitives
 crc = "3.0.0"
 hkdf = "0.12.0"
 hmac = { version = "0.12.0", default-features = false, features = ["reset"]}
 md-5 = { version = "0.10.0", default-features = false }
-rand = { version = "0.8.4", default-features = false, features = ["std", "std_rng"] }
+rand = { version = "0.8.5", default-features = false, features = ["std", "std_rng"] }
 sha2 = { version = "0.10.0", default-features = false }
 
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
@@ -54,14 +54,14 @@ uuid = { workspace = true, optional = true }
 # Misc
 atoi = "2.0"
 base64 = { version = "0.22.0", default-features = false, features = ["std"] }
-bitflags = { version = "2", default-features = false }
+bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
 hex = "0.4.3"
 itoa = "1.0.1"
 log = "0.4.18"
-memchr = { version = "2.4.1", default-features = false }
+memchr = { version = "2.5.0", default-features = false }
 num-bigint = { version = "0.4.3", optional = true }
-smallvec = { version = "1.7.0" }
+smallvec = { version = "1.10.0" }
 stringprep = "0.1.2"
 tracing = { version = "0.1.37", features = ["log"] }
 whoami = { version = "2.0.2", default-features = false }
@@ -69,7 +69,7 @@ whoami = { version = "2.0.2", default-features = false }
 dotenvy.workspace = true
 thiserror.workspace = true
 
-serde = { version = "1.0.144", optional = true, features = ["derive"] }
+serde = { version = "1.0.218", optional = true, features = ["derive"] }
 serde_json = { version = "1.0.85", optional = true, features = ["raw_value"] }
 
 [dependencies.sqlx-core]

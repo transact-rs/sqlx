@@ -57,9 +57,9 @@ json = ["sqlx-macros-core/json"]
 sqlx-core = { workspace = true, features = ["any"] }
 sqlx-macros-core = { workspace = true }
 
-proc-macro2 = { version = "1.0.36", default-features = false }
-syn = { version = "2.0.52", default-features = false, features = ["parsing", "proc-macro"] }
-quote = { version = "1.0.26", default-features = false }
+proc-macro2 = { version = "1.0.83", default-features = false }
+syn = { version = "2.0.87", default-features = false, features = ["parsing", "proc-macro"] }
+quote = { version = "1.0.35", default-features = false }
 
 [lints]
 workspace = true
