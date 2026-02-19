@@ -68,7 +68,7 @@ jobs:
           --target-dir target/beta/
 
   check-minimal-versions:
-    name: Check build using minimal versions
+    name: Check build using direct minimal versions
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -77,7 +77,7 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustup toolchain install nightly
-      - run: cargo +nightly generate-lockfile -Z minimal-versions
+      - run: cargo +nightly generate-lockfile -Z direct-minimal-versions
       - run: cargo build --all-features
 
   test:
