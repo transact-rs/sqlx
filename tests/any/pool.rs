@@ -1,5 +1,4 @@
 use sqlx::any::{AnyConnectOptions, AnyPoolOptions};
-use sqlx::Executor;
 use sqlx_core::connection::{ConnectOptions, Connection};
 use sqlx_core::pool::PoolConnectMetadata;
 use sqlx_core::sql_str::AssertSqlSafe;
@@ -25,9 +24,11 @@ async fn pool_basic_functions() -> anyhow::Result<()> {
 
     drop(conn);
 
-    let b: bool = sqlx::query_scalar("SELECT true").fetch_one(&pool).await?;
+    let i: i64 = sqlx::query_scalar("SELECT 12345678")
+        .fetch_one(&pool)
+        .await?;
 
-    assert!(b);
+    assert_eq!(i, 12345678);
 
     Ok(())
 }
