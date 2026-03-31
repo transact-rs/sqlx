@@ -146,7 +146,9 @@ pub fn quote_query_as<DB: DatabaseExt>(
         |(
             i,
             RustColumn {
-                var_name, type_, ident
+                var_name,
+                type_,
+                ident,
             },
         )| {
             match (input.checked, type_) {
@@ -164,7 +166,7 @@ pub fn quote_query_as<DB: DatabaseExt>(
                             stringify!(#column_ident)
                         )?.into();
                     }
-                },
+                }
                 // type was overridden to be a wildcard so we fallback to the runtime check
                 (true, ColumnType::Wildcard) => quote! (
                 #[allow(non_snake_case)]
