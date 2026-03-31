@@ -23,6 +23,8 @@ use sqlx_core::sql_str::SqlSafeStr;
 
 pub use self::stream::PgStream;
 
+pub use sasl::ClientKeyCache;
+
 #[cfg(feature = "offline")]
 mod describe;
 mod establish;

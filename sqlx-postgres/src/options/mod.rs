@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 pub use ssl_mode::PgSslMode;
 
-use crate::{connection::LogSettings, net::tls::CertificateInput};
+use crate::{
+    connection::{ClientKeyCache, LogSettings},
+    net::tls::CertificateInput,
+};
 
 mod connect;
 mod parse;
@@ -30,6 +33,7 @@ pub struct PgConnectOptions {
     pub(crate) log_settings: LogSettings,
     pub(crate) extra_float_digits: Option<Cow<'static, str>>,
     pub(crate) options: Option<String>,
+    pub(crate) sasl_client_key_cache: ClientKeyCache,
 }
 
 impl Default for PgConnectOptions {
@@ -97,6 +101,7 @@ impl PgConnectOptions {
             extra_float_digits: Some("2".into()),
             log_settings: Default::default(),
             options: var("PGOPTIONS").ok(),
+            sasl_client_key_cache: ClientKeyCache::new(),
         }
     }
 
@@ -188,6 +193,8 @@ impl PgConnectOptions {
     /// ```
     pub fn password(mut self, password: &str) -> Self {
         self.password = Some(password.to_owned());
+        // Invalidate the cached SASL client key, since it was derived from the old password.
+        self.sasl_client_key_cache = ClientKeyCache::new();
         self
     }
 
@@ -274,7 +281,7 @@ impl PgConnectOptions {
     /// -----BEGIN CERTIFICATE-----
     /// <Certificate data here.>
     /// -----END CERTIFICATE-----";
-    ///    
+    ///
     /// let options = PgConnectOptions::new()
     ///     // Providing a CA certificate with less than VerifyCa is pointless
     ///     .ssl_mode(PgSslMode::VerifyCa)

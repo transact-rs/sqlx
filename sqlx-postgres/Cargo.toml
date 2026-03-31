@@ -52,6 +52,7 @@ time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
 # Misc
+async-lock = "3.4"
 atoi = "2.0"
 base64 = { version = "0.22.0", default-features = false, features = ["std"] }
 bitflags = { version = "2", default-features = false }

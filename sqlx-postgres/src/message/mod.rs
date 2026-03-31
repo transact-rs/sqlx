@@ -30,7 +30,7 @@ mod startup;
 mod sync;
 mod terminate;
 
-pub use authentication::{Authentication, AuthenticationSasl};
+pub use authentication::{Authentication, AuthenticationSasl, AuthenticationSaslContinue};
 pub use backend_key_data::BackendKeyData;
 pub use bind::Bind;
 pub use close::Close;

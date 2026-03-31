@@ -1,6 +1,13 @@
+use std::sync::Arc;
+
+use async_lock::{RwLock, RwLockUpgradableReadGuard};
+
 use crate::connection::stream::PgStream;
 use crate::error::Error;
-use crate::message::{Authentication, AuthenticationSasl, SaslInitialResponse, SaslResponse};
+use crate::message::{
+    Authentication, AuthenticationSasl, AuthenticationSaslContinue, SaslInitialResponse,
+    SaslResponse,
+};
 use crate::rt;
 use crate::PgConnectOptions;
 use hmac::{Hmac, Mac};
@@ -15,6 +22,89 @@ const CHANNEL_ATTR: &str = "c";
 const USERNAME_ATTR: &str = "n";
 const CLIENT_PROOF_ATTR: &str = "p";
 const NONCE_ATTR: &str = "r";
+
+/// A single-entry cache for the client key derived from the password.
+///
+/// Salting the password and deriving the client key can be expensive, so this cache stores the most
+/// recently used client key along with the parameters used to derive it.
+///
+/// The cache is keyed on the salt and iteration count, which are the server-provided parameters
+/// that affect the HMAC result. The password is not included in the cache key because it can only
+/// change via `&mut self` on `PgConnectOptions`, which replaces the cache instance.
+///
+/// An async `RwLock` is used so that only one caller computes the key at a time; subsequent callers
+/// wait and then read the cached result.
+///
+/// According to [RFC-7677](https://datatracker.ietf.org/doc/html/rfc7677):
+///
+/// > This computational cost can be avoided by caching the ClientKey (assuming the Salt and hash
+/// > iteration-count is stable).
+#[derive(Debug, Clone)]
+pub struct ClientKeyCache {
+    inner: Arc<RwLock<Option<CacheEntry>>>,
+}
+
+#[derive(Debug)]
+struct CacheEntry {
+    // Keys
+    salt: Vec<u8>,
+    iterations: u32,
+
+    // Values
+    salted_password: [u8; 32],
+    client_key: Hmac<Sha256>,
+}
+
+impl CacheEntry {
+    fn matches(&self, cont: &AuthenticationSaslContinue) -> bool {
+        self.salt == cont.salt && self.iterations == cont.iterations
+    }
+}
+
+impl ClientKeyCache {
+    pub fn new() -> Self {
+        ClientKeyCache {
+            inner: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Returns the cached salted password and client key HMAC if the cache matches the given
+    /// salt and iteration count. Otherwise, computes and caches them.
+    async fn get_or_compute(
+        &self,
+        password: &str,
+        cont: &AuthenticationSaslContinue,
+    ) -> Result<([u8; 32], Hmac<Sha256>), Error> {
+        let guard = self.inner.upgradable_read().await;
+
+        if let Some(entry) = guard.as_ref().filter(|e| e.matches(cont)) {
+            return Ok((entry.salted_password, entry.client_key.clone()));
+        }
+
+        let mut guard = RwLockUpgradableReadGuard::upgrade(guard).await;
+
+        // Re-check after acquiring the write lock, in case another caller populated the cache.
+        if let Some(entry) = guard.as_ref().filter(|e| e.matches(cont)) {
+            return Ok((entry.salted_password, entry.client_key.clone()));
+        }
+
+        // SaltedPassword := Hi(Normalize(password), salt, i)
+        let salted_password = hi(password, &cont.salt, cont.iterations).await?;
+
+        // ClientKey := HMAC(SaltedPassword, "Client Key")
+        let client_key =
+            Hmac::<Sha256>::new_from_slice(&salted_password).map_err(Error::protocol)?;
+
+        *guard = Some(CacheEntry {
+            salt: cont.salt.clone(),
+            iterations: cont.iterations,
+            salted_password,
+            client_key: client_key.clone(),
+        });
+
+        Ok((salted_password, client_key))
+    }
+}
 
 pub(crate) async fn authenticate(
     stream: &mut PgStream,
@@ -86,16 +176,11 @@ pub(crate) async fn authenticate(
         }
     };
 
-    // SaltedPassword := Hi(Normalize(password), salt, i)
-    let salted_password = hi(
-        options.password.as_deref().unwrap_or_default(),
-        &cont.salt,
-        cont.iterations,
-    )
-    .await?;
+    let (salted_password, mut mac) = options
+        .sasl_client_key_cache
+        .get_or_compute(options.password.as_deref().unwrap_or_default(), &cont)
+        .await?;
 
-    // ClientKey := HMAC(SaltedPassword, "Client Key")
-    let mut mac = Hmac::<Sha256>::new_from_slice(&salted_password).map_err(Error::protocol)?;
     mac.update(b"Client Key");
 
     let client_key = mac.finalize().into_bytes();
