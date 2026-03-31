@@ -146,17 +146,24 @@ pub fn quote_query_as<DB: DatabaseExt>(
         |(
             i,
             RustColumn {
-                var_name, type_, ..
+                var_name, type_, ident
             },
         )| {
             match (input.checked, type_) {
                 // we guarantee the type is valid so we can skip the runtime check
-                (true, ColumnType::Exact(type_)) => quote! {
-                    // binding to a `let` avoids confusing errors about
-                    // "try expression alternatives have incompatible types"
-                    // it doesn't seem to hurt inference in the other branches
-                    #[allow(non_snake_case)]
-                    let #var_name = row.try_get_unchecked::<#type_, _>(#i)?.into();
+                (true, ColumnType::Exact(type_)) => {
+                    let column_ident = quote::format_ident!("{}", ident);
+
+                    quote! {
+                        // binding to a `let` avoids confusing errors about
+                        // "try expression alternatives have incompatible types"
+                        // it doesn't seem to hurt inference in the other branches
+                        #[allow(non_snake_case)]
+                        let #var_name = row.try_get_unchecked::<#type_, _>(
+                            // use the column identity as the index,
+                            stringify!(#column_ident)
+                        )?.into();
+                    }
                 },
                 // type was overridden to be a wildcard so we fallback to the runtime check
                 (true, ColumnType::Wildcard) => quote! (
