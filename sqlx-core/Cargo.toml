@@ -32,6 +32,7 @@ _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
 _tls-rustls-ring-webpki = ["_tls-rustls", "rustls/ring", "webpki-roots"]
 _tls-rustls-ring-native-roots = ["_tls-rustls", "rustls/ring", "rustls-native-certs"]
 _tls-rustls = ["rustls"]
+_tls-wasm = []
 _tls-none = []
 
 # support offline/decoupled building (enables serialization of `Describe`)
@@ -92,8 +93,7 @@ serde = { version = "1.0.132", features = ["derive", "rc"], optional = true }
 serde_json = { version = "1.0.73", features = ["raw_value"], optional = true }
 toml = { version = "0.8.16", optional = true }
 sha2 = { version = "0.10.0", default-features = false, optional = true }
-#sqlformat = "0.2.0"
-tokio-stream = { version = "0.1.8", features = ["fs"], optional = true }
+tokio-stream = { version = "0.1.8", optional = true }
 tracing = { version = "0.1.37", features = ["log"] }
 smallvec = "1.7.0"
 url = { version = "2.2.2" }
@@ -104,6 +104,19 @@ event-listener = "5.2.0"
 hashbrown = "0.16.0"
 
 thiserror.workspace = true
+
+# WASM/WASIP3 dependencies (always enabled on wasm32)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, features = ["sync", "rt"] }
+tokio-util = { workspace = true }
+wasip3 = { workspace = true }
+wit-bindgen = { workspace = true, features = ["async-spawn"] }
+futures = "0.3"
+
+# Non-WASM dependencies with platform-specific features
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["net", "fs"], optional = true }
+tokio-stream = { version = "0.1.8", features = ["fs"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt"] }

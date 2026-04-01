@@ -56,7 +56,7 @@ _unstable-docs = [
 
 [dependencies.libsqlite3-sys]
 # See `sqlx-sqlite/src/lib.rs` for details.
-version = ">=0.30.0, <0.37.0"
+version = ">=0.30.0, <0.36.0"
 default-features = false
 features = [
     "pkg-config",
@@ -77,16 +77,15 @@ uuid = { workspace = true, optional = true }
 
 url = { version = "2.2.2" }
 percent-encoding = "2.1.0"
-form_urlencoded = "1.2.2"
+serde_urlencoded = "0.7"
 
-flume = { version = "0.12.0", default-features = false, features = ["async"] }
+flume = { version = "0.11.0", default-features = false, features = ["async"] }
 
 atoi = "2.0"
 
 log = "0.4.18"
 tracing = { version = "0.1.37", features = ["log"] }
-
-thiserror.workspace = true
+thiserror = "2.0.0"
 
 serde = { version = "1.0.145", features = ["derive"], optional = true }
 regex = { version = "1.5.5", optional = true }
@@ -94,12 +93,8 @@ regex = { version = "1.5.5", optional = true }
 [dependencies.sqlx-core]
 workspace = true
 
-[dev-dependencies.sqlx]
-# FIXME: https://github.com/rust-lang/cargo/issues/15622
-# workspace = true
-path = ".."
-default-features = false
-features = ["macros", "runtime-tokio", "tls-none", "sqlite"]
+[dev-dependencies]
+sqlx = { workspace = true, features = ["macros", "runtime-tokio", "tls-none", "sqlite"] }
 
 [lints]
 workspace = true

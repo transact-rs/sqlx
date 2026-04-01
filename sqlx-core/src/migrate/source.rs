@@ -1,12 +1,15 @@
 use crate::error::BoxDynError;
-use crate::migrate::{migration, Migration, MigrationType};
+use crate::migrate::Migration;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::migrate::{migration, MigrationType};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::sql_str::{AssertSqlSafe, SqlSafeStr};
 use futures_core::future::BoxFuture;
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -38,18 +41,13 @@ impl<'s> MigrationSource<'s> for &'s Path {
 
 impl MigrationSource<'static> for PathBuf {
     fn resolve(self) -> BoxFuture<'static, Result<Vec<Migration>, BoxDynError>> {
-        // Technically this could just be `Box::pin(spawn_blocking(...))`
-        // but that would actually be a breaking behavior change because it would call
-        // `spawn_blocking()` on the current thread
-        Box::pin(async move {
-            crate::rt::spawn_blocking(move || {
-                let migrations_with_paths = resolve_blocking(&self)?;
-
-                Ok(migrations_with_paths.into_iter().map(|(m, _p)| m).collect())
-            })
-            .await
-        })
+        Box::pin(async move { self.as_path().resolve().await })
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn resolve(_path: &PathBuf) -> Result<Vec<(Migration, PathBuf)>, ResolveError> {
+    todo!();
 }
 
 /// A [`MigrationSource`] implementation with configurable resolution.
@@ -64,12 +62,14 @@ impl<'s, S: Debug + Into<PathBuf> + Send + 's> MigrationSource<'s> for ResolveWi
     fn resolve(self) -> BoxFuture<'s, Result<Vec<Migration>, BoxDynError>> {
         Box::pin(async move {
             let path = self.0.into();
-            let config = self.1;
-
-            let migrations_with_paths =
+            #[cfg(not(target_arch = "wasm32"))]
+            let migrations_with_paths = {
+                let config = self.1;
                 crate::rt::spawn_blocking(move || resolve_blocking_with_config(&path, &config))
-                    .await?;
-
+                    .await?
+            };
+            #[cfg(target_arch = "wasm32")]
+            let migrations_with_paths = resolve(&path).await?;
             Ok(migrations_with_paths.into_iter().map(|(m, _p)| m).collect())
         })
     }
@@ -148,11 +148,13 @@ impl ResolveConfig {
 // FIXME: paths should just be part of `Migration` but we can't add a field backwards compatibly
 // since it's `#[non_exhaustive]`.
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_blocking(path: &Path) -> Result<Vec<(Migration, PathBuf)>, ResolveError> {
     resolve_blocking_with_config(path, &ResolveConfig::new())
 }
 
 #[doc(hidden)]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn resolve_blocking_with_config(
     path: &Path,
     config: &ResolveConfig,
@@ -161,7 +163,7 @@ pub fn resolve_blocking_with_config(
         message: format!("error canonicalizing path {}", path.display()),
         source: Some(e),
     })?;
-
+    use std::fs;
     let s = fs::read_dir(&path).map_err(|e| ResolveError {
         message: format!("error reading migration directory {}", path.display()),
         source: Some(e),
@@ -254,6 +256,7 @@ pub fn resolve_blocking_with_config(
     Ok(migrations)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn checksum_with(sql: &str, ignored_chars: &BTreeSet<char>) -> Vec<u8> {
     if ignored_chars.is_empty() {
         // This is going to be much faster because it doesn't have to UTF-8 decode `sql`.

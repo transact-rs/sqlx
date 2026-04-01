@@ -64,6 +64,7 @@ pub fn checksum(sql: &str) -> Vec<u8> {
     Vec::from(Sha384::digest(sql).as_slice())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn checksum_fragments<'a>(fragments: impl Iterator<Item = &'a str>) -> Vec<u8> {
     let mut digest = Sha384::new();
 

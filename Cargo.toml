@@ -24,6 +24,10 @@ members = [
     "examples/postgres/transaction",
     "examples/sqlite/todos",
     "examples/sqlite/extension",
+    "tests/mysql/wasm-components/connect-test",
+    "tests/mysql/wasm-components/execute-query-test",
+    "tests/mysql/wasm-components/pool-crud-test",
+    "tests/mysql/wasm-components/prepared-query-test",
 ]
 
 [workspace.package]
@@ -106,6 +110,9 @@ tls-rustls-ring = ["tls-rustls-ring-webpki"] # For backwards compatibility
 tls-rustls-ring-webpki = ["sqlx-core/_tls-rustls-ring-webpki", "sqlx-macros?/_tls-rustls-ring-webpki"]
 tls-rustls-ring-native-roots = ["sqlx-core/_tls-rustls-ring-native-roots", "sqlx-macros?/_tls-rustls-ring-native-roots"]
 
+# WASM-native TLS via wasi-tls host interface. Only effective on wasm32 targets.
+tls-wasm = ["sqlx-core/_tls-wasm"]
+
 # No-op feature used by the workflows to compile without TLS enabled. Not meant for general use.
 tls-none = []
 
@@ -186,11 +193,13 @@ mac_address = "1.1.5"
 rust_decimal = { version = "1.26.1", default-features = false, features = ["std"] }
 time = { version = "0.3.36", features = ["formatting", "parsing", "macros"] }
 uuid = "1.1.2"
-
+tokio-util = { version = "*" }
 # Common utility crates
 cfg-if = "1.0.0"
 dotenvy = { version = "0.15.0", default-features = false }
 thiserror = { version = "2.0.17", default-features = false, features = ["std"] }
+wasip3 = { version = "0.4.0", default-features = false }
+wit-bindgen = { version = "0.51", default-features = false, features = ["async"] }
 
 # Runtimes
 [workspace.dependencies.async-global-executor]
@@ -207,7 +216,7 @@ default-features = false
 
 [workspace.dependencies.tokio]
 version = "1"
-features = ["time", "net", "sync", "fs", "io-util", "rt"]
+features = ["time", "sync", "io-util", "rt"]
 default-features = false
 
 [dependencies]
@@ -223,6 +232,7 @@ anyhow = "1.0.52"
 time_ = { version = "0.3.2", package = "time" }
 futures-util = { version = "0.3.19", default-features = false, features = ["alloc"] }
 env_logger = "0.11"
+wasip3 = "0.4.0"
 async-std = { workspace = true, features = ["attributes"] }
 tokio = { version = "1.15.0", features = ["full"] }
 dotenvy = "0.15.0"
@@ -253,6 +263,9 @@ cast_possible_wrap = 'deny'
 cast_sign_loss = 'deny'
 # See `clippy.toml`
 disallowed_methods = 'deny'
+
+[patch.crates-io]
+whoami = { git = "https://github.com/Aditya1404Sal/whoami", branch = "v2" }
 
 
 [lints.rust.unexpected_cfgs]
@@ -360,6 +373,10 @@ required-features = ["sqlite"]
 name = "mysql"
 path = "tests/mysql/mysql.rs"
 required-features = ["mysql"]
+
+[[test]]
+name = "wasi_integration_test"
+path = "tests/mysql/wasi_integration_test.rs"
 
 [[test]]
 name = "mysql-types"

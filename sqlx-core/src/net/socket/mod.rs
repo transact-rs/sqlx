@@ -6,6 +6,7 @@ use std::task::{ready, Context, Poll};
 
 pub use buffered::{BufferedSocket, WriteBuffer};
 use bytes::BufMut;
+#[cfg(not(target_arch = "wasm32"))]
 use cfg_if::cfg_if;
 
 use crate::io::ReadBuf;
@@ -186,18 +187,26 @@ pub async fn connect_tcp<Ws: WithSocket>(
     port: u16,
     with_socket: Ws,
 ) -> crate::Result<Ws::Output> {
-    #[cfg(feature = "_rt-tokio")]
-    if crate::rt::rt_tokio::available() {
-        return Ok(with_socket
-            .with_socket(tokio::net::TcpStream::connect((host, port)).await?)
-            .await);
+    #[cfg(target_arch = "wasm32")]
+    {
+        return crate::rt::rt_wasip3::connect_tcp(host, port, with_socket).await;
     }
 
-    cfg_if! {
-        if #[cfg(feature = "_rt-async-io")] {
-            Ok(with_socket.with_socket(connect_tcp_async_io(host, port).await?).await)
-        } else {
-            crate::rt::missing_rt((host, port, with_socket))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        #[cfg(feature = "_rt-tokio")]
+        if crate::rt::rt_tokio::available() {
+            return Ok(with_socket
+                .with_socket(tokio::net::TcpStream::connect((host, port)).await?)
+                .await);
+        }
+
+        cfg_if! {
+            if #[cfg(feature = "_rt-async-io")] {
+                Ok(with_socket.with_socket(connect_tcp_async_io(host, port).await?).await)
+            } else {
+                crate::rt::missing_rt((host, port, with_socket))
+            }
         }
     }
 }
