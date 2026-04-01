@@ -57,6 +57,24 @@ impl PgStream {
         })
     }
 
+    /// Create a stream from a pre-connected socket.
+    ///
+    /// The socket must already be connected to a PostgreSQL server.
+    /// TLS upgrade will be attempted if configured in `options`.
+    pub(super) async fn connect_with_socket<S: Socket>(
+        options: &PgConnectOptions,
+        socket: S,
+    ) -> Result<Self, Error> {
+        let socket = net::connect_with(socket, MaybeUpgradeTls(options)).await?;
+
+        Ok(Self {
+            inner: BufferedSocket::new(socket),
+            notifications: None,
+            parameter_statuses: BTreeMap::default(),
+            server_version_num: None,
+        })
+    }
+
     #[inline(always)]
     pub(crate) fn write_msg(&mut self, message: impl FrontendMessage) -> Result<(), Error> {
         self.write(EncodeMessage(message))

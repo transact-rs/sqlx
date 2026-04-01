@@ -20,8 +20,31 @@ impl MySqlConnection {
             None => crate::net::connect_tcp(&options.host, options.port, do_handshake).await?,
         };
 
-        let stream = handshake?;
+        Self::from_stream(options, handshake?)
+    }
 
+    /// Establish a connection over a pre-connected socket.
+    ///
+    /// The provided socket must already be connected to a MySQL-compatible
+    /// server. The MySQL handshake and authentication will be performed
+    /// using the credentials from `options`.
+    ///
+    /// This enables custom transports such as in-memory pipes, simulation
+    /// frameworks (e.g. turmoil), SSH tunnels, or SOCKS proxies.
+    ///
+    /// Note: this only performs the low-level handshake and authentication.
+    /// Use [`MySqlConnectOptions::connect_with_socket()`] for a fully
+    /// initialized connection (with `SET NAMES`, `sql_mode`, etc.).
+    pub async fn connect_with_socket<S: Socket>(
+        options: &MySqlConnectOptions,
+        socket: S,
+    ) -> Result<Self, Error> {
+        let do_handshake = DoHandshake::new(options)?;
+        let stream = crate::net::connect_with(socket, do_handshake).await?;
+        Self::from_stream(options, stream)
+    }
+
+    fn from_stream(options: &MySqlConnectOptions, stream: MySqlStream) -> Result<Self, Error> {
         Ok(Self {
             inner: Box::new(MySqlConnectionInner {
                 stream,

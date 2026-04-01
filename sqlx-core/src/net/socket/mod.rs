@@ -249,6 +249,16 @@ async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socke
         .into())
 }
 
+/// Use a pre-connected socket, passing it to the given [`WithSocket`] handler.
+///
+/// This is the analog of [`connect_tcp`] and [`connect_uds`] for sockets
+/// that have already been established by the caller. This enables custom
+/// transports such as in-memory pipes, simulation frameworks (e.g. turmoil),
+/// SSH tunnels, or SOCKS proxies.
+pub async fn connect_with<S: Socket, Ws: WithSocket>(socket: S, with_socket: Ws) -> Ws::Output {
+    with_socket.with_socket(socket).await
+}
+
 /// Connect a Unix Domain Socket at the given path.
 ///
 /// Returns an error if Unix Domain Sockets are not supported on this platform.

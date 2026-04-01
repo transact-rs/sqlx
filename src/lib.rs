@@ -38,6 +38,18 @@ pub use sqlx_core::types::Type;
 pub use sqlx_core::value::{Value, ValueRef};
 pub use sqlx_core::Either;
 
+/// Networking primitives used by SQLx database drivers.
+///
+/// The [`Socket`][net::Socket] trait allows implementing custom transports
+/// for database connections (e.g. in-memory pipes, simulation frameworks,
+/// SSH tunnels, SOCKS proxies). Use with
+/// [`MySqlConnectOptions::connect_with_socket()`][crate::mysql::MySqlConnectOptions::connect_with_socket]
+/// or [`PgConnectOptions::connect_with_socket()`][crate::postgres::PgConnectOptions::connect_with_socket].
+pub mod net {
+    pub use sqlx_core::io::ReadBuf;
+    pub use sqlx_core::net::{connect_with, Socket};
+}
+
 #[doc(inline)]
 pub use sqlx_core::error::{self, Error, Result};
 

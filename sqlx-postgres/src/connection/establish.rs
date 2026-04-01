@@ -7,6 +7,7 @@ use crate::io::StatementId;
 use crate::message::{
     Authentication, BackendKeyData, BackendMessageFormat, Password, ReadyForQuery, Startup,
 };
+use crate::net::Socket;
 use crate::{PgConnectOptions, PgConnection};
 
 use super::PgConnectionInner;
@@ -16,9 +17,35 @@ use super::PgConnectionInner;
 
 impl PgConnection {
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
-        // Upgrade to TLS if we were asked to and the server supports it
-        let mut stream = PgStream::connect(options).await?;
+        let stream = PgStream::connect(options).await?;
+        Self::establish_with_stream(options, stream).await
+    }
 
+    /// Establish a connection over a pre-connected socket.
+    ///
+    /// The provided socket must already be connected to a
+    /// PostgreSQL-compatible server. The startup handshake, TLS upgrade
+    /// (if configured), and authentication will be performed over this
+    /// socket.
+    ///
+    /// This enables custom transports such as in-memory pipes, simulation
+    /// frameworks (e.g. turmoil), SSH tunnels, or SOCKS proxies.
+    ///
+    /// Note: this only performs the low-level handshake and authentication.
+    /// Use [`PgConnectOptions::connect_with_socket()`] for a fully
+    /// initialized connection.
+    pub async fn connect_with_socket<S: Socket>(
+        options: &PgConnectOptions,
+        socket: S,
+    ) -> Result<Self, Error> {
+        let stream = PgStream::connect_with_socket(options, socket).await?;
+        Self::establish_with_stream(options, stream).await
+    }
+
+    async fn establish_with_stream(
+        options: &PgConnectOptions,
+        mut stream: PgStream,
+    ) -> Result<Self, Error> {
         // To begin a session, a frontend opens a connection to the server
         // and sends a startup message.
 
