@@ -9,6 +9,11 @@ use crate::rt;
 pub struct ReadDir {
     #[cfg(not(target_arch = "wasm32"))]
     inner: Option<std::fs::ReadDir>,
+
+    // On wasm32, all entries are collected upfront into a VecDeque so
+    // next() can pop them one at a time without needing an async stream handle.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) entries: std::collections::VecDeque<DirEntry>,
 }
 
 pub struct DirEntry {

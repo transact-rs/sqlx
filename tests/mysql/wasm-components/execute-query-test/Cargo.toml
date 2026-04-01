@@ -14,7 +14,7 @@ sqlx = { path = "../../../../", features = [ "mysql", "runtime-tokio" ] }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1.20.0", features = ["rt"]}
 dotenvy = "0.15.0"
-wasip3 = "0.4.0"
+wasip3 = "0.5.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sqlx = { path = "../../../../", features = ["tls-native-tls"] }

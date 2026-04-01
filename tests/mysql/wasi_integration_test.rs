@@ -31,25 +31,35 @@ fn build_wasm_component(component_name: &str) -> PathBuf {
 }
 
 fn run_wasm_test(wasm_path: PathBuf, test_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    run_wasm_test_with_flags(wasm_path, test_name, &[])
+}
+
+fn run_wasm_test_with_flags(
+    wasm_path: PathBuf,
+    test_name: &str,
+    extra_flags: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Running test: {}", test_name);
 
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url = "mysql://mysql:Password123!@127.0.0.1:3306/todos";
 
-    let status = Command::new("wasmtime")
-        .args(&[
-            "run",
-            "-Scli=y",
-            "-Stcp=y",
-            "-Sinherit-env=y",
-            "-Sudp=y",
-            "-Sp3",
-            "-Sallow-ip-name-lookup=y",
-            "-Wcomponent-model-async=y",
-            "-Sinherit-network=y",
-        ])
-        .env("DATABASE_URL", database_url)
-        .arg(wasm_path.as_os_str())
-        .status()?;
+    let mut cmd = Command::new("wasmtime");
+    cmd.args(&[
+        "run",
+        "-Scli=y",
+        "-Stcp=y",
+        "-Sinherit-env=y",
+        "-Sudp=y",
+        "-Sp3",
+        "-Sallow-ip-name-lookup=y",
+        "-Wcomponent-model-async=y",
+        "-Sinherit-network=y",
+    ]);
+    cmd.args(extra_flags);
+    cmd.env("DATABASE_URL", database_url)
+        .arg(wasm_path.as_os_str());
+
+    let status = cmd.status()?;
 
     if !status.success() {
         return Err(format!("{} failed", test_name).into());
@@ -81,4 +91,11 @@ fn test_wasi_mysql_prepared_query() {
 fn test_wasi_mysql_pool_crud() {
     let wasm = build_wasm_component("pool-crud-test");
     run_wasm_test(wasm, "Pool CRUD Test").expect("Pool CRUD test failed");
+}
+
+#[test]
+fn test_wasi_mysql_tls_connect() {
+    let wasm = build_wasm_component("tls-connect-test");
+    run_wasm_test_with_flags(wasm, "TLS Connect Test", &["-Stls=y"])
+        .expect("TLS connect test failed");
 }

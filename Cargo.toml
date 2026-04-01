@@ -28,6 +28,7 @@ members = [
     "tests/mysql/wasm-components/execute-query-test",
     "tests/mysql/wasm-components/pool-crud-test",
     "tests/mysql/wasm-components/prepared-query-test",
+    "tests/mysql/wasm-components/tls-connect-test",
 ]
 
 [workspace.package]
@@ -198,8 +199,8 @@ tokio-util = { version = "*" }
 cfg-if = "1.0.0"
 dotenvy = { version = "0.15.0", default-features = false }
 thiserror = { version = "2.0.17", default-features = false, features = ["std"] }
-wasip3 = { version = "0.4.0", default-features = false }
-wit-bindgen = { version = "0.51", default-features = false, features = ["async"] }
+wasip3 = "0.5.0"
+wit-bindgen = { version = "0.54", default-features = false, features = ["async", "async-spawn", "inter-task-wakeup", "macros"] }
 
 # Runtimes
 [workspace.dependencies.async-global-executor]
@@ -232,7 +233,7 @@ anyhow = "1.0.52"
 time_ = { version = "0.3.2", package = "time" }
 futures-util = { version = "0.3.19", default-features = false, features = ["alloc"] }
 env_logger = "0.11"
-wasip3 = "0.4.0"
+wasip3 = "0.5.0"
 async-std = { workspace = true, features = ["attributes"] }
 tokio = { version = "1.15.0", features = ["full"] }
 dotenvy = "0.15.0"
@@ -264,8 +265,8 @@ cast_sign_loss = 'deny'
 # See `clippy.toml`
 disallowed_methods = 'deny'
 
-[patch.crates-io]
-whoami = { git = "https://github.com/Aditya1404Sal/whoami", branch = "v2" }
+# [patch.crates-io]
+# whoami = { git = "https://github.com/Aditya1404Sal/whoami", branch = "v2" }
 
 
 [lints.rust.unexpected_cfgs]

@@ -110,7 +110,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 tokio-util = { workspace = true }
 wasip3 = { workspace = true }
-wit-bindgen = { workspace = true, features = ["async-spawn"] }
+wit-bindgen = { workspace = true }
 futures = "0.3"
 
 # Non-WASM dependencies with platform-specific features

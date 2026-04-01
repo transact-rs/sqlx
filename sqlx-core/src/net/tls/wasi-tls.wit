@@ -1,8 +1,8 @@
-package wasi:tls@0.1.0;
+package wasi:tls@0.3.0-draft;
 
 interface types {
     resource error {
-        message: func() -> string;
+        to-debug-string: func() -> string;
     }
 }
 
@@ -30,5 +30,6 @@ interface client {
 }
 
 world tls-client {
+    import types;
     import client;
 }
