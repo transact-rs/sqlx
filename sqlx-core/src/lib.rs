@@ -22,6 +22,9 @@
 // <https://doc.rust-lang.org/unstable-book/language-features/doc-cfg.html>
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
 #[macro_use]
 pub mod ext;
 
