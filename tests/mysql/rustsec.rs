@@ -1,4 +1,5 @@
 use sqlx::{Error, MySql};
+use sqlx_mysql::MySqlDatabaseError;
 use std::io;
 
 use sqlx_test::new;
@@ -29,8 +30,8 @@ async fn rustsec_2024_0363() -> anyhow::Result<()> {
         "CREATE TEMPORARY TABLE injection_target(id INTEGER PRIMARY KEY AUTO_INCREMENT, message TEXT);\n\
          INSERT INTO injection_target(message) VALUES ('existing message');",
     )
-    .execute(&mut conn)
-    .await?;
+        .execute(&mut conn)
+        .await?;
 
     // We can't concatenate a query string together like the other tests
     // because it would just demonstrate a regular old SQL injection.
@@ -42,16 +43,22 @@ async fn rustsec_2024_0363() -> anyhow::Result<()> {
     if let Err(e) = res {
         // Connection rejected the query; we're happy.
         //
-        // Current observed behavior is that `mysqld` closes the connection before we're even done
-        // sending the message, giving us a "Broken pipe" error.
+        // If a packet exceeds `max_allowed_packet`, MySQL returns ER_NET_PACKET_TOO_LARGE
+        // and closes the connection. Depending on timing, the client may instead observe
+        // "Lost connection to MySQL server during query" or a local "Broken pipe" error.
         //
-        // As it turns out, MySQL has a tight limit on packet sizes (even after splitting)
-        // by default: https://dev.mysql.com/doc/refman/8.4/en/packet-too-large.html
-        if matches!(e, Error::Io(ref ioe) if ioe.kind() == io::ErrorKind::BrokenPipe) {
-            return Ok(());
+        // See: https://dev.mysql.com/doc/refman/8.4/en/packet-too-large.html
+        match e {
+            Error::Database(ref dbe) => {
+                let err_net_packet_too_large = 1153;
+                return match dbe.try_downcast_ref::<MySqlDatabaseError>() {
+                    Some(error) if error.number() == err_net_packet_too_large => Ok(()),
+                    _ => panic!("unexpected error: {e:?}"),
+                };
+            }
+            Error::Io(ref ioe) if ioe.kind() == io::ErrorKind::BrokenPipe => return Ok(()),
+            _ => panic!("unexpected error: {e:?}"),
         }
-
-        panic!("unexpected error: {e:?}");
     }
 
     let messages: Vec<String> =

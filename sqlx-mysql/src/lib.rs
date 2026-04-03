@@ -42,7 +42,7 @@ pub use column::MySqlColumn;
 pub use connection::MySqlConnection;
 pub use database::MySql;
 pub use error::MySqlDatabaseError;
-pub use options::{MySqlConnectOptions, MySqlSslMode};
+pub use options::{Compression, CompressionConfig, MySqlConnectOptions, MySqlSslMode};
 pub use query_result::MySqlQueryResult;
 pub use row::MySqlRow;
 pub use statement::MySqlStatement;

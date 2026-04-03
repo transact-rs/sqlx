@@ -16,6 +16,7 @@ use crate::transaction::Transaction;
 use crate::{MySql, MySqlConnectOptions};
 
 mod auth;
+mod compression;
 mod establish;
 mod executor;
 mod stream;

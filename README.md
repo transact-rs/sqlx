@@ -177,6 +177,10 @@ be removed in the future.
 
 -   `mysql`: Add support for the MySQL/MariaDB database server.
 
+-   `mysql-zlib-compression`: Add zlib compression support for MySQL/MariaDB database server.
+
+-   `mysql-zstd-compression`: Add std compression support for MySQL database server.
+
 -   `mssql`: Add support for the MSSQL database server.
 
 -   `sqlite`: Add support for the self-contained [SQLite](https://sqlite.org/) database engine with SQLite bundled and statically-linked.

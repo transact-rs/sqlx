@@ -81,13 +81,13 @@ def run(command, comment=None, env=None, service=None, tag=None, args=None, data
                 environ["RUSTFLAGS"] = "--cfg sqlite_ipaddr"
             if platform.system() == "Linux":
                 if os.environ.get("LD_LIBRARY_PATH"):
-                    environ["LD_LIBRARY_PATH"]= os.environ.get("LD_LIBRARY_PATH") + ":"+ os.getcwd()
+                    environ["LD_LIBRARY_PATH"] = os.environ.get("LD_LIBRARY_PATH") + ":" + os.getcwd()
                 else:
-                    environ["LD_LIBRARY_PATH"]=os.getcwd()
-
+                    environ["LD_LIBRARY_PATH"] = os.getcwd()
 
     if service is not None:
-        database_url = start_database(service, database="sqlite/sqlite.db" if service == "sqlite" else "sqlx", cwd=dir_tests)
+        database_url = start_database(service, database="sqlite/sqlite.db" if service == "sqlite" else "sqlx",
+                                      cwd=dir_tests)
 
         if database_url_args:
             database_url += "?" + database_url_args
@@ -209,20 +209,48 @@ for runtime in ["async-std", "tokio"]:
         for version in ["8", "5_7"]:
             # Since docker mysql 5.7 using yaSSL(It only supports TLSv1.1), avoid running when using rustls.
             # https://github.com/docker-library/mysql/issues/567
-            if not(version == "5_7" and tls == "rustls"):
+            if not (version == "5_7" and tls == "rustls"):
                 run(
                     f"cargo test --no-default-features --features any,mysql,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
                     comment=f"test mysql {version}",
                     service=f"mysql_{version}",
                     tag=f"mysql_{version}" if runtime == "async-std" else f"mysql_{version}_{runtime}",
                 )
+                run(
+                    f"cargo test --no-default-features --features any,mysql,mysql-zlib-compression,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
+                    comment=f"test mysql {version} zlib-compression",
+                    database_url_args="compression=zlib:1",
+                    service=f"mysql_{version}",
+                    tag=f"mysql_{version}" if runtime == "async-std" else f"mysql_{version}_{runtime}",
+                )
+                run(
+                    f"cargo test --no-default-features --features any,mysql,mysql-zstd-compression,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
+                    comment=f"test mysql {version} zstd-compression",
+                    database_url_args="compression=zstd:1",
+                    service=f"mysql_{version}",
+                    tag=f"mysql_{version}" if runtime == "async-std" else f"mysql_{version}_{runtime}",
+                )
 
             ## +client-ssl
-            if tls != "none" and not(version == "5_7" and tls == "rustls"):
+            if tls != "none" and not (version == "5_7" and tls == "rustls"):
                 run(
                     f"cargo test --no-default-features --features any,mysql,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
                     comment=f"test mysql {version}_client_ssl no-password",
                     database_url_args="sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt",
+                    service=f"mysql_{version}_client_ssl",
+                    tag=f"mysql_{version}_client_ssl_no_password" if runtime == "async-std" else f"mysql_{version}_client_ssl_no_password_{runtime}",
+                )
+                run(
+                    f"cargo test --no-default-features --features any,mysql,mysql,mysql-zlib-compression,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
+                    comment=f"test mysql {version}_client_ssl no-password zlib-compression",
+                    database_url_args="sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt&compression=zlib:1",
+                    service=f"mysql_{version}_client_ssl",
+                    tag=f"mysql_{version}_client_ssl_no_password" if runtime == "async-std" else f"mysql_{version}_client_ssl_no_password_{runtime}",
+                )
+                run(
+                    f"cargo test --no-default-features --features any,mysql,mysql,mysql-zstd-compression,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
+                    comment=f"test mysql {version}_client_ssl no-password zstd-compression",
+                    database_url_args="sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt&compression=zstd:1",
                     service=f"mysql_{version}_client_ssl",
                     tag=f"mysql_{version}_client_ssl_no_password" if runtime == "async-std" else f"mysql_{version}_client_ssl_no_password_{runtime}",
                 )
@@ -238,6 +266,13 @@ for runtime in ["async-std", "tokio"]:
                 service=f"mariadb_{version}",
                 tag=f"mariadb_{version}" if runtime == "async-std" else f"mariadb_{version}_{runtime}",
             )
+            run(
+                f"cargo test --no-default-features --features any,mysql,mysql-zlib-compression,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
+                comment=f"test mariadb {version} zlib-compression",
+                database_url_args="compression=zlib:1",
+                service=f"mariadb_{version}",
+                tag=f"mariadb_{version}" if runtime == "async-std" else f"mariadb_{version}_{runtime}",
+            )
 
             ## +client-ssl
             if tls != "none":
@@ -245,6 +280,13 @@ for runtime in ["async-std", "tokio"]:
                     f"cargo test --no-default-features --features any,mysql,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
                     comment=f"test mariadb {version}_client_ssl no-password",
                     database_url_args="sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt",
+                    service=f"mariadb_{version}_client_ssl",
+                    tag=f"mariadb_{version}_client_ssl_no_password" if runtime == "async-std" else f"mariadb_{version}_client_ssl_no_password_{runtime}",
+                )
+                run(
+                    f"cargo test --no-default-features --features any,mysql,mysql-zlib-compression,macros,_unstable-all-types,runtime-{runtime},tls-{tls}",
+                    comment=f"test mariadb {version}_client_ssl no-password zlib-compression",
+                    database_url_args="sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt&compression=zlib:1",
                     service=f"mariadb_{version}_client_ssl",
                     tag=f"mariadb_{version}_client_ssl_no_password" if runtime == "async-std" else f"mariadb_{version}_client_ssl_no_password_{runtime}",
                 )

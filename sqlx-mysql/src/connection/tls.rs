@@ -1,3 +1,4 @@
+use crate::connection::compression::CompressionMySqlStream;
 use crate::connection::{MySqlStream, Waiting};
 use crate::error::Error;
 use crate::net::tls::TlsConfig;
@@ -66,15 +67,17 @@ pub(super) async fn maybe_upgrade<S: Socket>(
     };
 
     // Request TLS upgrade
-    stream.write_packet(SslRequest {
-        max_packet_size: super::MAX_PACKET_SIZE,
-        charset: super::INITIAL_CHARSET,
-    })?;
+    stream
+        .write_packet(SslRequest {
+            max_packet_size: super::MAX_PACKET_SIZE,
+            charset: super::INITIAL_CHARSET,
+        })
+        .await?;
 
     stream.flush().await?;
 
     tls::handshake(
-        stream.socket.into_inner(),
+        stream.compression_stream.socket.into_inner(),
         tls_config,
         MapStream {
             server_version: stream.server_version,
@@ -91,7 +94,9 @@ impl WithSocket for MapStream {
 
     async fn with_socket<S: Socket>(self, socket: S) -> Self::Output {
         MySqlStream {
-            socket: BufferedSocket::new(Box::new(socket)),
+            compression_stream: CompressionMySqlStream::not_compressed(BufferedSocket::new(
+                Box::new(socket),
+            )),
             server_version: self.server_version,
             capabilities: self.capabilities,
             sequence_id: self.sequence_id,

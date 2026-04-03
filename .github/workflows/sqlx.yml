@@ -360,6 +360,26 @@ jobs:
           SQLX_OFFLINE_DIR: .sqlx
           RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
 
+      # Run tests to validate zstd compression for traffic
+      - run: >
+          cargo test
+          --no-default-features
+          --features any,mysql,mysql-zstd-compression,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: mysql://root:password@localhost:3306/sqlx?ssl-mode=disabled&compression=zstd:1
+          SQLX_OFFLINE_DIR: .sqlx
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+      # Run tests to validate zlib compression for traffic
+      - run: >
+          cargo test
+          --no-default-features
+          --features any,mysql,mysql-zlib-compression,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: mysql://root:password@localhost:3306/sqlx?ssl-mode=disabled&compression=zlib:1
+          SQLX_OFFLINE_DIR: .sqlx
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
       # Run the `test-attr` test again to cover cleanup.
       - run: >
           cargo test
@@ -426,6 +446,27 @@ jobs:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
 
+      # Run tests to validate zstd compression for traffic with tls
+      - if: ${{ matrix.tls != 'none' }}
+        run: >
+          cargo test
+          --no-default-features
+          --features any,mysql,mysql-zstd-compression,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt&compression=zstd:1
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+      # Run tests to validate zlib compression for traffic with tls
+      - if: ${{ matrix.tls != 'none' }}
+        run: >
+          cargo test
+          --no-default-features
+          --features any,mysql,mysql-zlib-compression,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt&compression=zlib:1
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+
   mariadb:
     name: MariaDB
     runs-on: ubuntu-24.04
@@ -458,6 +499,16 @@ jobs:
           --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: mysql://root:password@localhost:3306/sqlx
+          SQLX_OFFLINE_DIR: .sqlx
+          RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"
+
+      # Run tests to validate zlib compression for traffic
+      - run: >
+          cargo test
+          --no-default-features
+          --features any,mysql,mysql-zlib-compression,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: mysql://root:password@localhost:3306/sqlx?compression=zlib:1
           SQLX_OFFLINE_DIR: .sqlx
           RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"
 
@@ -513,4 +564,15 @@ jobs:
           --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"
+
+
+      # Run tests to validate zlib compression for traffic with tls
+      - if: ${{ matrix.tls != 'none' }}
+        run: >
+          cargo test
+          --no-default-features
+          --features any,mysql,mysql-zlib-compression,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt&compression=zlib:1
           RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"

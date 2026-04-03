@@ -161,6 +161,10 @@ uuid = ["sqlx-core/uuid", "sqlx-macros?/uuid", "sqlx-mysql?/uuid", "sqlx-postgre
 regexp = ["sqlx-sqlite?/regexp"]
 bstr = ["sqlx-core/bstr"]
 
+# compression
+mysql-zstd-compression = ["sqlx-mysql/zstd-compression"]
+mysql-zlib-compression = ["sqlx-mysql/zlib-compression"]
+
 [workspace.dependencies]
 # Core Crates
 sqlx-core = { version = "=0.9.0-alpha.1", path = "sqlx-core" }
@@ -400,6 +404,12 @@ required-features = ["mysql", "macros", "migrate"]
 name = "mysql-rustsec"
 path = "tests/mysql/rustsec.rs"
 required-features = ["mysql"]
+
+[[test]]
+name = "mysql-compression"
+path = "tests/mysql/compression.rs"
+required-features = ["mysql"]
+
 
 #
 # PostgreSQL
