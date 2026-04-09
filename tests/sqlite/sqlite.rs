@@ -1,17 +1,17 @@
 use futures_util::TryStreamExt;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteOperation, SqlitePoolOptions};
 use sqlx::SqlSafeStr;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteOperation, SqlitePoolOptions};
 use sqlx::{
-    query, sqlite::Sqlite, sqlite::SqliteRow, Column, ConnectOptions, Connection, Executor, Row,
-    SqliteConnection, SqlitePool, Statement, TypeInfo,
+    Column, ConnectOptions, Connection, Executor, Row, SqliteConnection, SqlitePool, Statement,
+    TypeInfo, query, sqlite::Sqlite, sqlite::SqliteRow,
 };
 use sqlx_sqlite::LockedSqliteHandle;
 use sqlx_test::new;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[sqlx_macros::test]
 async fn it_connects() -> anyhow::Result<()> {
@@ -574,7 +574,7 @@ async fn it_resets_prepared_statement_after_fetch_many() -> anyhow::Result<()> {
 // https://github.com/launchbadge/sqlx/issues/1300
 #[sqlx_macros::test]
 async fn concurrent_resets_dont_segfault() {
-    use sqlx::{sqlite::SqliteConnectOptions, ConnectOptions};
+    use sqlx::{ConnectOptions, sqlite::SqliteConnectOptions};
     use std::{str::FromStr, time::Duration};
 
     let mut conn = SqliteConnectOptions::from_str(":memory:")
@@ -1398,7 +1398,7 @@ async fn it_can_recover_from_bad_transaction_begin() -> anyhow::Result<()> {
 }
 
 fn transaction_state(handle: &mut LockedSqliteHandle) -> SqliteTransactionState {
-    use libsqlite3_sys::{sqlite3_txn_state, SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE};
+    use libsqlite3_sys::{SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE, sqlite3_txn_state};
 
     let unchecked_state =
         unsafe { sqlite3_txn_state(handle.as_raw_handle().as_ptr(), std::ptr::null()) };
@@ -1435,6 +1435,58 @@ async fn issue_3982() -> anyhow::Result<()> {
     .await?;
 
     assert_eq!(name, None,);
+
+    Ok(())
+}
+
+// Regression test for https://github.com/launchbadge/sqlx/issues/4126
+// Map::fetch() stream must continue past row-level mapper errors instead
+// of terminating the entire stream at the first error.
+#[sqlx_macros::test]
+async fn it_fetch_stream_continues_past_mapper_error() -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+
+    let mut conn = new::<Sqlite>().await?;
+
+    // Insert rows: values 1..=5
+    sqlx::query("CREATE TEMPORARY TABLE test_stream (val INTEGER NOT NULL)")
+        .execute(&mut conn)
+        .await?;
+    for i in 1..=5i32 {
+        sqlx::query("INSERT INTO test_stream (val) VALUES (?)")
+            .bind(i)
+            .execute(&mut conn)
+            .await?;
+    }
+
+    // Use try_map with a mapper that fails on val == 3
+    let mut stream = sqlx::query("SELECT val FROM test_stream ORDER BY val")
+        .try_map(|row: SqliteRow| {
+            let val: i32 = row.try_get("val")?;
+            if val == 3 {
+                return Err(sqlx::Error::Protocol(format!("bad row: {val}")));
+            }
+            Ok(val)
+        })
+        .fetch(&mut conn);
+
+    let mut successes = Vec::new();
+    let mut errors = 0;
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(val) => successes.push(val),
+            Err(_) => errors += 1,
+        }
+    }
+
+    // The stream should yield all 5 items: 4 successes + 1 error
+    assert_eq!(
+        successes,
+        vec![1, 2, 4, 5],
+        "stream should continue past the error for val=3"
+    );
+    assert_eq!(errors, 1, "there should be exactly one error");
 
     Ok(())
 }
