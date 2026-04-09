@@ -21,7 +21,7 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::ptr::NonNull;
 use std::slice::from_raw_parts;
-use std::str::{from_utf8, from_utf8_unchecked};
+use std::str::from_utf8;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -77,7 +77,8 @@ impl StatementHandle {
             let raw = sqlite3_sql(self.0.as_ptr());
             debug_assert!(!raw.is_null());
 
-            from_utf8_unchecked(CStr::from_ptr(raw).to_bytes())
+            from_utf8(CStr::from_ptr(raw).to_bytes())
+                .expect("sqlite3_sql() returned non-UTF-8 string")
         }
     }
 
@@ -107,7 +108,8 @@ impl StatementHandle {
             let name = sqlite3_column_name(self.0.as_ptr(), check_col_idx!(index));
             debug_assert!(!name.is_null());
 
-            from_utf8_unchecked(CStr::from_ptr(name).to_bytes())
+            from_utf8(CStr::from_ptr(name).to_bytes())
+                .expect("sqlite3_column_name() returned non-UTF-8 column name")
         }
     }
 
@@ -139,7 +141,8 @@ impl StatementHandle {
             let db_name = sqlite3_column_database_name(self.0.as_ptr(), check_col_idx!(index));
 
             if !db_name.is_null() {
-                Some(from_utf8_unchecked(CStr::from_ptr(db_name).to_bytes()))
+                Some(from_utf8(CStr::from_ptr(db_name).to_bytes())
+                    .expect("sqlite3_column_database_name() returned non-UTF-8 string"))
             } else {
                 None
             }
@@ -151,7 +154,8 @@ impl StatementHandle {
             let table_name = sqlite3_column_table_name(self.0.as_ptr(), check_col_idx!(index));
 
             if !table_name.is_null() {
-                Some(from_utf8_unchecked(CStr::from_ptr(table_name).to_bytes()))
+                Some(from_utf8(CStr::from_ptr(table_name).to_bytes())
+                    .expect("sqlite3_column_table_name() returned non-UTF-8 string"))
             } else {
                 None
             }
@@ -163,7 +167,8 @@ impl StatementHandle {
             let origin_name = sqlite3_column_origin_name(self.0.as_ptr(), check_col_idx!(index));
 
             if !origin_name.is_null() {
-                Some(from_utf8_unchecked(CStr::from_ptr(origin_name).to_bytes()))
+                Some(from_utf8(CStr::from_ptr(origin_name).to_bytes())
+                    .expect("sqlite3_column_origin_name() returned non-UTF-8 string"))
             } else {
                 None
             }
@@ -191,7 +196,8 @@ impl StatementHandle {
                 return None;
             }
 
-            let decl = from_utf8_unchecked(CStr::from_ptr(decl).to_bytes());
+            let decl = from_utf8(CStr::from_ptr(decl).to_bytes())
+                .expect("sqlite3_column_decltype() returned non-UTF-8 string");
             let ty: DataType = decl.parse().ok()?;
 
             Some(SqliteTypeInfo(ty))
@@ -285,7 +291,8 @@ impl StatementHandle {
                 return None;
             }
 
-            Some(from_utf8_unchecked(CStr::from_ptr(name).to_bytes()))
+            Some(from_utf8(CStr::from_ptr(name).to_bytes())
+                .expect("sqlite3_bind_parameter_name() returned non-UTF-8 string"))
         }
     }
 
