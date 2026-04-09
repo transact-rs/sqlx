@@ -1,17 +1,17 @@
 use futures_util::TryStreamExt;
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
-use sqlx::SqlSafeStr;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteOperation, SqlitePoolOptions};
+use sqlx::SqlSafeStr;
 use sqlx::{
-    Column, ConnectOptions, Connection, Executor, Row, SqliteConnection, SqlitePool, Statement,
-    TypeInfo, query, sqlite::Sqlite, sqlite::SqliteRow,
+    query, sqlite::Sqlite, sqlite::SqliteRow, Column, ConnectOptions, Connection, Executor, Row,
+    SqliteConnection, SqlitePool, Statement, TypeInfo,
 };
 use sqlx_sqlite::LockedSqliteHandle;
 use sqlx_test::new;
 use std::future::Future;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[sqlx_macros::test]
 async fn it_connects() -> anyhow::Result<()> {
@@ -574,7 +574,7 @@ async fn it_resets_prepared_statement_after_fetch_many() -> anyhow::Result<()> {
 // https://github.com/launchbadge/sqlx/issues/1300
 #[sqlx_macros::test]
 async fn concurrent_resets_dont_segfault() {
-    use sqlx::{ConnectOptions, sqlite::SqliteConnectOptions};
+    use sqlx::{sqlite::SqliteConnectOptions, ConnectOptions};
     use std::{str::FromStr, time::Duration};
 
     let mut conn = SqliteConnectOptions::from_str(":memory:")
@@ -1398,7 +1398,7 @@ async fn it_can_recover_from_bad_transaction_begin() -> anyhow::Result<()> {
 }
 
 fn transaction_state(handle: &mut LockedSqliteHandle) -> SqliteTransactionState {
-    use libsqlite3_sys::{SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE, sqlite3_txn_state};
+    use libsqlite3_sys::{sqlite3_txn_state, SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE};
 
     let unchecked_state =
         unsafe { sqlite3_txn_state(handle.as_raw_handle().as_ptr(), std::ptr::null()) };
