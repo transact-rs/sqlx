@@ -1,4 +1,4 @@
-use crate::protocol::text::ColumnType;
+use crate::protocol::text::{ColumnFlags, ColumnType};
 use crate::{
     MySql, MySqlColumn, MySqlConnectOptions, MySqlConnection, MySqlQueryResult, MySqlRow,
     MySqlTransactionManager, MySqlTypeInfo,
@@ -169,7 +169,11 @@ impl<'a> TryFrom<&'a MySqlTypeInfo> for AnyTypeInfo {
                 | ColumnType::MediumBlob
                 | ColumnType::LongBlob => AnyTypeInfoKind::Blob,
                 ColumnType::String | ColumnType::VarString | ColumnType::VarChar => {
-                    AnyTypeInfoKind::Text
+                    if type_info.flags.contains(ColumnFlags::BINARY) {
+                        AnyTypeInfoKind::Blob
+                    } else {
+                        AnyTypeInfoKind::Text
+                    }
                 }
                 _ => {
                     return Err(sqlx_core::Error::AnyDriverError(
