@@ -141,8 +141,10 @@ impl StatementHandle {
             let db_name = sqlite3_column_database_name(self.0.as_ptr(), check_col_idx!(index));
 
             if !db_name.is_null() {
-                Some(from_utf8(CStr::from_ptr(db_name).to_bytes())
-                    .expect("sqlite3_column_database_name() returned non-UTF-8 string"))
+                Some(
+                    from_utf8(CStr::from_ptr(db_name).to_bytes())
+                        .expect("sqlite3_column_database_name() returned non-UTF-8 string"),
+                )
             } else {
                 None
             }
@@ -154,8 +156,10 @@ impl StatementHandle {
             let table_name = sqlite3_column_table_name(self.0.as_ptr(), check_col_idx!(index));
 
             if !table_name.is_null() {
-                Some(from_utf8(CStr::from_ptr(table_name).to_bytes())
-                    .expect("sqlite3_column_table_name() returned non-UTF-8 string"))
+                Some(
+                    from_utf8(CStr::from_ptr(table_name).to_bytes())
+                        .expect("sqlite3_column_table_name() returned non-UTF-8 string"),
+                )
             } else {
                 None
             }
@@ -167,8 +171,10 @@ impl StatementHandle {
             let origin_name = sqlite3_column_origin_name(self.0.as_ptr(), check_col_idx!(index));
 
             if !origin_name.is_null() {
-                Some(from_utf8(CStr::from_ptr(origin_name).to_bytes())
-                    .expect("sqlite3_column_origin_name() returned non-UTF-8 string"))
+                Some(
+                    from_utf8(CStr::from_ptr(origin_name).to_bytes())
+                        .expect("sqlite3_column_origin_name() returned non-UTF-8 string"),
+                )
             } else {
                 None
             }
@@ -291,8 +297,10 @@ impl StatementHandle {
                 return None;
             }
 
-            Some(from_utf8(CStr::from_ptr(name).to_bytes())
-                .expect("sqlite3_bind_parameter_name() returned non-UTF-8 string"))
+            Some(
+                from_utf8(CStr::from_ptr(name).to_bytes())
+                    .expect("sqlite3_bind_parameter_name() returned non-UTF-8 string"),
+            )
         }
     }
 
