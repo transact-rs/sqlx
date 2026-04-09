@@ -82,7 +82,23 @@ pub(crate) fn describe(
             let col_nullable = stmt.handle.column_nullable(col)?;
             let exp_nullable = fallback_nullable.get(col).copied().and_then(identity);
 
-            nullable.push(exp_nullable.or(col_nullable));
+            // If the column has a known schema origin that says NOT NULL,
+            // trust that over the explain analysis which may lose NOT NULL
+            // constraints through ephemeral tables / sorters (e.g. ORDER BY).
+            // See: https://github.com/launchbadge/sqlx/issues/4147
+            let result_nullable = match (col_nullable, exp_nullable) {
+                // Schema says NOT NULL — trust it regardless of explain result
+                (Some(false), _) => Some(false),
+                // Schema doesn't know (e.g. expression column), use explain
+                (None, exp) => exp,
+                // Both agree or only schema has info
+                (col, None) => col,
+                // Schema says nullable, explain says not — be conservative, say nullable
+                (Some(true), Some(false)) => Some(true),
+                // Both say nullable
+                (Some(true), Some(true)) => Some(true),
+            };
+            nullable.push(result_nullable);
 
             columns.push(SqliteColumn {
                 name: name.into(),
