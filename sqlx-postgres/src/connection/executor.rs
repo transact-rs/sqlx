@@ -23,7 +23,7 @@ use std::{pin::pin, sync::Arc};
 async fn prepare(
     conn: &mut PgConnection,
     sql: &str,
-    parameters: &[PgTypeInfo],
+    arg_types: &[PgTypeInfo],
     metadata: Option<Arc<PgStatementMetadata>>,
     persistent: bool,
     fetch_column_origin: bool,
@@ -39,12 +39,7 @@ async fn prepare(
     // build a list of type OIDs to send to the database in the PARSE command
     // we have not yet started the query sequence, so we are *safe* to cleanly make
     // additional queries here to get any missing OIDs
-
-    let mut param_types = Vec::with_capacity(parameters.len());
-
-    for ty in parameters {
-        param_types.push(conn.resolve_type_id(&ty.0).await?);
-    }
+    let param_types = conn.argument_types_to_oids(arg_types).await?;
 
     // flush and wait until we are re-ready
     conn.wait_until_ready().await?;
@@ -292,8 +287,7 @@ impl PgConnection {
             PgValueFormat::Binary
         } else {
             // Query will trigger a ReadyForQuery
-            self.inner.stream.write_msg(Query(sql))?;
-            self.inner.pending_ready_for_query_count += 1;
+            self.queue_simple_query(sql)?;
 
             // metadata starts out as "nothing"
             metadata = Arc::new(PgStatementMetadata::default());
