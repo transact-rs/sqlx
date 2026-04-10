@@ -9,13 +9,11 @@ async fn any_sets_last_insert_id() -> anyhow::Result<()> {
 
     let mut conn = new::<Any>().await?;
     // syntax as per: https://dev.mysql.com/doc/refman/9.6/en/example-auto-increment.html
-    let _ = conn
-        .execute(
-            r#"
-CREATE TEMPORARY TABLE users (id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT, name TEXT NOT NULL)
-            "#,
-        )
-        .await?;
+    let _ = sqlx::query(
+        "CREATE TEMPORARY TABLE users (id INTEGER NOT NULL PRIMARY KEY AUTO_INCREMENT, name TEXT NOT NULL)",
+    )
+    .execute(&mut conn)
+    .await?;
 
     let result = sqlx::query("INSERT INTO users (name) VALUES (?)")
         .bind("Glorbo")
