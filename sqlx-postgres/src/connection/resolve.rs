@@ -9,14 +9,14 @@ use crate::types::Oid;
 use crate::{HashMap, PgRow, PgValueRef, Postgres};
 use crate::{PgColumn, PgConnection, PgTypeInfo};
 use sqlx_core::column::{ColumnOrigin, TableColumn};
-use sqlx_core::database::Database;
 use sqlx_core::decode::Decode;
 use sqlx_core::error::BoxDynError;
 use sqlx_core::from_row::FromRow;
 use sqlx_core::raw_sql::raw_sql;
 use sqlx_core::row::Row;
-use sqlx_core::sql_str::{AssertSqlSafe, SqlSafeStr};
+use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_core::types::Type;
+use std::collections::VecDeque;
 use std::fmt::Display;
 use std::mem;
 use std::ops::ControlFlow;
@@ -358,17 +358,19 @@ WHERE rngtypid = $1
     ) -> Result<Vec<Oid>, Error> {
         let mut oids = Vec::with_capacity(types.len());
 
-        let mut unresolved_types = types.iter();
+        let mut unresolved_types = types.iter().peekable();
 
-        for ty in &mut unresolved_types {
+        // Eagerly try to resolve types, stopping at the first unresolved type
+        while let Some(ty) = unresolved_types.peek() {
             let Some(oid) = self.try_type_to_oid(ty) else {
                 break;
             };
 
             oids.push(oid);
+            unresolved_types.next();
         }
 
-        // Fast-path
+        // Fast-path: all types resolved
         if oids.len() == types.len() {
             return Ok(oids);
         }
@@ -376,7 +378,8 @@ WHERE rngtypid = $1
         let mut resolver = TypesResolver::default();
 
         for ty in unresolved_types.clone() {
-            if let Some(_) = self.try_type_to_oid(ty) {
+            // Skip over subsequent types that are already resolved
+            if self.try_type_to_oid(ty).is_some() {
                 continue;
             }
 
@@ -384,7 +387,7 @@ WHERE rngtypid = $1
                 // `escape_default()` should produce a valid SQL string literal
                 // https://doc.rust-lang.org/stable/std/primitive.char.html#method.escape_default
                 // https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE
-                //
+                format_args!("'{}'", ty.name().escape_default()),
                 // `to_regtype()` evaluates to `NULL` if the type does not exist,
                 // instead of throwing an exception
                 format_args!("to_regtype('{}')::oid", ty.name().escape_default()),
@@ -394,13 +397,12 @@ WHERE rngtypid = $1
         resolver.fill_cache(self).await?;
 
         for ty in unresolved_types {
-            let Some(oid) = self.try_type_to_oid(ty) else {
-                return Err(Error::TypeNotFound {
-                    type_name: ty.name().to_string(),
-                });
-            };
-
-            oids.push(oid);
+            oids.push(
+                self.try_type_to_oid(ty)
+                    .ok_or_else(|| Error::TypeNotFound {
+                        type_name: ty.name().to_string(),
+                    })?,
+            );
         }
 
         Ok(oids)
@@ -414,21 +416,9 @@ WHERE rngtypid = $1
         match &ty.0 {
             PgType::DeclareWithName(name) => self.inner.cache_type_oid.get(name).copied(),
             PgType::DeclareArrayOf(array) => {
-                self.inner.cache_type_oid.get(&array.elem_name).copied()
+                let typelem = self.inner.cache_type_oid.get(&array.elem_name).copied()?;
+                self.inner.cache_elem_type_to_array.get(&typelem).copied()
             }
-            // `.try_oid()` should return `Some()` or it should be covered here
-            _ => unreachable!("(bug) OID should be resolvable for type {ty:?}"),
-        }
-    }
-
-    pub(crate) async fn resolve_type_id(&mut self, ty: &PgType) -> Result<Oid, Error> {
-        if let Some(oid) = ty.try_oid() {
-            return Ok(oid);
-        }
-
-        match ty {
-            PgType::DeclareWithName(name) => self.fetch_type_id_by_name(name).await,
-            PgType::DeclareArrayOf(array) => self.fetch_array_type_id(array).await,
             // `.try_oid()` should return `Some()` or it should be covered here
             _ => unreachable!("(bug) OID should be resolvable for type {ty:?}"),
         }
@@ -492,6 +482,25 @@ WHERE rngtypid = $1
 
     fn try_cache_type(&mut self, ty: &TypeResolverRow) -> Result<ControlFlow<Oid>, Error> {
         if self.try_type_by_oid(ty.oid).is_some() {
+            // We hit this code path because one of these names didn't resolve,
+            // cache them both.
+            self.inner
+                .cache_type_oid
+                .insert(UStr::new(&ty.catalog_name), ty.oid);
+            self.inner
+                .cache_type_oid
+                .insert(UStr::new(&ty.pretty_name), ty.oid);
+
+            if let Some(original_name) = &ty.original_name {
+                self.inner
+                    .cache_type_oid
+                    .insert(UStr::new(original_name), ty.oid);
+            }
+
+            return Ok(ControlFlow::Continue(()));
+        }
+
+        if self.inner.cache_type_info.contains_key(&ty.oid) {
             return Ok(ControlFlow::Continue(()));
         }
 
@@ -520,6 +529,8 @@ WHERE rngtypid = $1
                 let Some(elem_type) = self.try_type_by_oid(typelem) else {
                     return Ok(ControlFlow::Break(typelem));
                 };
+
+                self.inner.cache_elem_type_to_array.insert(typelem, ty.oid);
 
                 PgTypeKind::Array(elem_type)
             }
@@ -559,12 +570,26 @@ WHERE rngtypid = $1
             _ => PgTypeKind::Simple,
         };
 
-        let typname = UStr::new(&ty.typname);
+        let typname = UStr::new(&ty.pretty_name);
 
         self.inner
             .cache_type_oid
             .entry_ref(&typname)
             .or_insert(ty.oid);
+
+        if ty.pretty_name != ty.catalog_name {
+            self.inner
+                .cache_type_oid
+                .entry(UStr::new(&ty.catalog_name))
+                .or_insert(ty.oid);
+        }
+
+        if let Some(original_name) = &ty.original_name {
+            self.inner
+                .cache_type_oid
+                .entry(UStr::new(original_name))
+                .or_insert(ty.oid);
+        }
 
         self.inner.cache_type_info.entry(ty.oid).or_insert_with(|| {
             PgTypeInfo(PgType::Custom(Arc::new(PgCustomType {
@@ -584,7 +609,7 @@ struct TypesResolver {
 }
 
 impl TypesResolver {
-    fn push_type(&mut self, oid_expr: impl Display) {
+    fn push_type(&mut self, original_name: impl Display, oid_expr: impl Display) {
         use std::fmt::Write;
 
         // Lazily push the preamble to `self.query` so we don't allocate in the fast path
@@ -593,30 +618,33 @@ impl TypesResolver {
             write!(
                 &mut self.query,
                 "SELECT pg_type.oid,\n\
-                     pg_type.oid::regtype::text typname,\n\
+                     pg_type.oid::regtype::text pretty_name,\n\
+                     typname catalog_name,\n\
+                     original_name,\n\
                      typtype,\n\
                      typcategory,\n\
-                     typrelid,\n\
                      typelem,\n\
                      typbasetype,\n\
                      rngsubtype,\n\
-                     (SELECT array_agg(enumlabel)\n\
-                      FROM pg_catalog.pg_enum\n\
-                      WHERE enumtypid = pg_type.oid\n\
-                      ORDER BY enumsortorder) enum_labels,\n\
-                     (SELECT array_agg((attname, atttypid))\n\
-                      FROM pg_catalog.pg_attribute\n\
-                      WHERE attrelid = pg_type.oid\n\
-                        AND NOT attisdropped\n\
-                        AND attnum > 0\n\
-                      ORDER BY attnum) record_attributes\n\
-                 FROM pg_catalog.pg_type\n\
-                 LEFT JOIN pg_catalog.pg_range ON pg_type.oid = pg_range.oid\n\
-                 WHERE oid IN ({oid_expr}"
+                     COALESCE(\
+                        (SELECT array_agg(enumlabel) OVER (ORDER BY enumsortorder)\n\
+                        FROM pg_catalog.pg_enum\n\
+                        WHERE enumtypid = pg_type.oid),\n\
+                        '{{}}') enum_labels,\n\
+                     COALESCE(\n\
+                        (SELECT array_agg((attname, atttypid)) FROM (SELECT *\n\
+                        FROM pg_catalog.pg_attribute\n\
+                        WHERE attrelid = pg_type.typrelid\n\
+                            AND NOT attisdropped\n\
+                            AND attnum > 0\n\
+                        ORDER BY attnum)),\n\
+                        '{{}}') record_attributes\n\
+                 FROM (SELECT DISTINCT ON(lookup_oid) original_name, lookup_oid\n\
+                    FROM (VALUES ({original_name}, {oid_expr})"
             )
             .expect("error writing type expression to query string")
         } else {
-            write!(&mut self.query, ", {oid_expr}")
+            write!(&mut self.query, ", ({original_name}, {oid_expr})")
                 .expect("error writing type expression to query string")
         }
     }
@@ -630,7 +658,12 @@ impl TypesResolver {
             // * Makes this type reusable if we want to for whatever reason
             // * Avoids an allocation when converting to `SqlStr`
             let mut query = mem::take(&mut self.query);
-            query.push(')');
+            query.push_str(
+                ") lookup_inner(original_name, lookup_oid)\n\
+                 ORDER BY lookup_oid) type_lookup\n\
+                 INNER JOIN pg_catalog.pg_type ON type_lookup.lookup_oid = pg_type.oid\n\
+                 LEFT JOIN pg_catalog.pg_range ON pg_type.oid = pg_range.rngtypid",
+            );
 
             let types = raw_sql(AssertSqlSafe(query)).fetch_all(&mut *conn).await?;
 
@@ -639,30 +672,28 @@ impl TypesResolver {
             'outer: for row in types {
                 let mut type_row = TypeResolverRow::from_row(&row)?;
 
-                let mut dependent_types = existing_dependencies
-                    .remove(&type_row.oid)
-                    .unwrap_or_default();
+                let mut resolved_dependencies = VecDeque::new();
 
                 loop {
                     if let ControlFlow::Break(missing_oid) = conn.try_cache_type(&type_row)? {
-                        if !dependent_types.is_empty() {
-                            new_dependencies
-                                .entry(type_row.oid)
-                                .or_default()
-                                .extend(dependent_types);
-                        }
-
                         new_dependencies
                             .entry(missing_oid)
                             .or_default()
                             .push(type_row);
 
-                        self.push_type(missing_oid.0);
+                        self.push_type("NULL", missing_oid.0);
 
                         continue 'outer;
                     }
 
-                    if let Some(next_row) = dependent_types.pop() {
+                    resolved_dependencies.extend(
+                        existing_dependencies
+                            .remove(&type_row.oid)
+                            .unwrap_or_default(),
+                    );
+
+                    // Iteratively mark existing dependencies as resolved
+                    if let Some(next_row) = resolved_dependencies.pop_back() {
                         type_row = next_row
                     } else {
                         break;
@@ -687,10 +718,12 @@ impl TypesResolver {
 #[derive(Debug)]
 struct TypeResolverRow {
     oid: Oid,
-    typname: String,
+    // Most of the time, these are the same but not necessarily for arrays
+    pretty_name: String,
+    catalog_name: String,
+    original_name: Option<String>,
     typtype: TypType,
     typcategory: TypCategory,
-    typrelid: Option<Oid>,
     typelem: Option<Oid>,
     typbasetype: Option<Oid>,
     rngsubtype: Option<Oid>,
@@ -703,10 +736,11 @@ impl<'r> FromRow<'r, PgRow> for TypeResolverRow {
     fn from_row(row: &'r PgRow) -> Result<Self, Error> {
         Ok(Self {
             oid: row.try_get("oid")?,
-            typname: row.try_get("typname")?,
+            pretty_name: row.try_get("pretty_name")?,
+            catalog_name: row.try_get("catalog_name")?,
+            original_name: row.try_get("original_name")?,
             typtype: row.try_get("typtype")?,
             typcategory: row.try_get("typcategory")?,
-            typrelid: row.try_get("typrelid")?,
             typelem: row.try_get("typelem")?,
             typbasetype: row.try_get("typbasetype")?,
             rngsubtype: row.try_get("rngsubtype")?,

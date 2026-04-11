@@ -4,7 +4,7 @@ use crate::io::{PortalId, StatementId};
 use crate::logger::QueryLogger;
 use crate::message::{
     self, BackendMessageFormat, Bind, Close, CommandComplete, DataRow, ParameterDescription, Parse,
-    ParseComplete, Query, RowDescription,
+    ParseComplete, RowDescription,
 };
 use crate::statement::PgStatementMetadata;
 use crate::{
