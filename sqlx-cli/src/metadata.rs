@@ -9,6 +9,7 @@ use std::{
 use anyhow::Context;
 use cargo_metadata::{
     Metadata as CargoMetadata, Package as MetadataPackage, PackageId as MetadataId,
+    PackageName as MetadataPackageName,
 };
 
 /// The minimal amount of package information we care about
@@ -17,13 +18,13 @@ use cargo_metadata::{
 /// are used to trigger recompiles of packages within the workspace
 #[derive(Debug)]
 pub struct Package {
-    name: String,
+    name: MetadataPackageName,
     src_paths: Vec<PathBuf>,
 }
 
 impl Package {
     pub fn name(&self) -> &str {
-        &self.name
+        self.name.as_str()
     }
 
     pub fn src_paths(&self) -> &[PathBuf] {

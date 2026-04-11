@@ -38,7 +38,7 @@ dialoguer = { version = "0.11", default-features = false }
 serde_json = "1.0.73"
 glob = "0.3.0"
 openssl = { version = "0.10.46", optional = true }
-cargo_metadata = "0.18.1"
+cargo_metadata = "0.23.1"
 filetime = "0.2"
 
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
