@@ -24,7 +24,7 @@ static USERNAME_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9A-Za
 #[derive(Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UserAuth {
-    #[validate(length(min = 3, max = 16), regex = "USERNAME_REGEX")]
+    #[validate(length(min = 3, max = 16), regex(path = USERNAME_REGEX))]
     username: String,
     #[validate(length(min = 8, max = 32))]
     password: String,
