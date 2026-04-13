@@ -403,13 +403,13 @@ Differences from `query()`:
     queries against; the database does not have to contain any data but must be the same
     kind (MySQL, Postgres, etc.) and have the same schema as the database you will be connecting to at runtime.
 
-    For convenience, you can use [a `.env` file][dotenv]<sup>1</sup> to set DATABASE_URL so that you don't have to pass it every time:
+    For convenience, you can use [a `.env` file][dotenvy]<sup>1</sup> to set DATABASE_URL so that you don't have to pass it every time:
 
     ```
     DATABASE_URL=mysql://localhost/my_database
     ```
 
-[dotenv]: https://github.com/dotenv-rs/dotenv#examples
+[dotenvy]: https://github.com/allan2/dotenvy?tab=readme-ov-file#what-is-an-environment-file
 
 The biggest downside to `query!()` is that the output type cannot be named (due to Rust not
 officially supporting anonymous records). To address that, there is a `query_as!()` macro that is
