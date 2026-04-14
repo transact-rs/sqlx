@@ -15,7 +15,7 @@ async fn any_sets_last_insert_id() -> anyhow::Result<()> {
     .execute(&mut conn)
     .await?;
 
-    let result = sqlx::query("INSERT INTO users (name) VALUES (?)")
+    let result = sqlx::query("INSERT INTO users (name) VALUES ($1)")
         .bind("Glorbo")
         .execute(&mut conn)
         .await?;
