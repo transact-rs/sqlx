@@ -612,6 +612,8 @@ impl TypesResolver {
     fn push_type(&mut self, original_name: impl Display, oid_expr: impl Display) {
         use std::fmt::Write;
 
+        tracing::trace!(%original_name, %oid_expr, "push_type");
+
         // Lazily push the preamble to `self.query` so we don't allocate in the fast path
         // (all types already known)
         if self.query.is_empty() {
@@ -627,9 +629,10 @@ impl TypesResolver {
                      typbasetype,\n\
                      rngsubtype,\n\
                      COALESCE(\
-                        (SELECT array_agg(enumlabel) OVER (ORDER BY enumsortorder)\n\
+                        (SELECT array_agg(enumlabel) FROM (SELECT *\n\
                         FROM pg_catalog.pg_enum\n\
-                        WHERE enumtypid = pg_type.oid),\n\
+                        WHERE enumtypid = pg_type.oid\n\
+                        ORDER BY enumsortorder)),\n\
                         '{{}}') enum_labels,\n\
                      COALESCE(\n\
                         (SELECT array_agg((attname, atttypid)) FROM (SELECT *\n\
@@ -650,10 +653,16 @@ impl TypesResolver {
     }
 
     async fn fill_cache(&mut self, conn: &mut PgConnection) -> Result<(), Error> {
-        let mut existing_dependencies = HashMap::<Oid, Vec<TypeResolverRow>>::new();
+        let mut missing_dependencies = HashMap::<Oid, Vec<TypeResolverRow>>::new();
 
-        // Iteratively resolve types until all or resolved or we hit a dead-end
-        while !self.query.is_empty() {
+        // Iteratively resolve types until all are resolved, or we hit a dead-end.
+        // We statically cap the number of iterations in case we somehow encounter a circular type
+        // dependency, which I *assume* Postgres should forbid.
+        for _ in 0..64 {
+            if self.query.is_empty() {
+                break;
+            }
+
             // * Cancel-safety
             // * Makes this type reusable if we want to for whatever reason
             // * Avoids an allocation when converting to `SqlStr`
@@ -665,18 +674,26 @@ impl TypesResolver {
                  LEFT JOIN pg_catalog.pg_range ON pg_type.oid = pg_range.rngtypid",
             );
 
-            let types = raw_sql(AssertSqlSafe(query)).fetch_all(&mut *conn).await?;
+            tracing::trace!(?query, "fill_cache");
 
-            let mut new_dependencies = HashMap::<Oid, Vec<TypeResolverRow>>::new();
+            let types = raw_sql(AssertSqlSafe(query)).fetch_all(&mut *conn).await?;
 
             'outer: for row in types {
                 let mut type_row = TypeResolverRow::from_row(&row)?;
+
+                tracing::trace!("type_row: {type_row:?}");
 
                 let mut resolved_dependencies = VecDeque::new();
 
                 loop {
                     if let ControlFlow::Break(missing_oid) = conn.try_cache_type(&type_row)? {
-                        new_dependencies
+                        tracing::trace!(
+                            ty_name = type_row.catalog_name,
+                            missing_oid = missing_oid.0,
+                            "type missing dependency"
+                        );
+
+                        missing_dependencies
                             .entry(missing_oid)
                             .or_default()
                             .push(type_row);
@@ -687,28 +704,32 @@ impl TypesResolver {
                     }
 
                     resolved_dependencies.extend(
-                        existing_dependencies
+                        missing_dependencies
                             .remove(&type_row.oid)
                             .unwrap_or_default(),
                     );
 
                     // Iteratively mark existing dependencies as resolved
                     if let Some(next_row) = resolved_dependencies.pop_back() {
+                        tracing::trace!(
+                            resolved_oid = type_row.oid.0,
+                            ty_name = next_row.catalog_name,
+                            "resolved dependency"
+                        );
+
                         type_row = next_row
                     } else {
                         break;
                     }
                 }
             }
+        }
 
-            if !existing_dependencies.is_empty() {
-                return Err(Error::Protocol(format!(
-                    "unable to resolve type OIDs: {:?}",
-                    existing_dependencies.keys()
-                )));
-            }
-
-            existing_dependencies = new_dependencies;
+        if !missing_dependencies.is_empty() {
+            return Err(Error::Protocol(format!(
+                "unable to resolve type OIDs: {:?}",
+                missing_dependencies.keys()
+            )));
         }
 
         Ok(())
