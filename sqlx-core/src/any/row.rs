@@ -1,5 +1,5 @@
 use crate::any::error::mismatched_types;
-use crate::any::{Any, AnyColumn, AnyTypeInfo, AnyTypeInfoKind, AnyValue, AnyValueKind};
+use crate::any::{Any, AnyColumn, AnyJson, AnyTypeInfo, AnyTypeInfoKind, AnyValue, AnyValueKind};
 use crate::column::{Column, ColumnIndex};
 use crate::database::Database;
 use crate::decode::Decode;
@@ -85,6 +85,7 @@ impl AnyRow {
     ) -> Result<Self, Error>
     where
         usize: ColumnIndex<R>,
+        R::Database: AnyJson,
         AnyTypeInfo: for<'b> TryFrom<&'b <R::Database as Database>::TypeInfo, Error = Error>,
         AnyColumn: for<'b> TryFrom<&'b <R::Database as Database>::Column, Error = Error>,
         bool: Type<R::Database> + Decode<'a, R::Database>,
@@ -127,6 +128,15 @@ impl AnyRow {
                 AnyTypeInfoKind::Double => AnyValueKind::Double(decode(value)?),
                 AnyTypeInfoKind::Blob => AnyValueKind::Blob(decode::<_, Vec<u8>>(value)?.into()),
                 AnyTypeInfoKind::Text => AnyValueKind::Text(decode::<_, String>(value)?.into()),
+                #[cfg(feature = "json")]
+                AnyTypeInfoKind::Json => {
+                    AnyValueKind::Json(R::Database::decode_json(value).map_err(|e| {
+                        Error::ColumnDecode {
+                            index: col.ordinal().to_string(),
+                            source: e,
+                        }
+                    })?)
+                }
             };
 
             row_out.columns.push(any_col);

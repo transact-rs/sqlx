@@ -200,6 +200,8 @@ impl<'a> TryFrom<&'a PgTypeInfo> for AnyTypeInfo {
                 PgType::Bytea => AnyTypeInfoKind::Blob,
                 PgType::Text | PgType::Varchar => AnyTypeInfoKind::Text,
                 PgType::DeclareWithName(UStr::Static("citext")) => AnyTypeInfoKind::Text,
+                #[cfg(feature = "json")]
+                PgType::Json | PgType::Jsonb => AnyTypeInfoKind::Json,
                 _ => {
                     return Err(sqlx_core::Error::AnyDriverError(
                         format!("Any driver does not support the Postgres type {pg_type:?}").into(),

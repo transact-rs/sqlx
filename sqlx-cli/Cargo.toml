@@ -50,6 +50,7 @@ features = [
     "runtime-tokio",
     "migrate",
     "any",
+    "json"
 ]
 
 [features]

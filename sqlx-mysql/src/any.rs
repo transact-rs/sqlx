@@ -171,6 +171,8 @@ impl<'a> TryFrom<&'a MySqlTypeInfo> for AnyTypeInfo {
                 ColumnType::String | ColumnType::VarString | ColumnType::VarChar => {
                     AnyTypeInfoKind::Text
                 }
+                #[cfg(feature = "json")]
+                ColumnType::Json => AnyTypeInfoKind::Json,
                 _ => {
                     return Err(sqlx_core::Error::AnyDriverError(
                         format!("Any driver does not support MySql type {type_info:?}").into(),

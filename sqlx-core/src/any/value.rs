@@ -19,6 +19,9 @@ pub enum AnyValueKind {
     Text(Arc<String>),
     TextSlice(Arc<str>),
     Blob(Arc<Vec<u8>>),
+    #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
+    Json(Box<serde_json::value::RawValue>),
 }
 
 impl AnyValueKind {
@@ -35,6 +38,8 @@ impl AnyValueKind {
                 AnyValueKind::Text(_) => AnyTypeInfoKind::Text,
                 AnyValueKind::TextSlice(_) => AnyTypeInfoKind::Text,
                 AnyValueKind::Blob(_) => AnyTypeInfoKind::Blob,
+                #[cfg(feature = "json")]
+                AnyValueKind::Json(_) => AnyTypeInfoKind::Json,
             },
         }
     }
