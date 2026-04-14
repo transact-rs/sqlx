@@ -143,9 +143,7 @@ impl SqliteRwPoolOptions {
         // Configure writer: WAL mode + synchronous(Normal)
         let writer_opts = self
             .writer_connect_options
-            .unwrap_or_else(|| base_options.clone())
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal);
+            .unwrap_or_else(|| base_options.clone());
 
         // Configure reader: read_only only.
         // WAL mode is NOT set here because the reader connection is opened with
