@@ -341,7 +341,7 @@ fn minimal_project_recompile_action(metadata: &Metadata, all: bool) -> ProjectRe
 }
 
 /// Find all `query-*.json` files in a directory.
-fn glob_query_files(path: impl AsRef<Path>) -> anyhow::Result<Vec<PathBuf>> {
+pub(crate) fn glob_query_files(path: impl AsRef<Path>) -> anyhow::Result<Vec<PathBuf>> {
     let path = path.as_ref();
     let pattern = path.join("query-*.json");
     glob::glob(

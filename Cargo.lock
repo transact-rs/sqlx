@@ -3541,6 +3541,7 @@ dependencies = [
  "futures-util",
  "glob",
  "openssl",
+ "serde",
  "serde_json",
  "sqlx",
  "tempfile",

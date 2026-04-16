@@ -38,6 +38,7 @@ pub mod completions;
 pub mod migrate;
 pub mod opt;
 pub mod prepare;
+pub mod revalidate;
 
 pub use crate::opt::Opt;
 
@@ -206,6 +207,16 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
 
         #[cfg(feature = "completions")]
         Command::Completions { shell } => completions::run(shell),
+
+        Command::Revalidate {
+            mut connect_opts,
+            config,
+            database,
+        } => {
+            let config = config.load_config().await?;
+            connect_opts.populate_db_url(&config)?;
+            revalidate::run_revalidate(connect_opts, database.as_deref()).await?;
+        }
     };
 
     Ok(())

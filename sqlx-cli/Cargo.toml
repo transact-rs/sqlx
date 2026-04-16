@@ -36,6 +36,7 @@ anyhow = "1.0.52"
 console = "0.15.0"
 dialoguer = { version = "0.11", default-features = false }
 serde_json = "1.0.73"
+serde = {version = "1.0.228", features = ["derive"] }
 glob = "0.3.0"
 openssl = { version = "0.10.46", optional = true }
 cargo_metadata = "0.23.1"
@@ -50,6 +51,7 @@ features = [
     "runtime-tokio",
     "migrate",
     "any",
+    "_offline"
 ]
 
 [features]

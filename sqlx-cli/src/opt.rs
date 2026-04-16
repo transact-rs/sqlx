@@ -79,6 +79,15 @@ pub enum Command {
     #[cfg(feature = "completions")]
     /// Generate shell completions for the specified shell
     Completions { shell: Shell },
+
+    /// Revalidate the cached files in `.sqlx/` against the database
+    Revalidate {
+        #[clap(flatten)]
+        connect_opts: ConnectOpts,
+        #[clap(flatten)]
+        config: ConfigOpt,
+        database: Option<String>,
+    },
 }
 
 /// Group of commands for creating and dropping your database.
