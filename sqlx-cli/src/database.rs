@@ -1,10 +1,9 @@
 use crate::opt::{ConnectOpts, MigrationSourceOpt};
 use crate::{migrate, Config};
-use console::{style, Term};
-use dialoguer::Confirm;
+use console::style;
 use sqlx::any::Any;
 use sqlx::migrate::MigrateDatabase;
-use std::{io, mem};
+use std::io::{self, BufRead, Write};
 use tokio::task;
 
 pub async fn create(connect_opts: &ConnectOpts) -> anyhow::Result<()> {
@@ -66,45 +65,56 @@ pub async fn setup(
 }
 
 async fn ask_to_continue_drop(db_url: String) -> bool {
-    // If the setup operation is cancelled while we are waiting for the user to decide whether
-    // or not to drop the database, this will restore the terminal's cursor to its normal state.
-    struct RestoreCursorGuard {
-        disarmed: bool,
-    }
+    task::spawn_blocking(move || {
+        let stderr = io::stderr();
+        let mut stderr_lock = stderr.lock();
+        let _ = write!(
+            stderr_lock,
+            "Drop database at {}? (y/N): ",
+            style(&db_url).cyan()
+        );
+        let _ = stderr_lock.flush();
+        std::mem::drop(stderr_lock);
 
-    impl Drop for RestoreCursorGuard {
-        fn drop(&mut self) {
-            if !self.disarmed {
-                Term::stderr().show_cursor().unwrap()
-            }
+        let stdin = io::stdin();
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => false,
+            Ok(_) => parse_drop_response(&line),
         }
-    }
-
-    let mut guard = RestoreCursorGuard { disarmed: false };
-
-    let decision_result = task::spawn_blocking(move || {
-        Confirm::new()
-            .with_prompt(format!("Drop database at {}?", style(&db_url).cyan()))
-            .wait_for_newline(true)
-            .default(false)
-            .show_default(true)
-            .interact()
     })
     .await
-    .expect("Confirm thread panicked");
-    match decision_result {
-        Ok(decision) => {
-            guard.disarmed = true;
-            decision
+    .expect("Confirm thread panicked")
+}
+
+fn parse_drop_response(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.eq_ignore_ascii_case("y") || trimmed.eq_ignore_ascii_case("yes")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_drop_response;
+
+    #[test]
+    fn parse_drop_response_accepts_yes() {
+        for input in ["y", "Y", "yes", "YES", "Yes", "y\n", "yes\r\n", " yes "] {
+            assert!(
+                parse_drop_response(input),
+                "expected yes for input {input:?}"
+            );
         }
-        Err(dialoguer::Error::IO(err)) if err.kind() == io::ErrorKind::Interrupted => {
-            // Sometimes CTRL + C causes this error to be returned
-            mem::drop(guard);
-            false
-        }
-        Err(err) => {
-            mem::drop(guard);
-            panic!("Confirm dialog failed with {err}")
+    }
+
+    #[test]
+    fn parse_drop_response_rejects_everything_else() {
+        for input in [
+            "", "\n", "\r\n", "n", "N", "no", "NO", "maybe", " ", "xyz", "yep",
+        ] {
+            assert!(
+                !parse_drop_response(input),
+                "expected no for input {input:?}"
+            );
         }
     }
 }
