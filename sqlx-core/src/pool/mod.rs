@@ -4,7 +4,7 @@
 //! become expensive. Furthermore, sharing a database connection between threads and functions
 //! can be difficult to express in Rust.
 //!
-//! A connection pool is a standard technique that can manage opening and re-using connections.
+//! A connection pool is a standard technique that can manage opening and reusing connections.
 //! Normally it also enforces a maximum number of connections as these are an expensive resource
 //! on the database server.
 //!

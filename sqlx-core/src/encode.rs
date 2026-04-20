@@ -38,7 +38,7 @@ pub trait Encode<'q, DB: Database> {
 
     /// Writes the value of `self` into `buf` without moving `self`.
     ///
-    /// Where possible, make use of `encode` instead as it can take advantage of re-using
+    /// Where possible, make use of `encode` instead as it can take advantage of reusing
     /// memory.
     fn encode_by_ref(
         &self,
