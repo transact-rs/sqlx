@@ -15,7 +15,7 @@ use either::Either;
 /// look at that cache in-between the statement being prepared and it being executed. This contains
 /// the expected columns to be returned and the expected parameter types (if available).
 ///
-/// Statements can be re-used with any connection and on first-use it will be re-prepared and
+/// Statements can be reused with any connection and on first-use it will be re-prepared and
 /// cached within the connection.
 pub trait Statement: Send + Sync + Clone {
     type Database: Database;
