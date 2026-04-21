@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub struct AnyArguments {
     #[doc(hidden)]
     pub values: AnyArgumentBuffer,
+    // pub position_values: 
 }
 
 impl Arguments for AnyArguments {
@@ -29,6 +30,16 @@ impl Arguments for AnyArguments {
 
     fn len(&self) -> usize {
         self.values.0.len()
+    }
+    
+    fn merge(&mut self, arguments: Self) {
+        todo!()
+    }
+    
+    fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
+    where
+        T: Encode<'t, Self::Database> + Type<Self::Database> {
+        todo!()
     }
 }
 

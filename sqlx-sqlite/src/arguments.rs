@@ -66,6 +66,17 @@ impl Arguments for SqliteArguments {
     fn len(&self) -> usize {
         self.values.0.len()
     }
+    
+    fn merge(&mut self, arguments: Self) {
+        panic!("function not implemented");
+    }
+    
+    fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
+    where
+        T: Encode<'t, Self::Database> + sqlx_core::types::Type<Self::Database>
+    {
+        panic!("function not implemented");
+    }
 }
 
 impl SqliteArguments {

@@ -27,6 +27,12 @@ pub trait Arguments: Send + Sized + Default {
     fn format_placeholder<W: Write>(&self, writer: &mut W) -> fmt::Result {
         writer.write_str("?")
     }
+
+    fn merge(&mut self, arguments: Self);
+
+    fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
+    where
+        T: Encode<'t, Self::Database> + Type<Self::Database>;
 }
 
 pub trait IntoArguments<DB: Database>: Sized + Send {

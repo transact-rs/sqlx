@@ -55,6 +55,17 @@ impl Arguments for MySqlArguments {
     fn len(&self) -> usize {
         self.types.len()
     }
+    
+    fn merge(&mut self, arguments: Self) {
+        panic!("function not implemented");
+    }
+    
+    fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
+    where
+        T: Encode<'t, Self::Database> + Type<Self::Database>
+    {
+        panic!("function not implemented");
+    }
 }
 
 #[derive(Debug, Default, Clone)]
