@@ -182,7 +182,7 @@ impl Arguments for PgArguments {
             self.buffer.count += arguments.buffer.count;
         }
 
-        drop(arguments);
+        // drop(arguments);
     }
     
     fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
