@@ -20,13 +20,13 @@ pub(super) async fn maybe_upgrade<S: Socket>(
 ) -> Result<MySqlStream, Error> {
     let server_supports_tls = stream.capabilities.contains(Capabilities::SSL);
 
-    if matches!(options.ssl_mode, MySqlSslMode::Disabled) || !tls::available() {
+    if matches!(options.ssl_options.ssl_mode, MySqlSslMode::Disabled) || !tls::available() {
         // remove the SSL capability if SSL has been explicitly disabled
         stream.capabilities.remove(Capabilities::SSL);
     }
 
     // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
-    match options.ssl_mode {
+    match options.ssl_options.ssl_mode {
         MySqlSslMode::Disabled => return Ok(stream.boxed_socket()),
 
         MySqlSslMode::Preferred => {
@@ -53,16 +53,27 @@ pub(super) async fn maybe_upgrade<S: Socket>(
         }
     }
 
-    let tls_config = TlsConfig {
-        accept_invalid_certs: !matches!(
-            options.ssl_mode,
-            MySqlSslMode::VerifyCa | MySqlSslMode::VerifyIdentity
-        ),
-        accept_invalid_hostnames: !matches!(options.ssl_mode, MySqlSslMode::VerifyIdentity),
-        hostname: &options.host,
-        root_cert_path: options.ssl_ca.as_ref(),
-        client_cert_path: options.ssl_client_cert.as_ref(),
-        client_key_path: options.ssl_client_key.as_ref(),
+    let connector = if let Some(c) = options.ssl_options.cached_connector.get() {
+        c
+    } else {
+        let tls_config = TlsConfig {
+            accept_invalid_certs: !matches!(
+                options.ssl_options.ssl_mode,
+                MySqlSslMode::VerifyCa | MySqlSslMode::VerifyIdentity
+            ),
+            accept_invalid_hostnames: !matches!(
+                options.ssl_options.ssl_mode,
+                MySqlSslMode::VerifyIdentity
+            ),
+            root_cert_path: options.ssl_options.ssl_ca.as_ref(),
+            client_cert_path: options.ssl_options.ssl_client_cert.as_ref(),
+            client_key_path: options.ssl_options.ssl_client_key.as_ref(),
+        };
+        let connector = tls::connector(tls_config).await?;
+        options
+            .ssl_options
+            .cached_connector
+            .get_or_init(|| connector)
     };
 
     // Request TLS upgrade
@@ -75,7 +86,8 @@ pub(super) async fn maybe_upgrade<S: Socket>(
 
     tls::handshake(
         stream.socket.into_inner(),
-        tls_config,
+        &options.host,
+        connector,
         MapStream {
             server_version: stream.server_version,
             capabilities: stream.capabilities,
