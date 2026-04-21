@@ -35,12 +35,6 @@ impl Arguments for AnyArguments {
     fn merge(&mut self, arguments: Self) {
         todo!()
     }
-    
-    fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
-    where
-        T: Encode<'t, Self::Database> + Type<Self::Database> {
-        todo!()
-    }
 }
 
 #[derive(Default)]

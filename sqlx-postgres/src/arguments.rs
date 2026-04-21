@@ -162,61 +162,25 @@ impl Arguments for PgArguments {
         self.buffer.count
     }
     
-    fn merge(&mut self, mut arguments: Self) {
-        // Merge `Arguments.types`
-        {
-            self.types.append(&mut arguments.types);
-        }
-        // Merge `Arguments.Buffer`
-        {
-            // Merge `buffer`
-            self.buffer.buffer.append(&mut arguments.buffer.buffer);
+    fn merge(&mut self, arguments: Self) {
+        let buf_offset = self.buffer.len();
+        let count_offset = self.buffer.count;
 
-            // Merge `patches`
-            self.buffer.patches.append(&mut arguments.buffer.patches);
+        self.types.extend(arguments.types);
+        self.buffer.count += arguments.buffer.count;
+        self.buffer.buffer.extend(arguments.buffer.buffer);
 
-            // Merge `type_holes`
-            self.buffer.type_holes.append(&mut arguments.buffer.type_holes);
-
-            // Increment number of arguments
-            self.buffer.count += arguments.buffer.count;
+        for mut patch in arguments.buffer.patches {
+            patch.buf_offset += buf_offset;
+            patch.arg_index += count_offset;
+            self.buffer.patches.push(patch);
         }
 
-        // drop(arguments);
-    }
-    
-    fn position<'t, T>(&mut self, position: u32, value: T) -> Result<(), BoxDynError>
-    where
-        T: Encode<'t, Self::Database> + Type<Self::Database>
-    {
-        todo!()
+        for (offset, kind) in arguments.buffer.type_holes {
+            self.buffer.type_holes.push((offset + buf_offset, kind));
+        }
     }
 }
-
-
-// #[derive(Default, Debug, Clone)]
-// pub struct PgArgumentBuffer {
-//     buffer: Vec<u8>,
-
-//     // Number of arguments
-//     count: usize,
-
-//     // Whenever an `Encode` impl needs to defer some work until after we resolve parameter types
-//     // it can use `patch`.
-//     //
-//     // This currently is only setup to be useful if there is a *fixed-size* slot that needs to be
-//     // tweaked from the input type. However, that's the only use case we currently have.
-//     patches: Vec<Patch>,
-
-//     // Whenever an `Encode` impl encounters a `PgTypeInfo` object that does not have an OID
-//     // It pushes a "hole" that must be patched later.
-//     //
-//     // The hole is a `usize` offset into the buffer with the type name that should be resolved
-//     // This is done for Records and Arrays as the OID is needed well before we are in an async
-//     // function and can just ask postgres.
-//     //
-//     type_holes: Vec<(usize, HoleKind)>, // Vec<{ offset, type_name }>
-// }
 
 impl PgArgumentBuffer {
     pub(crate) fn encode<'q, T>(&mut self, value: T) -> Result<(), BoxDynError>
