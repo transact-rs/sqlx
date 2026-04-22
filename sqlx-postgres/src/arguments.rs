@@ -161,6 +161,25 @@ impl Arguments for PgArguments {
     fn len(&self) -> usize {
         self.buffer.count
     }
+
+    fn merge(&mut self, arguments: Self) {
+        let buf_offset = self.buffer.len();
+        let count_offset = self.buffer.count;
+
+        self.types.extend(arguments.types);
+        self.buffer.count += arguments.buffer.count;
+        self.buffer.buffer.extend(arguments.buffer.buffer);
+
+        for mut patch in arguments.buffer.patches {
+            patch.buf_offset += buf_offset;
+            patch.arg_index += count_offset;
+            self.buffer.patches.push(patch);
+        }
+
+        for (offset, kind) in arguments.buffer.type_holes {
+            self.buffer.type_holes.push((offset + buf_offset, kind));
+        }
+    }
 }
 
 impl PgArgumentBuffer {

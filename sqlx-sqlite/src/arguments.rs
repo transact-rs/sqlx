@@ -66,6 +66,10 @@ impl Arguments for SqliteArguments {
     fn len(&self) -> usize {
         self.values.0.len()
     }
+
+    fn merge(&mut self, arguments: Self) {
+        self.values.0.extend(arguments.values.0);
+    }
 }
 
 impl SqliteArguments {

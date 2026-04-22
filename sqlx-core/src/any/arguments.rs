@@ -30,6 +30,10 @@ impl Arguments for AnyArguments {
     fn len(&self) -> usize {
         self.values.0.len()
     }
+
+    fn merge(&mut self, arguments: Self) {
+        self.values.0.extend(arguments.values.0);
+    }
 }
 
 #[derive(Default)]
