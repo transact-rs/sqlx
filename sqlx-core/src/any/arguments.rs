@@ -32,7 +32,7 @@ impl Arguments for AnyArguments {
     }
 
     fn merge(&mut self, arguments: Self) {
-        todo!()
+        self.values.0.extend(arguments.values.0);
     }
 }
 
