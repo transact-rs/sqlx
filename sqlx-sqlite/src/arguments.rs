@@ -68,7 +68,7 @@ impl Arguments for SqliteArguments {
     }
     
     fn merge(&mut self, arguments: Self) {
-        panic!("function not implemented");
+        self.values.0.extend(arguments.values.0);
     }
 }
 

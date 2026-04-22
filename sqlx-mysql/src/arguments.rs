@@ -57,7 +57,16 @@ impl Arguments for MySqlArguments {
     }
     
     fn merge(&mut self, arguments: Self) {
-        panic!("function not implemented");
+        self.values.extend(arguments.values);
+        self.types.extend(arguments.types);
+
+        for i in 0..arguments.null_bitmap.length {
+            let byte_index = i / 8;
+            let bit_offset = i % 8;
+            let is_null = (arguments.null_bitmap.bytes[byte_index] & (1 << bit_offset)) != 0;
+
+            self.null_bitmap.push(if is_null { IsNull::Yes } else { IsNull::No });
+        }
     }
 }
 
