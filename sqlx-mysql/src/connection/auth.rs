@@ -44,10 +44,12 @@ impl AuthPlugin {
         match self {
             AuthPlugin::CachingSha2Password if packet[0] == 0x01 => {
                 match packet[1] {
-                    // AUTH_OK
-                    0x03 => Ok(true),
+                    // fast_auth_success — the server still sends a trailing
+                    // OK_Packet, so yield back to the handshake loop and let
+                    // it consume the OK on the next iteration.
+                    0x03 => Ok(false),
 
-                    // AUTH_CONTINUE
+                    // perform_full_authentication
                     0x04 => {
                         let payload = encrypt_rsa(stream, 0x02, password, nonce).await?;
 
@@ -58,7 +60,7 @@ impl AuthPlugin {
                     }
 
                     v => {
-                        Err(err_protocol!("unexpected result from fast authentication 0x{:x} when expecting 0x03 (AUTH_OK) or 0x04 (AUTH_CONTINUE)", v))
+                        Err(err_protocol!("unexpected result from fast authentication 0x{:x} when expecting 0x03 (fast_auth_success) or 0x04 (perform_full_authentication)", v))
                     }
                 }
             }
@@ -104,8 +106,9 @@ fn scramble_sha256(
     password: &str,
     nonce: &Chain<Bytes, Bytes>,
 ) -> GenericArray<u8, <Sha256 as OutputSizeUser>::OutputSize> {
-    // XOR(SHA256(password), SHA256(seed, SHA256(SHA256(password))))
-    // https://mariadb.com/kb/en/caching_sha2_password-authentication-plugin/#sha-2-encrypted-password
+    // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), seed))
+    // Order matches the server-side verification in MySQL's sha2_password
+    // (generate_sha2_scramble): stage2 digest first, then the nonce.
     let mut ctx = Sha256::new();
 
     ctx.update(password);
@@ -116,9 +119,9 @@ fn scramble_sha256(
 
     let pw_hash_hash = ctx.finalize_reset();
 
+    ctx.update(pw_hash_hash);
     ctx.update(nonce.first_ref());
     ctx.update(nonce.last_ref());
-    ctx.update(pw_hash_hash);
 
     let pw_seed_hash_hash = ctx.finalize();
 
@@ -214,5 +217,38 @@ mod rsa_backend {
         Err(Error::Configuration(
             "RSA auth backend disabled; enable feature `mysql-rsa` (or `rsa` if using sqlx-mysql directly) or use TLS.".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Buf;
+    use sha2::{Digest, Sha256};
+
+    // Regression test for https://github.com/launchbadge/sqlx/issues/4244:
+    // caching_sha2_password fast-auth requires the client scramble to be
+    // invertible by the server as XOR(scramble, SHA256(stage2 || nonce)) == stage1,
+    // where stage1 = SHA256(password) and stage2 = SHA256(stage1).
+    #[test]
+    fn scramble_sha256_is_invertible_by_server() {
+        let password = "my_pwd";
+        let nonce_a = Bytes::from_static(b"0123456789");
+        let nonce_b = Bytes::from_static(&[0xAB; 10]);
+        let nonce = nonce_a.clone().chain(nonce_b.clone());
+
+        let mut scramble = scramble_sha256(password, &nonce);
+
+        let stage1 = Sha256::digest(password.as_bytes());
+        let stage2 = Sha256::digest(stage1);
+
+        let mut h = Sha256::new();
+        h.update(stage2);
+        h.update(&nonce_a);
+        h.update(&nonce_b);
+        let xor_pad = h.finalize();
+
+        xor_eq(&mut scramble, &xor_pad);
+        assert_eq!(&scramble[..], &stage1[..]);
     }
 }
