@@ -26,7 +26,7 @@ async fn prepare(
     arg_types: &[PgTypeInfo],
     metadata: Option<Arc<PgStatementMetadata>>,
     persistent: bool,
-    fetch_column_origin: bool,
+    resolve_column_origin: bool,
 ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
     let id = if persistent {
         let id = conn.inner.next_statement_id;
@@ -39,7 +39,7 @@ async fn prepare(
     // build a list of type OIDs to send to the database in the PARSE command
     // we have not yet started the query sequence, so we are *safe* to cleanly make
     // additional queries here to get any missing OIDs
-    let param_types = conn.argument_types_to_oids(arg_types).await?;
+    let param_types = conn.resolve_types(arg_types).await?;
 
     // flush and wait until we are re-ready
     conn.wait_until_ready().await?;
@@ -74,26 +74,20 @@ async fn prepare(
     } else {
         let parameters = recv_desc_params(conn).await?;
 
-        let rows = recv_desc_rows(conn).await?;
+        let row_desc = recv_desc_rows(conn).await?;
 
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
 
-        let parameters = conn.handle_parameter_description(parameters).await?;
-
-        let (columns, column_names) = conn
-            .handle_row_description(rows, true, fetch_column_origin)
+        let metadata = conn
+            .resolve_statement_metadata::<true>(Some(parameters), row_desc, resolve_column_origin)
             .await?;
 
         // ensure that if we did fetch custom data, we wait until we are fully ready before
         // continuing
         conn.wait_until_ready().await?;
 
-        Arc::new(PgStatementMetadata {
-            parameters,
-            columns,
-            column_names: Arc::new(column_names),
-        })
+        metadata
     };
 
     Ok((id, metadata))
@@ -171,7 +165,7 @@ impl PgConnection {
         // optional metadata that was provided by the user, this means they are reusing
         // a statement object
         metadata: Option<Arc<PgStatementMetadata>>,
-        fetch_column_origin: bool,
+        resolve_column_origin: bool,
     ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
         if let Some(statement) = self.inner.cache_statement.get_mut(sql) {
             return Ok((*statement).clone());
@@ -183,7 +177,7 @@ impl PgConnection {
             parameters,
             metadata,
             persistent,
-            fetch_column_origin,
+            resolve_column_origin,
         )
         .await?;
 
@@ -337,17 +331,15 @@ impl PgConnection {
                     // incomplete query execution has finished
                     BackendMessageFormat::PortalSuspended => {}
 
+                    // indicates that a *new* set of rows are about to be returned
                     BackendMessageFormat::RowDescription => {
-                        // indicates that a *new* set of rows are about to be returned
-                        let (columns, column_names) = self
-                            .handle_row_description(Some(message.decode()?), false, false)
-                            .await?;
+                        let new_metadata = self.resolve_statement_metadata::<false>(
+                            None,
+                            Some(message.decode()?),
+                            false,
+                        ).await?;
 
-                        metadata = Arc::new(PgStatementMetadata {
-                            column_names: Arc::new(column_names),
-                            columns,
-                            parameters: Vec::default(),
-                        });
+                        metadata = new_metadata;
                     }
 
                     BackendMessageFormat::DataRow => {
