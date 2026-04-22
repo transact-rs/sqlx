@@ -55,7 +55,7 @@ impl Arguments for MySqlArguments {
     fn len(&self) -> usize {
         self.types.len()
     }
-    
+
     fn merge(&mut self, arguments: Self) {
         self.values.extend(arguments.values);
         self.types.extend(arguments.types);
@@ -65,7 +65,8 @@ impl Arguments for MySqlArguments {
             let bit_offset = i % 8;
             let is_null = (arguments.null_bitmap.bytes[byte_index] & (1 << bit_offset)) != 0;
 
-            self.null_bitmap.push(if is_null { IsNull::Yes } else { IsNull::No });
+            self.null_bitmap
+                .push(if is_null { IsNull::Yes } else { IsNull::No });
         }
     }
 }

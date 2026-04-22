@@ -161,7 +161,7 @@ impl Arguments for PgArguments {
     fn len(&self) -> usize {
         self.buffer.count
     }
-    
+
     fn merge(&mut self, arguments: Self) {
         let buf_offset = self.buffer.len();
         let count_offset = self.buffer.count;
