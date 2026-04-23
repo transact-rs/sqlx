@@ -63,7 +63,7 @@ serde = { version = "1.0.144", optional = true }
 
 [dev-dependencies]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
-sqlx = { path = "..", default-features = false, features = ["mysql"] }
+sqlx = { path = "..", package = "sqlx-flyer", default-features = false, features = ["mysql"] }
 
 [lints]
 workspace = true

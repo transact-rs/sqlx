@@ -44,7 +44,7 @@ authors = [
 rust-version = "1.86.0"
 
 [package]
-name = "sqlx"
+name = "sqlx-flyer"
 readme = "README.md"
 documentation = "https://docs.rs/sqlx"
 description = "🧰 The Rust SQL Toolkit. An async, pure Rust SQL crate featuring compile-time checked queries without a DSL. Supports PostgreSQL, MySQL, and SQLite."
@@ -54,6 +54,9 @@ edition.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+
+[lib]
+name="sqlx"
 
 # Note: written so that it may be copy-pasted to other crates
 [package.metadata.docs.rs]

@@ -19,10 +19,12 @@ rust_decimal = "1.36.0"
 
 rand = "0.8.5"
 
-[dependencies.sqlx]
-# version = "0.9.0"
-workspace = true
-features = ["runtime-tokio", "postgres", "migrate", "sqlx-toml"]
+#[dependencies.sqlx]
+## version = "0.9.0"
+#workspace = true
+#features = ["runtime-tokio", "postgres", "migrate", "sqlx-toml"]
+
+sqlx = { path = "../../../", package = "sqlx-flyer", features = ["runtime-tokio", "postgres", "migrate", "sqlx-toml"] }
 
 [dependencies.accounts]
 path = "accounts"

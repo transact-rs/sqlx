@@ -16,14 +16,17 @@ chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde"] }
 
+# New ADD`S
+sqlx = { path = "../../../", package = "sqlx-flyer", features = ["runtime-tokio", "postgres", "bigdecimal", "chrono", "derive", "macros", "migrate", "sqlx-toml"] }
+
 [dependencies.tokio]
 workspace = true
 features = ["rt-multi-thread", "macros"]
 
-[dependencies.sqlx]
-# version = "0.9.0"
-workspace = true
-features = ["runtime-tokio", "postgres", "bigdecimal", "chrono", "derive", "macros", "migrate", "sqlx-toml"]
+#[dependencies.sqlx]
+## version = "0.9.0"
+#workspace = true
+#features = ["runtime-tokio", "postgres", "bigdecimal", "chrono", "derive", "macros", "migrate", "sqlx-toml"]
 
 [dependencies.uses-rust-decimal]
 path = "uses-rust-decimal"

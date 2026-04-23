@@ -43,14 +43,18 @@ filetime = "0.2"
 
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 
-[dependencies.sqlx]
-workspace = true
-default-features = false
-features = [
-    "runtime-tokio",
-    "migrate",
-    "any",
-]
+# New ADD`S
+sqlx = { path = "..", workspace = "true", default-features = false, package = "sqlx-flyer", features = ["runtime-tokio", "migrate", "any"] }
+
+#[dependencies.sqlx]
+#workspace = true
+#default-features = false
+#features = [
+#    "runtime-tokio",
+#    "migrate",
+#    "any",
+#]
+
 
 [features]
 default = ["postgres", "sqlite", "mysql", "native-tls", "completions", "sqlx-toml"]

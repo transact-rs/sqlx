@@ -13,9 +13,12 @@ chrono = "0.4"
 rust_decimal = "1"
 uuid = "1"
 
-[dependencies.sqlx]
-workspace = true
-features = ["runtime-tokio", "postgres", "rust_decimal", "chrono", "uuid"]
+# NEW ADD`S
+sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["runtime-tokio", "postgres", "rust_decimal", "chrono", "uuid"] }
+
+#[dependencies.sqlx]
+#workspace = true
+#features = ["runtime-tokio", "postgres", "rust_decimal", "chrono", "uuid"]
 
 [lints]
 workspace = true

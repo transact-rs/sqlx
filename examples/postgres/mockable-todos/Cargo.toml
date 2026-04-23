@@ -6,7 +6,7 @@ workspace = "../../../"
 
 [dependencies]
 anyhow = "1.0"
-sqlx = { path = "../../../", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
+sqlx = { path = "../../../", package = "sqlx-flyer", features = [ "postgres", "runtime-tokio", "tls-native-tls" ] }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1.20.0", features = ["rt", "macros"]}
 dotenvy = "0.15.0"

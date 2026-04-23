@@ -72,14 +72,20 @@ thiserror.workspace = true
 serde = { version = "1.0.144", optional = true, features = ["derive"] }
 serde_json = { version = "1.0.85", optional = true, features = ["raw_value"] }
 
-[dependencies.sqlx-core]
-workspace = true
+# NEW ADD`S
+sqlx-core = { workspace = true }
+sqlx = { path = "..", package = "sqlx-flyer", features = ["postgres", "derive"] }
 
-[dev-dependencies.sqlx]
+#[dependencies.sqlx-core]
+#workspace = true
+
+#[dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
-# workspace = true
-path = ".."
-features = ["postgres", "derive"]
+## workspace = true
+#path = ".."
+#features = ["postgres", "derive"]
+
+#[dependencies]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 etcetera = "0.10.0"

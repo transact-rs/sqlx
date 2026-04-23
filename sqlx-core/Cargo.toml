@@ -114,6 +114,9 @@ tokio = { version = "1", features = ["rt"] }
 path = ".."
 default-features = false
 features = ["postgres", "sqlite", "mysql", "migrate", "macros", "time", "uuid"]
+package = "sqlx-flyer"
+
+#sqlx = { path = "..", package = "sqlx-flyer", default-features = false, features = ["postgres", "sqlite", "mysql", "migrate", "macros", "time", "uuid"] }
 
 [lints]
 workspace = true
