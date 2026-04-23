@@ -189,6 +189,7 @@ impl PgArgumentBuffer {
     }
 
     // Adds a callback to be invoked later when we know the parameter type
+    #[cfg_attr(not(feature = "json"), expect(dead_code))]
     pub(crate) fn patch_with<F>(&mut self, callback: F)
     where
         F: Fn(&mut [u8], &PgTypeInfo) + 'static + Send + Sync,
