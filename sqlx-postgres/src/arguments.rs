@@ -4,11 +4,9 @@ use std::sync::Arc;
 
 use crate::encode::{Encode, IsNull};
 use crate::error::Error;
-use crate::ext::ustr::UStr;
 use crate::types::Type;
 use crate::{PgConnection, PgTypeInfo, Postgres};
 
-use crate::type_info::PgArrayOf;
 pub(crate) use sqlx_core::arguments::Arguments;
 use sqlx_core::error::BoxDynError;
 
