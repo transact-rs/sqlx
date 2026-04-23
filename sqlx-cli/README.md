@@ -66,6 +66,12 @@ this new file.
 sqlx migrate run
 ```
 
+Recursively resolve migrations in sub-directories of your migrations folder with `--recursive`:
+
+```bash
+sqlx migrate run --recursive
+```
+
 Compares the migration history of the running database against the `migrations/` folder and runs
 any scripts that are still pending.
 

@@ -87,6 +87,9 @@ pub struct ResolveError {
 #[derive(Debug, Default)]
 pub struct ResolveConfig {
     ignored_chars: BTreeSet<char>,
+    // When true, traverse subdirectories of the migrations directory and include
+    // any files that match the migration filename pattern.
+    recursive: bool,
 }
 
 impl ResolveConfig {
@@ -94,6 +97,7 @@ impl ResolveConfig {
     pub fn new() -> Self {
         ResolveConfig {
             ignored_chars: BTreeSet::new(),
+            recursive: false,
         }
     }
 
@@ -143,6 +147,12 @@ impl ResolveConfig {
     pub fn ignored_chars(&self) -> impl Iterator<Item = char> + '_ {
         self.ignored_chars.iter().copied()
     }
+
+    /// Enable or disable recursive directory traversal when resolving migrations.
+    pub fn set_recursive(&mut self, recursive: bool) -> &mut Self {
+        self.recursive = recursive;
+        self
+    }
 }
 
 // FIXME: paths should just be part of `Migration` but we can't add a field backwards compatibly
@@ -162,91 +172,108 @@ pub fn resolve_blocking_with_config(
         source: Some(e),
     })?;
 
-    let s = fs::read_dir(&path).map_err(|e| ResolveError {
-        message: format!("error reading migration directory {}", path.display()),
-        source: Some(e),
-    })?;
-
     let mut migrations = Vec::new();
 
-    for res in s {
-        let entry = res.map_err(|e| ResolveError {
-            message: format!(
-                "error reading contents of migration directory {}",
-                path.display()
-            ),
+    fn collect_dir(
+        dir: &Path,
+        config: &ResolveConfig,
+        out: &mut Vec<(Migration, PathBuf)>,
+    ) -> Result<(), ResolveError> {
+        let s = fs::read_dir(dir).map_err(|e| ResolveError {
+            message: format!("error reading migration directory {}", dir.display()),
             source: Some(e),
         })?;
 
-        let entry_path = entry.path();
+        for res in s {
+            let entry = res.map_err(|e| ResolveError {
+                message: format!(
+                    "error reading contents of migration directory {}",
+                    dir.display()
+                ),
+                source: Some(e),
+            })?;
 
-        let metadata = fs::metadata(&entry_path).map_err(|e| ResolveError {
-            message: format!(
-                "error getting metadata of migration path {}",
-                entry_path.display()
-            ),
-            source: Some(e),
-        })?;
+            let entry_path = entry.path();
 
-        if !metadata.is_file() {
-            // not a file; ignore
-            continue;
-        }
+            let metadata = fs::metadata(&entry_path).map_err(|e| ResolveError {
+                message: format!(
+                    "error getting metadata of migration path {}",
+                    entry_path.display()
+                ),
+                source: Some(e),
+            })?;
 
-        let file_name = entry.file_name();
-        // This is arguably the wrong choice,
-        // but it really only matters for parsing the version and description.
-        //
-        // Using `.to_str()` and returning an error if the filename is not UTF-8
-        // would be a breaking change.
-        let file_name = file_name.to_string_lossy();
+            if metadata.is_dir() {
+                if config.recursive {
+                    collect_dir(&entry_path, config, out)?;
+                }
+                continue;
+            }
 
-        let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
+            if !metadata.is_file() {
+                continue;
+            }
 
-        if parts.len() != 2 || !parts[1].ends_with(".sql") {
-            // not of the format: <VERSION>_<DESCRIPTION>.<REVERSIBLE_DIRECTION>.sql; ignore
-            continue;
-        }
+            let file_name = entry.file_name();
+            // This is arguably the wrong choice,
+            // but it really only matters for parsing the version and description.
+            //
+            // Using `.to_str()` and returning an error if the filename is not UTF-8
+            // would be a breaking change.
+            let file_name = file_name.to_string_lossy();
 
-        let version: i64 = parts[0].parse()
-            .map_err(|_e| ResolveError {
-                message: format!("error parsing migration filename {file_name:?}; expected integer version prefix (e.g. `01_foo.sql`)"),
+            let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
+
+            if parts.len() != 2 || !parts[1].ends_with(".sql") {
+                // not of the format: <VERSION>_<DESCRIPTION>.<REVERSIBLE_DIRECTION>.sql; ignore
+                continue;
+            }
+
+            let version: i64 = parts[0].parse().map_err(|_e| ResolveError {
+                message: format!(
+                    "error parsing migration filename {file_name:?}; expected integer version prefix (e.g. `01_foo.sql`)"
+                ),
                 source: None,
             })?;
 
-        let migration_type = MigrationType::from_filename(parts[1]);
+            let migration_type = MigrationType::from_filename(parts[1]);
 
-        // remove the `.sql` and replace `_` with ` `
-        let description = parts[1]
-            .trim_end_matches(migration_type.suffix())
-            .replace('_', " ")
-            .to_owned();
+            // remove the `.sql` and replace `_` with ` `
+            let description = parts[1]
+                .trim_end_matches(migration_type.suffix())
+                .replace('_', " ")
+                .to_owned();
 
-        let sql = fs::read_to_string(&entry_path).map_err(|e| ResolveError {
-            message: format!(
-                "error reading contents of migration {}: {e}",
-                entry_path.display()
-            ),
-            source: Some(e),
-        })?;
+            let sql = fs::read_to_string(&entry_path).map_err(|e| ResolveError {
+                message: format!(
+                    "error reading contents of migration {}: {e}",
+                    entry_path.display()
+                ),
+                source: Some(e),
+            })?;
 
-        // opt-out of migration transaction
-        let no_tx = sql.starts_with("-- no-transaction");
+            // opt-out of migration transaction
+            let no_tx = sql.starts_with("-- no-transaction");
 
-        let checksum = checksum_with(&sql, &config.ignored_chars);
+            let checksum = checksum_with(&sql, &config.ignored_chars);
 
-        migrations.push((
-            Migration::with_checksum(
-                version,
-                Cow::Owned(description),
-                migration_type,
-                AssertSqlSafe(sql).into_sql_str(),
-                checksum.into(),
-                no_tx,
-            ),
-            entry_path,
-        ));
+            out.push((
+                Migration::with_checksum(
+                    version,
+                    Cow::Owned(description),
+                    migration_type,
+                    AssertSqlSafe(sql).into_sql_str(),
+                    checksum.into(),
+                    no_tx,
+                ),
+                entry_path,
+            ));
+        }
+
+        Ok(())
     }
+
+    collect_dir(&path, config, &mut migrations)?;
 
     // Ensure that we are sorted by version in ascending order.
     migrations.sort_by_key(|(m, _)| m.version);
@@ -296,4 +323,46 @@ fn checksum_with_ignored_chars() {
     let digest_stripped = migration::checksum(&stripped_sql);
 
     assert_eq!(digest_ignored, digest_stripped);
+}
+
+#[cfg(test)]
+mod recursive_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn non_recursive_ignores_subdirs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        // top-level migration
+        fs::write(root.join("1_top.sql"), "-- top\nSELECT 1;\n").expect("write top");
+        // subdir migration
+        let sub = root.join("nested");
+        fs::create_dir(&sub).expect("create nested");
+        fs::write(sub.join("2_sub.sql"), "-- sub\nSELECT 2;\n").expect("write sub");
+
+        let cfg = ResolveConfig::new();
+        let got = resolve_blocking_with_config(root, &cfg).expect("resolve ok");
+        // should only see the top-level one
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].0.version, 1);
+    }
+
+    #[test]
+    fn recursive_finds_subdirs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join("1_top.sql"), "-- top\nSELECT 1;\n").expect("write top");
+        let sub = root.join("nested");
+        fs::create_dir(&sub).expect("create nested");
+        fs::write(sub.join("2_sub.sql"), "-- sub\nSELECT 2;\n").expect("write sub");
+
+        let mut cfg = ResolveConfig::new();
+        cfg.set_recursive(true);
+        let got = resolve_blocking_with_config(root, &cfg).expect("resolve ok");
+        // should see both, sorted by version
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].0.version, 1);
+        assert_eq!(got[1].0.version, 2);
+    }
 }

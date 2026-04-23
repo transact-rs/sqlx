@@ -107,6 +107,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt"] }
+tempfile = "3.10.1"
 
 [dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622

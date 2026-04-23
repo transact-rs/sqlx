@@ -334,11 +334,16 @@ pub struct AddMigrationOpts {
 /// Argument for the migration scripts source.
 #[derive(Args, Debug)]
 pub struct MigrationSourceOpt {
-    /// Path to folder containing migrations.
+    /// Path to the folder containing migrations.
     ///
     /// Defaults to `migrations/` if not specified, but a different default may be set by `sqlx.toml`.
     #[clap(long)]
     pub source: Option<String>,
+
+    /// Recursively resolve migrations in subdirectories of the source directory
+    /// when set. By default, only files in the top-level source directory are considered.
+    #[clap(long)]
+    pub recursive: bool,
 }
 
 impl MigrationSourceOpt {
@@ -351,10 +356,11 @@ impl MigrationSourceOpt {
     }
 
     pub async fn resolve(&self, config: &Config) -> Result<Migrator, MigrateError> {
-        Migrator::new(ResolveWith(
-            self.resolve_path(config),
-            config.migrate.to_resolve_config(),
-        ))
+        {
+            let mut rc = config.migrate.to_resolve_config();
+            rc.set_recursive(self.recursive);
+            Migrator::new(ResolveWith(self.resolve_path(config), rc))
+        }
         .await
     }
 }
