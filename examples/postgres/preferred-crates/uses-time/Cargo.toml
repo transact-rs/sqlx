@@ -14,7 +14,7 @@ time = "0.3"
 uuid = "1"
 
 # NEW ADD`S
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["runtime-tokio", "postgres", "time", "json", "uuid"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["runtime-tokio", "postgres", "time", "json", "uuid"] }
 
 #[dependencies.sqlx]
 #workspace = true

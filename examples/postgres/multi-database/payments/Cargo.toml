@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["postgres", "time", "uuid", "rust_decimal", "sqlx-toml"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["postgres", "time", "uuid", "rust_decimal", "sqlx-toml"] }
 
 rust_decimal = "1.36.0"
 
@@ -17,4 +17,4 @@ path = "../accounts"
 package = "sqlx-example-postgres-multi-database-accounts"
 
 [dev-dependencies]
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["runtime-tokio"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["runtime-tokio"] }

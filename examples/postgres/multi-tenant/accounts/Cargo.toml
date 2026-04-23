@@ -18,7 +18,7 @@ time = { version = "0.3.37", features = ["serde"] }
 serde = { version = "1.0.218", features = ["derive"] }
 
 # NEW ADD`S
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["postgres", "time", "uuid", "macros", "sqlx-toml", "migrate"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["postgres", "time", "uuid", "macros", "sqlx-toml", "migrate"] }
 
 #[dependencies.sqlx]
 ## version = "0.9.0"
@@ -26,4 +26,4 @@ sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["postgres", 
 #features = ["postgres", "time", "uuid", "macros", "sqlx-toml", "migrate"]
 
 [dev-dependencies]
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["runtime-tokio"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["runtime-tokio"] }

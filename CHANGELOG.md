@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.9.0-alpha.1 - 2025-10-14
+## 0.9.0 - 2025-10-14
 
 Accumulated changes since the beginning of the alpha cycle. Effectively a draft CHANGELOG for the 0.9.0 release.
 
@@ -61,7 +61,7 @@ This section will be replaced in subsequent alpha releases. See the Git history 
 * [[#3800]]: Escape PostgreSQL Options [[@V02460]]
   * Breaking behavior change: options passed to `PgConnectOptions::options()` are now automatically escaped.
     Manual escaping of options is no longer necessary and may cause incorrect behavior.
-* [[#3821]]: Groundwork for 0.9.0-alpha.1 [[@abonander]]
+* [[#3821]]: Groundwork for 0.9.0 [[@abonander]]
   * Increased MSRV to 1.86 and set rust-version
   * Deleted deprecated combination runtime+TLS features (e.g. `runtime-tokio-native-tls`)
   * Deleted re-export of unstable `TransactionManager` trait in `sqlx`.

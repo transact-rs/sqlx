@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["postgres", "time", "uuid", "macros", "sqlx-toml"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["postgres", "time", "uuid", "macros", "sqlx-toml"] }
 tokio = { version = "1", features = ["rt", "sync"] }
 
 argon2 = { version = "0.5.3", features = ["password-hash"] }
@@ -19,4 +19,4 @@ time = { version = "0.3.37", features = ["serde"] }
 serde = { version = "1.0.218", features = ["derive"] }
 
 [dev-dependencies]
-sqlx = { path = "../../../../", package = "sqlx-flyer", features = ["runtime-tokio"] }
+sqlx = { path = "../../../../", package = "flyer-sqlx", features = ["runtime-tokio"] }

@@ -24,7 +24,7 @@ rand = "0.8.5"
 #workspace = true
 #features = ["runtime-tokio", "postgres", "migrate", "sqlx-toml"]
 
-sqlx = { path = "../../../", package = "sqlx-flyer", features = ["runtime-tokio", "postgres", "migrate", "sqlx-toml"] }
+sqlx = { path = "../../../", package = "flyer-sqlx", features = ["runtime-tokio", "postgres", "migrate", "sqlx-toml"] }
 
 [dependencies.accounts]
 path = "accounts"

@@ -9,7 +9,7 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-sqlx = { path = "../../../", package = "sqlx-flyer", features = [ "sqlite", "runtime-tokio", "tls-native-tls", "sqlx-toml"] }
+sqlx = { path = "../../../", package = "flyer-sqlx", features = [ "sqlite", "runtime-tokio", "tls-native-tls", "sqlx-toml"] }
 tokio = { version = "1.20.0", features = ["rt", "macros"]}
 anyhow = "1.0"
 

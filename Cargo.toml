@@ -28,11 +28,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 license = "MIT OR Apache-2.0"
 # TODO: upgrade to edition 2024 (after merging all pending PRs)
 edition = "2021"
-repository = "https://github.com/lucas11776-golang/sqlx"
+repository = "https://github.com/lucas11776-golang/flyer-sqlx"
 keywords = ["database", "async", "postgres", "mysql", "sqlite"]
 categories = ["database", "asynchronous"]
 authors = [
@@ -44,7 +44,7 @@ authors = [
 rust-version = "1.86.0"
 
 [package]
-name = "sqlx-flyer"
+name = "flyer-sqlx"
 readme = "README.md"
 documentation = "https://docs.rs/sqlx"
 description = "🧰 The Rust SQL Toolkit. An async, pure Rust SQL crate featuring compile-time checked queries without a DSL. Supports PostgreSQL, MySQL, and SQLite."
@@ -168,17 +168,17 @@ bstr = ["sqlx-core/bstr"]
 
 [workspace.dependencies]
 # Core Crates
-sqlx-core = { version = "=0.9.0-alpha.1", path = "sqlx-core" }
-sqlx-macros-core = { version = "=0.9.0-alpha.1", path = "sqlx-macros-core" }
-sqlx-macros = { version = "=0.9.0-alpha.1", path = "sqlx-macros" }
+sqlx-core = { version = "=0.9.0", path = "sqlx-core" }
+sqlx-macros-core = { version = "=0.9.0", path = "sqlx-macros-core" }
+sqlx-macros = { version = "=0.9.0", path = "sqlx-macros" }
 
 # Driver crates
-sqlx-mysql = { version = "=0.9.0-alpha.1", path = "sqlx-mysql", default-features = false }
-sqlx-postgres = { version = "=0.9.0-alpha.1", path = "sqlx-postgres" }
-sqlx-sqlite = { version = "=0.9.0-alpha.1", path = "sqlx-sqlite" }
+sqlx-mysql = { version = "=0.9.0", path = "sqlx-mysql", default-features = false }
+sqlx-postgres = { version = "=0.9.0", path = "sqlx-postgres" }
+sqlx-sqlite = { version = "=0.9.0", path = "sqlx-sqlite" }
 
 # Facade crate (for reference from sqlx-cli)
-sqlx = { package = "sqlx-flyer", version = "=0.9.0-alpha.1", path = ".", default-features = false }
+sqlx = { package = "flyer-sqlx", version = "=0.9.0", path = ".", default-features = false }
 
 # Common type integrations shared by multiple driver crates.
 # These are optional unless enabled in a workspace crate.

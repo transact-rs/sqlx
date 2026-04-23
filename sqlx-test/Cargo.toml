@@ -6,7 +6,7 @@ publish = false
 rust-version.workspace = true
 
 [dependencies]
-sqlx = { default-features = false, path = "..", package = "sqlx-flyer" }
+sqlx = { default-features = false, path = "..", package = "flyer-sqlx" }
 env_logger = "0.11"
 dotenvy = "0.15.0"
 anyhow = "1.0.26"

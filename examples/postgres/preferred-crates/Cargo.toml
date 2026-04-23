@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["serde"] }
 
 # New ADD`S
-sqlx = { path = "../../../", package = "sqlx-flyer", features = ["runtime-tokio", "postgres", "bigdecimal", "chrono", "derive", "macros", "migrate", "sqlx-toml"] }
+sqlx = { path = "../../../", package = "flyer-sqlx", features = ["runtime-tokio", "postgres", "bigdecimal", "chrono", "derive", "macros", "migrate", "sqlx-toml"] }
 
 [dependencies.tokio]
 workspace = true

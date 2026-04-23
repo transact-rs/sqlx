@@ -80,7 +80,7 @@ sqlx-core = { workspace = true }
 
 [dev-dependencies]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
-sqlx = { path = "..", package = "sqlx-flyer", features = ["postgres", "derive"] }
+sqlx = { path = "..", package = "flyer-sqlx", features = ["postgres", "derive"] }
 
 #[dependencies]
 

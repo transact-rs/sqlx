@@ -1387,6 +1387,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "flyer-sqlx"
+version = "0.9.0"
+dependencies = [
+ "anyhow",
+ "async-std",
+ "criterion",
+ "dotenvy",
+ "env_logger",
+ "futures-util",
+ "hex",
+ "libsqlite3-sys",
+ "paste",
+ "rand",
+ "rand_xoshiro",
+ "serde",
+ "serde_json",
+ "sqlx-core",
+ "sqlx-macros",
+ "sqlx-mysql",
+ "sqlx-postgres",
+ "sqlx-sqlite",
+ "sqlx-test",
+ "tempfile",
+ "time",
+ "tokio",
+ "trybuild",
+ "url",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3495,7 +3525,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-cli"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3508,18 +3538,18 @@ dependencies = [
  "dialoguer",
  "dotenvy",
  "filetime",
+ "flyer-sqlx",
  "futures-util",
  "glob",
  "openssl",
  "serde_json",
- "sqlx-flyer",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "sqlx-core"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "async-fs",
  "async-global-executor 3.1.0",
@@ -3537,6 +3567,7 @@ dependencies = [
  "crossbeam-queue",
  "either",
  "event-listener 5.4.0",
+ "flyer-sqlx",
  "futures-core",
  "futures-intrusive",
  "futures-io",
@@ -3559,7 +3590,6 @@ dependencies = [
  "sha2",
  "smallvec",
  "smol",
- "sqlx-flyer",
  "thiserror 2.0.17",
  "time",
  "tokio",
@@ -3577,7 +3607,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
 ]
 
@@ -3589,12 +3619,12 @@ dependencies = [
  "argon2 0.4.1",
  "axum",
  "dotenvy",
+ "flyer-sqlx",
  "rand",
  "regex",
  "serde",
  "serde_json",
  "serde_with",
- "sqlx-flyer",
  "thiserror 2.0.17",
  "time",
  "tokio",
@@ -3609,8 +3639,8 @@ name = "sqlx-example-postgres-chat"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "flyer-sqlx",
  "ratatui",
- "sqlx-flyer",
  "tokio",
  "unicode-width 0.1.14",
 ]
@@ -3621,7 +3651,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dotenvy",
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
 ]
 
@@ -3632,9 +3662,9 @@ dependencies = [
  "anyhow",
  "clap",
  "dotenvy",
+ "flyer-sqlx",
  "serde",
  "serde_json",
- "sqlx-flyer",
  "tokio",
 ]
 
@@ -3642,8 +3672,8 @@ dependencies = [
 name = "sqlx-example-postgres-listen"
 version = "0.1.0"
 dependencies = [
+ "flyer-sqlx",
  "futures-util",
- "sqlx-flyer",
  "tokio",
 ]
 
@@ -3655,22 +3685,22 @@ dependencies = [
  "async-trait",
  "clap",
  "dotenvy",
+ "flyer-sqlx",
  "mockall",
- "sqlx-flyer",
  "tokio",
 ]
 
 [[package]]
 name = "sqlx-example-postgres-multi-database"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "color-eyre",
  "dotenvy",
+ "flyer-sqlx",
  "rand",
  "rust_decimal",
  "sqlx-example-postgres-multi-database-accounts",
  "sqlx-example-postgres-multi-database-payments",
- "sqlx-flyer",
  "tokio",
  "tracing-subscriber",
 ]
@@ -3680,10 +3710,10 @@ name = "sqlx-example-postgres-multi-database-accounts"
 version = "0.1.0"
 dependencies = [
  "argon2 0.5.3",
+ "flyer-sqlx",
  "password-hash 0.5.0",
  "rand",
  "serde",
- "sqlx-flyer",
  "thiserror 1.0.69",
  "time",
  "tokio",
@@ -3694,24 +3724,24 @@ dependencies = [
 name = "sqlx-example-postgres-multi-database-payments"
 version = "0.1.0"
 dependencies = [
+ "flyer-sqlx",
  "rust_decimal",
  "sqlx-example-postgres-multi-database-accounts",
- "sqlx-flyer",
  "time",
  "uuid",
 ]
 
 [[package]]
 name = "sqlx-example-postgres-multi-tenant"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "color-eyre",
  "dotenvy",
+ "flyer-sqlx",
  "rand",
  "rust_decimal",
  "sqlx-example-postgres-multi-tenant-accounts",
  "sqlx-example-postgres-multi-tenant-payments",
- "sqlx-flyer",
  "tokio",
  "tracing-subscriber",
 ]
@@ -3721,10 +3751,10 @@ name = "sqlx-example-postgres-multi-tenant-accounts"
 version = "0.1.0"
 dependencies = [
  "argon2 0.5.3",
+ "flyer-sqlx",
  "password-hash 0.5.0",
  "rand",
  "serde",
- "sqlx-flyer",
  "thiserror 1.0.69",
  "time",
  "tokio",
@@ -3735,44 +3765,44 @@ dependencies = [
 name = "sqlx-example-postgres-multi-tenant-payments"
 version = "0.1.0"
 dependencies = [
+ "flyer-sqlx",
  "rust_decimal",
  "sqlx-example-postgres-multi-tenant-accounts",
- "sqlx-flyer",
  "time",
  "uuid",
 ]
 
 [[package]]
 name = "sqlx-example-postgres-preferred-crates"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
  "dotenvy",
+ "flyer-sqlx",
  "serde",
  "sqlx-example-postgres-preferred-crates-uses-rust-decimal",
  "sqlx-example-postgres-preferred-crates-uses-time",
- "sqlx-flyer",
  "tokio",
  "uuid",
 ]
 
 [[package]]
 name = "sqlx-example-postgres-preferred-crates-uses-rust-decimal"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "chrono",
+ "flyer-sqlx",
  "rust_decimal",
- "sqlx-flyer",
  "uuid",
 ]
 
 [[package]]
 name = "sqlx-example-postgres-preferred-crates-uses-time"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
+ "flyer-sqlx",
  "serde",
- "sqlx-flyer",
  "time",
  "uuid",
 ]
@@ -3784,7 +3814,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dotenvy",
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
 ]
 
@@ -3792,7 +3822,7 @@ dependencies = [
 name = "sqlx-example-postgres-transaction"
 version = "0.1.0"
 dependencies = [
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
 ]
 
@@ -3801,7 +3831,7 @@ name = "sqlx-example-sqlite-extension"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
 ]
 
@@ -3810,7 +3840,7 @@ name = "sqlx-example-sqlite-serialize"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
 ]
 
@@ -3820,43 +3850,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "sqlx-flyer",
+ "flyer-sqlx",
  "tokio",
-]
-
-[[package]]
-name = "sqlx-flyer"
-version = "0.9.0-alpha.1"
-dependencies = [
- "anyhow",
- "async-std",
- "criterion",
- "dotenvy",
- "env_logger",
- "futures-util",
- "hex",
- "libsqlite3-sys",
- "paste",
- "rand",
- "rand_xoshiro",
- "serde",
- "serde_json",
- "sqlx-core",
- "sqlx-macros",
- "sqlx-mysql",
- "sqlx-postgres",
- "sqlx-sqlite",
- "sqlx-test",
- "tempfile",
- "time",
- "tokio",
- "trybuild",
- "url",
 ]
 
 [[package]]
 name = "sqlx-macros"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3867,7 +3867,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-macros-core"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "async-global-executor 3.1.0",
  "async-std",
@@ -3894,7 +3894,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-mysql"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "bigdecimal",
  "bitflags 2.9.1",
@@ -3905,6 +3905,7 @@ dependencies = [
  "digest",
  "dotenvy",
  "either",
+ "flyer-sqlx",
  "futures-core",
  "futures-util",
  "generic-array",
@@ -3917,7 +3918,6 @@ dependencies = [
  "sha1",
  "sha2",
  "sqlx-core",
- "sqlx-flyer",
  "thiserror 2.0.17",
  "time",
  "tracing",
@@ -3926,7 +3926,7 @@ dependencies = [
 
 [[package]]
 name = "sqlx-postgres"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "atoi",
  "base64 0.22.1",
@@ -3938,6 +3938,7 @@ dependencies = [
  "crc",
  "dotenvy",
  "etcetera",
+ "flyer-sqlx",
  "futures-channel",
  "futures-core",
  "futures-util",
@@ -3959,7 +3960,6 @@ dependencies = [
  "sha2",
  "smallvec",
  "sqlx-core",
- "sqlx-flyer",
  "stringprep",
  "thiserror 2.0.17",
  "time",
@@ -3970,11 +3970,12 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.9.0-alpha.1"
+version = "0.9.0"
 dependencies = [
  "atoi",
  "chrono",
  "flume",
+ "flyer-sqlx",
  "form_urlencoded",
  "futures-channel",
  "futures-core",
@@ -3987,7 +3988,6 @@ dependencies = [
  "regex",
  "serde",
  "sqlx-core",
- "sqlx-flyer",
  "thiserror 2.0.17",
  "time",
  "tracing",
@@ -4002,7 +4002,7 @@ dependencies = [
  "anyhow",
  "dotenvy",
  "env_logger",
- "sqlx-flyer",
+ "flyer-sqlx",
 ]
 
 [[package]]

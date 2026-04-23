@@ -6,5 +6,5 @@ workspace = "../../../"
 
 [dependencies]
 anyhow = "1.0"
-sqlx = { path = "../../../", package = "sqlx-flyer", features = ["sqlite", "sqlite-deserialize", "runtime-tokio"] }
+sqlx = { path = "../../../", package = "flyer-sqlx", features = ["sqlite", "sqlite-deserialize", "runtime-tokio"] }
 tokio = { version = "1", features = ["rt", "macros"] }
