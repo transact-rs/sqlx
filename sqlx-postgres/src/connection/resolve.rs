@@ -166,10 +166,10 @@ impl PgConnection {
                 // `escape_default()` should produce a valid SQL string literal
                 // https://doc.rust-lang.org/stable/std/primitive.char.html#method.escape_default
                 // https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-STRINGS-ESCAPE
-                format_args!("'{}'", ty.name().escape_default()),
+                format_args!("E'{}'", ty.name().escape_default()),
                 // `to_regtype()` evaluates to `NULL` if the type does not exist,
                 // instead of throwing an exception like `'<name>'::regtype` does.
-                format_args!("to_regtype('{}')::oid", ty.name().escape_default()),
+                format_args!("to_regtype(E'{}')::oid", ty.name().escape_default()),
             );
         }
 
@@ -222,6 +222,14 @@ impl PgConnection {
                 self.inner
                     .cache_type_oid
                     .insert(UStr::new(original_name), ty.oid);
+            }
+
+            if let Some(elem_oid) = ty.typelem {
+                if self.try_oid_to_type(elem_oid).is_some() {
+                    self.inner.cache_elem_type_to_array.insert(elem_oid, ty.oid);
+                } else {
+                    return Ok(ControlFlow::Break(elem_oid));
+                }
             }
 
             return Ok(ControlFlow::Continue(()));
