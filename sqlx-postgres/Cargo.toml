@@ -74,16 +74,13 @@ serde_json = { version = "1.0.85", optional = true, features = ["raw_value"] }
 
 # NEW ADD`S
 sqlx-core = { workspace = true }
-sqlx = { path = "..", package = "sqlx-flyer", features = ["postgres", "derive"] }
 
 #[dependencies.sqlx-core]
 #workspace = true
 
-#[dev-dependencies.sqlx]
+[dev-dependencies]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
-## workspace = true
-#path = ".."
-#features = ["postgres", "derive"]
+sqlx = { path = "..", package = "sqlx-flyer", features = ["postgres", "derive"] }
 
 #[dependencies]
 

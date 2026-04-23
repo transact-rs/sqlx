@@ -93,17 +93,13 @@ regex = { version = "1.5.5", optional = true }
 
 # NEW ADD`S
 sqlx-core = { workspace = true }
-sqlx = { path = "..", package = "sqlx-flyer", default-features = false, features = ["macros", "runtime-tokio", "tls-none", "sqlite"] }
 
 #[dependencies.sqlx-core]
 #workspace = true
 
-#[dev-dependencies.sqlx]
-## FIXME: https://github.com/rust-lang/cargo/issues/15622
-## workspace = true
-#path = ".."
-#default-features = false
-#features = ["macros", "runtime-tokio", "tls-none", "sqlite"]
+[dev-dependencies]
+# FIXME: https://github.com/rust-lang/cargo/issues/15622
+sqlx = { path = "..", package = "sqlx-flyer", default-features = false, features = ["macros", "runtime-tokio", "tls-none", "sqlite"] }
 
 [lints]
 workspace = true
