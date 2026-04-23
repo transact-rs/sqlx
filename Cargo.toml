@@ -124,7 +124,7 @@ _sqlite = []
 any = ["sqlx-core/any", "sqlx-mysql?/any", "sqlx-postgres?/any", "sqlx-sqlite?/any"]
 postgres = ["sqlx-postgres", "sqlx-macros?/postgres"]
 mysql = ["sqlx-mysql", "sqlx-macros?/mysql"]
-mysql-rsa = ["mysql", "sqlx-mysql/rsa", "sqlx-macros?/mysql-rsa"]
+#mysql-rsa = ["mysql", "sqlx-mysql/rsa", "sqlx-macros?/mysql-rsa"]
 sqlite = ["sqlite-bundled", "sqlite-deserialize", "sqlite-load-extension", "sqlite-unlock-notify"]
 
 # SQLite base features

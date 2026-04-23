@@ -6,6 +6,7 @@ workspace = "../../../"
 
 [dependencies]
 anyhow = "1.0"
-sqlx = { path = "../../../", package = "sqlx-flyer", features = [ "mysql", "mysql-rsa", "runtime-tokio", "tls-native-tls" ] }
+sqlx = { path = "../../../", package = "sqlx-flyer", features = [ "mysql", "runtime-tokio", "tls-native-tls" ] }
+#sqlx = { path = "../../../", package = "sqlx-flyer", features = [ "mysql", "mysql-rsa", "runtime-tokio", "tls-native-tls" ] }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1.20.0", features = ["rt", "macros"]}
