@@ -511,15 +511,15 @@ impl ColumnResolver {
             write!(
                 self.query,
                 "SELECT\n\
-                    table_oid,\n\
-                    table_oid::regclass::text table_name,\n\
+                    attrelid table_oid,\n\
+                    attrelid::regclass::text table_name,\n\
                     array_agg((attnum, attname)) columns\n\
                 FROM (VALUES ({}, {attribute_no})",
                 table_oid.0,
             )
             .expect("writing to a `String` should be infallible")
         } else {
-            write!(self.query, "({}, {attribute_no})", table_oid.0)
+            write!(self.query, ", ({}, {attribute_no})", table_oid.0)
                 .expect("writing to a `String` should be infallible")
         }
     }
@@ -531,10 +531,9 @@ impl ColumnResolver {
 
         let mut query = mem::take(&mut self.query);
         query.push_str(
-            ") lookup(table_oid, attribute_no)\n\
+            ") lookup(table_oid, attribute_num)\n\
             INNER JOIN pg_catalog.pg_attribute ON lookup.table_oid = attrelid AND lookup.attribute_num = attnum\n\
-            GROUP BY attrelid\n\
-            ORDER BY attrelid, attnum"
+            GROUP BY attrelid"
         );
 
         let rows = raw_sql(AssertSqlSafe(query)).fetch_all(&mut *conn).await?;
