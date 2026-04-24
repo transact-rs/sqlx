@@ -162,6 +162,14 @@ impl PgConnection {
                 continue;
             }
 
+            if let PgType::DeclareArrayOf(array_of) = &ty.0 {
+                // Eagerly bring the element type into cache for array types declared by-name
+                resolver.push_type(
+                    format_args!("E'{}'", array_of.elem_name),
+                    format_args!("to_regtype(E'{}')", array_of.elem_name),
+                );
+            }
+
             resolver.push_type(
                 // `escape_default()` should produce a valid SQL string literal
                 // https://doc.rust-lang.org/stable/std/primitive.char.html#method.escape_default
@@ -354,20 +362,21 @@ impl TypeResolver {
         if self.query.is_empty() {
             write!(
                 &mut self.query,
+                // Postgres 13 would return `0` instead of `NULL` for `typelem`, `typbasetype`
                 "SELECT pg_type.oid,\n\
                      pg_type.oid::regtype::text pretty_name,\n\
                      typname catalog_name,\n\
                      original_name,\n\
                      typtype,\n\
                      typcategory,\n\
-                     typelem,\n\
-                     typbasetype,\n\
+                     NULLIF(typelem, 0::oid) typelem,\n\
+                     NULLIF(typbasetype, 0::oid) typbasetype,\n\
                      rngsubtype,\n\
                      COALESCE(\
                         (SELECT array_agg(enumlabel) FROM (SELECT *\n\
                         FROM pg_catalog.pg_enum\n\
                         WHERE enumtypid = pg_type.oid\n\
-                        ORDER BY enumsortorder)),\n\
+                        ORDER BY enumsortorder) labels),\n\
                         '{{}}') enum_labels,\n\
                      COALESCE(\n\
                         (SELECT array_agg((attname, atttypid)) FROM (SELECT *\n\
@@ -375,7 +384,7 @@ impl TypeResolver {
                         WHERE attrelid = pg_type.typrelid\n\
                             AND NOT attisdropped\n\
                             AND attnum > 0\n\
-                        ORDER BY attnum)),\n\
+                        ORDER BY attnum) attributes),\n\
                         '{{}}') record_attributes\n\
                  FROM (SELECT DISTINCT ON(lookup_oid) original_name, lookup_oid\n\
                     FROM (VALUES ({original_name}, {oid_expr})"
@@ -409,7 +418,7 @@ impl TypeResolver {
                  LEFT JOIN pg_catalog.pg_range ON pg_type.oid = pg_range.rngtypid",
             );
 
-            tracing::trace!(?query, "fill_cache");
+            tracing::trace!(query, "fill_cache");
 
             let types = raw_sql(AssertSqlSafe(query)).fetch_all(&mut *conn).await?;
 
@@ -518,10 +527,11 @@ impl ColumnResolver {
         if self.query.is_empty() {
             write!(
                 self.query,
+                // Postgres 13 does not accept `(attnum,attname)` without `ROW`
                 "SELECT\n\
                     attrelid table_oid,\n\
                     attrelid::regclass::text table_name,\n\
-                    array_agg((attnum, attname)) columns\n\
+                    array_agg(ROW(attnum, attname)) AS columns\n\
                 FROM (VALUES ({}, {attribute_no})",
                 table_oid.0,
             )
