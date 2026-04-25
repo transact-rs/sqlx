@@ -118,7 +118,21 @@ impl MySqlConnection {
             let mut columns = Arc::new(Vec::new());
 
             let (mut column_names, format, mut needs_metadata) = if let Some(arguments) = arguments {
-                if persistent && self.inner.cache_statement.is_enabled() {
+                if !self.inner.cache_statement.is_enabled() {
+                    // Vendored patch: when the prepared-statement cache is
+                    // disabled, skip COM_STMT_PREPARE entirely. Interpolate
+                    // bind values into the SQL and send a plain COM_QUERY.
+                    let no_backslash_escape = self.inner.status_flags.contains(
+                        Status::SERVER_STATUS_NO_BACKSLASH_ESCAPES,
+                    );
+                    let interpolated = super::text_query::interpolate(
+                        sql,
+                        &arguments,
+                        no_backslash_escape,
+                    )?;
+                    self.inner.stream.send_packet(Query(&interpolated)).await?;
+                    (Arc::default(), MySqlValueFormat::Text, true)
+                } else if persistent && self.inner.cache_statement.is_enabled() {
                     let (id, metadata) = self
                         .get_or_prepare_statement(sql)
                         .await?;

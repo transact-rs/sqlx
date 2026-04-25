@@ -19,6 +19,7 @@ mod auth;
 mod establish;
 mod executor;
 mod stream;
+mod text_query;
 mod tls;
 
 const MAX_PACKET_SIZE: u32 = 1024;

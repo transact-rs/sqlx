@@ -49,6 +49,14 @@ rust_decimal = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
+# Vendored patch: client-side parameter interpolation when
+# `statement_cache_capacity == 0`. We use only `mysql_common::Value::as_sql`
+# for canonical MySQL-client quoting/escaping. mysql_common's default
+# features select a flate2 backend (required for it to compile); we unify
+# flate2 to its pure-Rust `rust_backend` here so we don't pull in libz-sys.
+mysql_common = { version = "0.37", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
 # Misc
 atoi = "2.0"
 base64 = { version = "0.22.0", default-features = false, features = ["std"] }
