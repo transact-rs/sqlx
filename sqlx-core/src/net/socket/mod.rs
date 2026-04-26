@@ -1,7 +1,6 @@
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::io;
 use std::path::Path;
-use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
 pub use buffered::{BufferedSocket, WriteBuffer};
@@ -27,55 +26,18 @@ pub trait Socket: Send + Sync + Unpin + 'static {
     }
 
     fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>>;
-
-    fn read<'a, B: ReadBuf>(&'a mut self, buf: &'a mut B) -> Read<'a, Self, B>
-    where
-        Self: Sized,
-    {
-        Read { socket: self, buf }
-    }
-
-    fn write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, Self>
-    where
-        Self: Sized,
-    {
-        Write { socket: self, buf }
-    }
-
-    fn flush(&mut self) -> Flush<'_, Self>
-    where
-        Self: Sized,
-    {
-        Flush { socket: self }
-    }
-
-    fn shutdown(&mut self) -> Shutdown<'_, Self>
-    where
-        Self: Sized,
-    {
-        Shutdown { socket: self }
-    }
 }
 
-pub struct Read<'a, S: ?Sized, B> {
-    socket: &'a mut S,
-    buf: &'a mut B,
-}
-
-impl<S: ?Sized, B> Future for Read<'_, S, B>
-where
-    S: Socket,
-    B: ReadBuf,
-{
-    type Output = io::Result<usize>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
-
-        while this.buf.has_remaining_mut() {
-            match this.socket.try_read(&mut *this.buf) {
+pub trait SocketExt: Socket {
+    fn poll_read(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &mut dyn ReadBuf,
+    ) -> Poll<Result<usize, io::Error>> {
+        while buf.has_remaining_mut() {
+            match self.try_read(buf) {
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    ready!(this.socket.poll_read_ready(cx))?;
+                    ready!(self.poll_read_ready(cx))?;
                 }
                 ready => return Poll::Ready(ready),
             }
@@ -83,26 +45,12 @@ where
 
         Poll::Ready(Ok(0))
     }
-}
 
-pub struct Write<'a, S: ?Sized> {
-    socket: &'a mut S,
-    buf: &'a [u8],
-}
-
-impl<S: ?Sized> Future for Write<'_, S>
-where
-    S: Socket,
-{
-    type Output = io::Result<usize>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
-
-        while !this.buf.is_empty() {
-            match this.socket.try_write(this.buf) {
+    fn poll_write(&mut self, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, io::Error>> {
+        while !buf.is_empty() {
+            match self.try_write(buf) {
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    ready!(this.socket.poll_write_ready(cx))?;
+                    ready!(self.poll_write_ready(cx))?;
                 }
                 ready => return Poll::Ready(ready),
             }
@@ -110,34 +58,29 @@ where
 
         Poll::Ready(Ok(0))
     }
-}
 
-pub struct Flush<'a, S: ?Sized> {
-    socket: &'a mut S,
-}
+    #[inline(always)]
+    fn shutdown(&mut self) -> impl Future<Output = io::Result<()>> {
+        poll_fn(|cx| self.poll_shutdown(cx))
+    }
 
-impl<S: Socket + ?Sized> Future for Flush<'_, S> {
-    type Output = io::Result<()>;
+    #[inline(always)]
+    fn flush(&mut self) -> impl Future<Output = io::Result<()>> {
+        poll_fn(|cx| self.poll_flush(cx))
+    }
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.socket.poll_flush(cx)
+    #[inline(always)]
+    fn write(&mut self, buf: &[u8]) -> impl Future<Output = io::Result<usize>> {
+        poll_fn(|cx| self.poll_write(cx, buf))
+    }
+
+    #[inline(always)]
+    fn read(&mut self, buf: &mut impl ReadBuf) -> impl Future<Output = io::Result<usize>> {
+        poll_fn(|cx| self.poll_read(cx, buf))
     }
 }
 
-pub struct Shutdown<'a, S: ?Sized> {
-    socket: &'a mut S,
-}
-
-impl<S: ?Sized> Future for Shutdown<'_, S>
-where
-    S: Socket,
-{
-    type Output = io::Result<()>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.socket.poll_shutdown(cx)
-    }
-}
+impl<S: Socket> SocketExt for S {}
 
 pub trait WithSocket {
     type Output;

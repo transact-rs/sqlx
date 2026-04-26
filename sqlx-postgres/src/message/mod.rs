@@ -87,7 +87,7 @@ pub enum FrontendMessageFormat {
     Terminate = b'X',
 }
 
-#[derive(Debug, PartialOrd, PartialEq)]
+#[derive(Debug, PartialOrd, PartialEq, Clone)]
 #[repr(u8)]
 pub enum BackendMessageFormat {
     Authentication,
@@ -113,7 +113,7 @@ pub enum BackendMessageFormat {
     RowDescription,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ReceivedMessage {
     pub format: BackendMessageFormat,
     pub contents: Bytes,

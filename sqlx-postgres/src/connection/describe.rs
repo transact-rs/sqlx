@@ -11,11 +11,13 @@ use sqlx_core::sql_str::AssertSqlSafe;
 impl PgConnection {
     /// Check whether EXPLAIN statements are supported by the current connection
     fn is_explain_available(&self) -> bool {
-        let parameter_statuses = &self.inner.stream.parameter_statuses;
-        let is_cockroachdb = parameter_statuses.contains_key("crdb_version");
-        let is_materialize = parameter_statuses.contains_key("mz_version");
-        let is_questdb = parameter_statuses.contains_key("questdb_version");
-        !is_cockroachdb && !is_materialize && !is_questdb
+        self.inner.shared.with_lock(|shared| {
+            let parameter_statuses = &shared.parameter_statuses;
+            let is_cockroachdb = parameter_statuses.contains_key("crdb_version");
+            let is_materialize = parameter_statuses.contains_key("mz_version");
+            let is_questdb = parameter_statuses.contains_key("questdb_version");
+            !is_cockroachdb && !is_materialize && !is_questdb
+        })
     }
 
     pub(crate) async fn get_nullable_for_columns(

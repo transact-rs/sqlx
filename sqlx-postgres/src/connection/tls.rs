@@ -1,6 +1,6 @@
 use crate::error::Error;
 use crate::net::tls::{self, TlsConfig};
-use crate::net::{Socket, SocketIntoBox, WithSocket};
+use crate::net::{Socket, SocketExt, SocketIntoBox, WithSocket};
 
 use crate::message::SslRequest;
 use crate::{PgConnectOptions, PgSslMode};

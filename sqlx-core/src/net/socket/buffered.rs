@@ -1,10 +1,13 @@
 use crate::error::Error;
-use crate::net::Socket;
+use crate::net::{Socket, SocketExt};
 use bytes::BytesMut;
+use futures_util::Sink;
 use std::ops::ControlFlow;
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
 use std::{cmp, io};
 
-use crate::io::{AsyncRead, AsyncReadExt, ProtocolDecode, ProtocolEncode};
+use crate::io::{read_from, AsyncRead, ProtocolDecode, ProtocolEncode};
 
 // Tokio, async-std, and std all use this as the default capacity for their buffered I/O.
 const DEFAULT_BUF_SIZE: usize = 8192;
@@ -13,6 +16,7 @@ pub struct BufferedSocket<S> {
     socket: S,
     write_buf: WriteBuffer,
     read_buf: ReadBuffer,
+    wants_bytes: usize,
 }
 
 pub struct WriteBuffer {
@@ -42,6 +46,7 @@ impl<S: Socket> BufferedSocket<S> {
                 read: BytesMut::new(),
                 available: BytesMut::with_capacity(DEFAULT_BUF_SIZE),
             },
+            wants_bytes: 0,
         }
     }
 
@@ -54,6 +59,25 @@ impl<S: Socket> BufferedSocket<S> {
             })
         })
         .await
+    }
+
+    pub fn poll_try_read<F, R>(
+        &mut self,
+        cx: &mut Context<'_>,
+        mut try_read: F,
+    ) -> Poll<Result<R, Error>>
+    where
+        F: FnMut(&mut BytesMut) -> Result<ControlFlow<R, usize>, Error>,
+    {
+        loop {
+            // Ensure we have enough bytes, only read if we want bytes.
+            ready!(self.poll_handle_read(cx)?);
+
+            match try_read(&mut self.read_buf.read)? {
+                ControlFlow::Continue(read_len) => self.wants_bytes = read_len,
+                ControlFlow::Break(ret) => return Poll::Ready(Ok(ret)),
+            };
+        }
     }
 
     /// Retryable read operation.
@@ -125,8 +149,8 @@ impl<S: Socket> BufferedSocket<S> {
     pub async fn flush(&mut self) -> io::Result<()> {
         while !self.write_buf.is_empty() {
             let written = self.socket.write(self.write_buf.get()).await?;
+            // Consume does the sanity check.
             self.write_buf.consume(written);
-            self.write_buf.sanity_check();
         }
 
         self.socket.flush().await?;
@@ -154,7 +178,37 @@ impl<S: Socket> BufferedSocket<S> {
             socket: Box::new(self.socket),
             write_buf: self.write_buf,
             read_buf: self.read_buf,
+            wants_bytes: self.wants_bytes,
         }
+    }
+
+    fn poll_handle_read(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        // Because of how `BytesMut` works, we should only be shifting capacity back and forth
+        // between `read` and `available` unless we have to read an oversize message.
+
+        while self.read_buf.len() < self.wants_bytes {
+            self.read_buf
+                .reserve(self.wants_bytes - self.read_buf.len());
+
+            let read = ready!(self.socket.poll_read(cx, &mut self.read_buf.available)?);
+
+            if read == 0 {
+                return Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    format!(
+                        "expected to read {} bytes, got {} bytes at EOF",
+                        self.wants_bytes,
+                        self.read_buf.len()
+                    ),
+                )));
+            }
+
+            self.read_buf.advance(read);
+        }
+
+        // we've read at least enough for `wants_bytes`, so we don't want more.
+        self.wants_bytes = 0;
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -206,14 +260,8 @@ impl WriteBuffer {
     /// Read into the buffer from `source`, returning the number of bytes read.
     ///
     /// The buffer is automatically advanced by the number of bytes read.
-    pub async fn read_from(&mut self, mut source: impl AsyncRead + Unpin) -> io::Result<usize> {
-        let read = match () {
-            // Tokio lets us read into the buffer without zeroing first
-            #[cfg(feature = "_rt-tokio")]
-            _ => source.read_buf(self.buf_mut()).await?,
-            #[cfg(not(feature = "_rt-tokio"))]
-            _ => source.read(self.init_remaining_mut()).await?,
-        };
+    pub async fn read_from(&mut self, source: impl AsyncRead + Unpin) -> io::Result<usize> {
+        let read = read_from(source, self.buf_mut()).await?;
 
         if read > 0 {
             self.advance(read);
@@ -325,5 +373,42 @@ impl ReadBuffer {
             // We should be warning the user not to call this often.
             self.available = BytesMut::with_capacity(DEFAULT_BUF_SIZE);
         }
+    }
+
+    fn len(&self) -> usize {
+        self.read.len()
+    }
+}
+
+impl<S: Socket> Sink<&[u8]> for BufferedSocket<S> {
+    type Error = crate::Error;
+
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<crate::Result<()>> {
+        if self.write_buf.bytes_written >= DEFAULT_BUF_SIZE {
+            self.poll_flush(cx)
+        } else {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: &[u8]) -> crate::Result<()> {
+        self.write_buffer_mut().put_slice(item);
+        Ok(())
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<crate::Result<()>> {
+        let this = &mut *self;
+
+        while !this.write_buf.is_empty() {
+            let written = ready!(this.socket.poll_write(cx, this.write_buf.get())?);
+            // Consume does the sanity check.
+            this.write_buf.consume(written);
+        }
+        this.socket.poll_flush(cx).map_err(Into::into)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<crate::Result<()>> {
+        ready!(self.as_mut().poll_flush(cx))?;
+        self.socket.poll_shutdown(cx).map_err(Into::into)
     }
 }

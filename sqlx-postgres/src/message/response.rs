@@ -1,6 +1,7 @@
 use std::ops::Range;
 use std::str::from_utf8;
 
+use log::Level;
 use memchr::memchr;
 
 use sqlx_core::bytes::Bytes;
@@ -89,6 +90,33 @@ impl Notice {
             .filter(|(field, _)| *field == ty)
             .map(|(_, range)| &self.storage[range])
             .next()
+    }
+
+    pub(crate) fn emit_notice(&self) {
+        let (log_level, tracing_level) = match self.severity() {
+            PgSeverity::Fatal | PgSeverity::Panic | PgSeverity::Error => {
+                (Level::Error, tracing::Level::ERROR)
+            }
+            PgSeverity::Warning => (Level::Warn, tracing::Level::WARN),
+            PgSeverity::Notice => (Level::Info, tracing::Level::INFO),
+            PgSeverity::Debug => (Level::Debug, tracing::Level::DEBUG),
+            PgSeverity::Info | PgSeverity::Log => (Level::Trace, tracing::Level::TRACE),
+        };
+
+        let log_is_enabled = log::log_enabled!(
+            target: "sqlx::postgres::notice",
+            log_level
+        ) || sqlx_core::private_tracing_dynamic_enabled!(
+            target: "sqlx::postgres::notice",
+            tracing_level
+        );
+        if log_is_enabled {
+            sqlx_core::private_tracing_dynamic_event!(
+                target: "sqlx::postgres::notice",
+                tracing_level,
+                message = self.message()
+            );
+        }
     }
 }
 

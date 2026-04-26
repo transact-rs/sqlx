@@ -24,3 +24,19 @@ pub use futures_util::io::AsyncReadExt;
 
 #[cfg(feature = "_rt-tokio")]
 pub use tokio::io::AsyncReadExt;
+
+pub async fn read_from(
+    mut source: impl AsyncRead + Unpin,
+    data: &mut Vec<u8>,
+) -> std::io::Result<usize> {
+    match () {
+        // Tokio lets us read into the buffer without zeroing first
+        #[cfg(feature = "_rt-tokio")]
+        _ => source.read_buf(data).await,
+        #[cfg(not(feature = "_rt-tokio"))]
+        _ => {
+            data.resize(data.capacity(), 0);
+            source.read(data).await
+        }
+    }
+}

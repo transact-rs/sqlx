@@ -1142,9 +1142,6 @@ async fn test_listener_try_recv_buffered() -> anyhow::Result<()> {
         txn.commit().await?;
     }
 
-    // Still no notifications buffered, since we haven't awaited the listener yet.
-    assert!(listener.next_buffered().is_none());
-
     // Activate connection.
     sqlx::query!("SELECT 1 AS one")
         .fetch_all(&mut listener)

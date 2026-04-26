@@ -1,4 +1,3 @@
-use crate::connection::stream::PgStream;
 use crate::error::Error;
 use crate::message::{Authentication, AuthenticationSasl, SaslInitialResponse, SaslResponse};
 use crate::rt;
@@ -10,6 +9,9 @@ use stringprep::saslprep;
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 
+use super::pipe::Pipe;
+use super::PgConnection;
+
 const GS2_HEADER: &str = "n,,";
 const CHANNEL_ATTR: &str = "c";
 const USERNAME_ATTR: &str = "n";
@@ -17,7 +19,8 @@ const CLIENT_PROOF_ATTR: &str = "p";
 const NONCE_ATTR: &str = "r";
 
 pub(crate) async fn authenticate(
-    stream: &mut PgStream,
+    conn: &PgConnection,
+    pipe: &mut Pipe,
     options: &PgConnectOptions,
     data: AuthenticationSasl,
 ) -> Result<(), Error> {
@@ -71,14 +74,12 @@ pub(crate) async fn authenticate(
 
     let client_first_message = format!("{GS2_HEADER}{client_first_message_bare}");
 
-    stream
-        .send(SaslInitialResponse {
-            response: &client_first_message,
-            plus: false,
-        })
-        .await?;
+    conn.pipe_and_forget(SaslInitialResponse {
+        response: &client_first_message,
+        plus: false,
+    })?;
 
-    let cont = match stream.recv_expect().await? {
+    let cont = match pipe.recv_expect().await? {
         Authentication::SaslContinue(data) => data,
 
         auth => {
@@ -154,9 +155,9 @@ pub(crate) async fn authenticate(
     let mut client_final_message = format!("{client_final_message_wo_proof},{CLIENT_PROOF_ATTR}=");
     BASE64_STANDARD.encode_string(client_proof, &mut client_final_message);
 
-    stream.send(SaslResponse(&client_final_message)).await?;
+    conn.pipe_and_forget(SaslResponse(&client_final_message))?;
 
-    let data = match stream.recv_expect().await? {
+    let data = match pipe.recv_expect().await? {
         Authentication::SaslFinal(data) => data,
 
         auth => {
