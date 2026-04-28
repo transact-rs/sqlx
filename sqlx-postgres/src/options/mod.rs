@@ -228,7 +228,7 @@ impl PgConnectOptions {
     }
 
     /// Enables the use of the `SSLKEYLOGFILE`` environment variable to export SSL session keys.
-    /// 
+    ///
     /// Only works with the `rustls` SSL backend
     pub fn ssl_enable_keylog(mut self, enable: bool) -> Self {
         self.ssl_enable_keylog = enable;
