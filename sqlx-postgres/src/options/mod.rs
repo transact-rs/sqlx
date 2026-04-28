@@ -25,6 +25,7 @@ pub struct PgConnectOptions {
     pub(crate) ssl_root_cert: Option<CertificateInput>,
     pub(crate) ssl_client_cert: Option<CertificateInput>,
     pub(crate) ssl_client_key: Option<CertificateInput>,
+    pub(crate) ssl_enable_keylog: bool,
     pub(crate) statement_cache_capacity: usize,
     pub(crate) application_name: Option<String>,
     pub(crate) log_settings: LogSettings,
@@ -92,6 +93,7 @@ impl PgConnectOptions {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or_default(),
+            ssl_enable_keylog: false,
             statement_cache_capacity: 100,
             application_name: var("PGAPPNAME").ok(),
             extra_float_digits: Some("2".into()),
@@ -222,6 +224,14 @@ impl PgConnectOptions {
     /// ```
     pub fn ssl_mode(mut self, mode: PgSslMode) -> Self {
         self.ssl_mode = mode;
+        self
+    }
+
+    /// Enables the use of the `SSLKEYLOGFILE`` environment variable to export SSL session keys.
+    /// 
+    /// Only works with the `rustls` SSL backend
+    pub fn ssl_enable_keylog(mut self, enable: bool) -> Self {
+        self.ssl_enable_keylog = enable;
         self
     }
 
