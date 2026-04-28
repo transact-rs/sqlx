@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # Primary crates
-axum = { version = "0.5.13", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 sqlx = { path = "../../../", features = [ "runtime-tokio", "tls-rustls-ring", "postgres", "time", "uuid" ] }
 tokio = { version = "1.20.1", features = ["rt-multi-thread", "macros"] }
 
@@ -28,5 +28,6 @@ thiserror = "2.0.0"
 tracing = "0.1.35"
 
 [dev-dependencies]
+http-body-util = "0.1"
 serde_json = "1.0.82"
-tower = "0.4.13"
+tower = "0.5"
