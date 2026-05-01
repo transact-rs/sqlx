@@ -88,7 +88,7 @@ tracing = { version = "0.1.37", features = ["log"] }
 
 thiserror.workspace = true
 
-serde = { version = "1.0.218", features = ["derive"], optional = true }
+serde = { version = "1.0.219", features = ["derive"], optional = true }
 regex = { version = "1.6.0", optional = true }
 
 [dependencies.sqlx-core]

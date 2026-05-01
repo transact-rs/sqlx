@@ -5,6 +5,6 @@ edition = "2024"
 workspace = "../../../"
 
 [dependencies]
-anyhow = "1.0"
+anyhow = "1.0.58"
 sqlx = { path = "../../../", features = ["sqlite", "sqlite-deserialize", "runtime-tokio"] }
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1.25.0", features = ["rt", "macros"] }

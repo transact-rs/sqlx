@@ -57,11 +57,11 @@ base64 = { version = "0.22.0", default-features = false, features = ["std"] }
 bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
 hex = "0.4.3"
-itoa = "1.0.1"
+itoa = "1.0.5"
 log = "0.4.18"
 memchr = { version = "2.5.0", default-features = false }
 num-bigint = { version = "0.4.3", optional = true }
-smallvec = { version = "1.10.0" }
+smallvec = { version = "1.13.1" }
 stringprep = "0.1.2"
 tracing = { version = "0.1.37", features = ["log"] }
 whoami = { version = "2.0.2", default-features = false }
@@ -69,8 +69,8 @@ whoami = { version = "2.0.2", default-features = false }
 dotenvy.workspace = true
 thiserror.workspace = true
 
-serde = { version = "1.0.218", optional = true, features = ["derive"] }
-serde_json = { version = "1.0.85", optional = true, features = ["raw_value"] }
+serde = { version = "1.0.219", optional = true, features = ["derive"] }
+serde_json = { version = "1.0.142", optional = true, features = ["raw_value"] }
 
 [dependencies.sqlx-core]
 workspace = true

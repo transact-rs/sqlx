@@ -7,8 +7,8 @@ workspace = "../../../"
 [dependencies]
 anyhow = "1.0.58"
 dotenvy = "0.15.7"
-serde = { version = "1.0.218", features = ["derive"] }
-serde_json = "1.0.85"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
 sqlx = { path = "../../../", features = [ "runtime-tokio", "postgres", "json" ] }
-clap = { version = "4.3.10", features = ["derive"] }
-tokio = { version = "1.20.1", features = ["rt", "macros"]}
+clap = { version = "4.4.7", features = ["derive"] }
+tokio = { version = "1.25.0", features = ["rt", "macros"]}

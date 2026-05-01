@@ -208,7 +208,7 @@ version = "2.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1.20.1"
+version = "1.25.0"
 features = ["time", "net", "sync", "fs", "io-util", "rt"]
 default-features = false
 
@@ -226,13 +226,13 @@ time_ = { version = "0.3.37", package = "time" }
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
 env_logger = "0.11"
 async-std = { workspace = true, features = ["attributes"] }
-tokio = { version = "1.20.1", features = ["full"] }
+tokio = { version = "1.25.0", features = ["full"] }
 dotenvy = "0.15.7"
 trybuild = "1.0.53"
 sqlx-test = { path = "./sqlx-test" }
 paste = "1.0.6"
-serde = { version = "1.0.218", features = ["derive"] }
-serde_json = "1.0.85"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
 url = "2.2.2"
 rand = "0.8.5"
 rand_xoshiro = "0.6.0"

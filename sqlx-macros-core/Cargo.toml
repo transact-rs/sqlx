@@ -73,8 +73,8 @@ hex = { version = "0.4.3" }
 heck = { version = "0.5" }
 either = "1.6.1"
 proc-macro2 = { version = "1.0.83", default-features = false }
-serde = { version = "1.0.218", features = ["derive"] }
-serde_json = { version = "1.0.85" }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = { version = "1.0.142" }
 sha2 = { version = "0.10.0" }
 syn = { version = "2.0.87", default-features = false, features = ["full", "derive", "parsing", "printing", "clone-impls"] }
 quote = { version = "1.0.35", default-features = false }

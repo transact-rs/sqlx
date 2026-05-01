@@ -9,7 +9,7 @@ categories.workspace = true
 authors.workspace = true
 
 [dependencies]
-serde = "1.0.218"
+serde = "1.0.219"
 time = "0.3.37"
 uuid = "1.12.1"
 

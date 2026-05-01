@@ -49,7 +49,7 @@ uuid = { workspace = true, optional = true }
 # Misc
 bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
-bytes = "1.1.0"
+bytes = "1.2.0"
 either = "1.6.1"
 generic-array = { version = "0.14.4", default-features = false }
 log = "0.4.18"
@@ -59,7 +59,7 @@ tracing = { version = "0.1.37", features = ["log"] }
 dotenvy.workspace = true
 thiserror.workspace = true
 
-serde = { version = "1.0.218", optional = true }
+serde = { version = "1.0.219", optional = true }
 
 [dev-dependencies]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
