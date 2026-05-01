@@ -248,14 +248,7 @@ pub fn resolve_blocking_with_config(
         ));
     }
 
-    // Ensure deterministic order: version ascending, then up before down when versions match.
-    migrations.sort_by(|(a, _), (b, _)| {
-        a.version.cmp(&b.version).then_with(|| {
-            a.migration_type
-                .direction_order()
-                .cmp(&b.migration_type.direction_order())
-        })
-    });
+    migrations.sort();
 
     Ok(migrations)
 }

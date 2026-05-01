@@ -1,7 +1,7 @@
 use super::Migrator;
 
 /// Migration Type represents the type of migration
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MigrationType {
     /// Simple migration are single file migrations with no up / down queries
     Simple,
@@ -77,8 +77,9 @@ impl MigrationType {
     /// Ordering helper to sort ups before downs when versions tie.
     pub fn direction_order(&self) -> u8 {
         match self {
-            MigrationType::ReversibleDown => 1,
-            MigrationType::Simple | MigrationType::ReversibleUp => 0,
+            MigrationType::Simple => 0,
+            MigrationType::ReversibleUp => 1,
+            MigrationType::ReversibleDown => 2,
         }
     }
 

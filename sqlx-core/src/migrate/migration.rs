@@ -1,5 +1,6 @@
 use sha2::{Digest, Sha384};
 use std::borrow::Cow;
+use std::cmp::Ordering;
 
 use crate::sql_str::SqlStr;
 
@@ -13,6 +14,28 @@ pub struct Migration {
     pub sql: SqlStr,
     pub checksum: Cow<'static, [u8]>,
     pub no_tx: bool,
+}
+
+impl PartialEq for Migration {
+    fn eq(&self, other: &Self) -> bool {
+        self.version == other.version && self.migration_type == other.migration_type
+    }
+}
+
+impl Eq for Migration {}
+
+impl PartialOrd for Migration {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Migration {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.version
+            .cmp(&other.version)
+            .then_with(|| self.migration_type.cmp(&other.migration_type))
+    }
 }
 
 impl Migration {
