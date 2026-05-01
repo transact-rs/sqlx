@@ -10,6 +10,7 @@ sqlx = { default-features = false, path = ".." }
 env_logger = "0.11"
 dotenvy = "0.15.0"
 anyhow = "1.0.26"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 [lints]
 workspace = true

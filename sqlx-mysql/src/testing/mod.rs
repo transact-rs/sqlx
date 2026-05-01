@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -108,27 +107,10 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
         .max_connections(20)
         // Immediately close master connections. Tokio's I/O streams don't like hopping runtimes.
         .after_release(|_conn, _| Box::pin(async move { Ok(false) }))
-        .connect_lazy_with(master_opts);
+        .connect_lazy_with(master_opts.clone());
 
-    let master_pool = match once_lock_try_insert_polyfill(&MASTER_POOL, pool) {
-        Ok(inserted) => inserted,
-        Err((existing, pool)) => {
-            // Sanity checks.
-            assert_eq!(
-                existing.connect_options().host,
-                pool.connect_options().host,
-                "DATABASE_URL changed at runtime, host differs"
-            );
-
-            assert_eq!(
-                existing.connect_options().database,
-                pool.connect_options().database,
-                "DATABASE_URL changed at runtime, database differs"
-            );
-
-            existing
-        }
-    };
+    let master_pool = once_lock_try_insert_polyfill(&MASTER_POOL, pool)
+        .unwrap_or_else(|(existing, _pool)| existing);
 
     let mut conn = master_pool.acquire().await?;
 
@@ -144,7 +126,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
             -- BLOB/TEXT columns can only be used as index keys with a prefix length:
             -- https://dev.mysql.com/doc/refman/8.4/en/column-indexes.html#column-indexes-prefix
             primary key(db_name(63))
-        );        
+        );
     "#,
     )
     .await?;
@@ -170,13 +152,8 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
             // or else they're likely doing too much in one test.
             .max_connections(5)
             // Close connections ASAP if left in the idle queue.
-            .idle_timeout(Some(Duration::from_secs(1)))
-            .parent(master_pool.clone()),
-        connect_opts: master_pool
-            .connect_options()
-            .deref()
-            .clone()
-            .database(&db_name),
+            .idle_timeout(Some(Duration::from_secs(1))),
+        connect_opts: master_opts.database(&db_name),
         db_name,
     })
 }

@@ -66,6 +66,7 @@ pub struct TestArgs {
     pub test_path: &'static str,
     pub migrator: Option<&'static Migrator>,
     pub fixtures: &'static [TestFixture],
+    pub max_connections: usize,
 }
 
 pub trait TestFn {
@@ -158,6 +159,10 @@ impl TestArgs {
             test_path,
             migrator: None,
             fixtures: &[],
+            // Don't allow a single test to take all the connections.
+            // Most tests shouldn't require more than 4 connections concurrently,
+            // or else they're likely doing too much in one test.
+            max_connections: 4,
         }
     }
 
@@ -167,6 +172,10 @@ impl TestArgs {
 
     pub fn fixtures(&mut self, fixtures: &'static [TestFixture]) {
         self.fixtures = fixtures;
+    }
+
+    pub fn max_connections(&mut self, n: usize) {
+        self.max_connections = n;
     }
 }
 

@@ -20,13 +20,13 @@ any = []
 json = ["serde", "serde_json"]
 
 # for conditional compilation
-_rt-async-global-executor = ["async-global-executor", "_rt-async-io", "_rt-async-task"]
-_rt-async-io = ["async-io", "async-fs"] # see note at async-fs declaration
-_rt-async-std = ["async-std", "_rt-async-io"]
+_rt-async-global-executor = ["async-global-executor", "_rt-async-io", "_rt-async-lock", "_rt-async-task"]
+_rt-async-io = ["async-io", "async-fs", "ease-off/async-io-2"] # see note at async-fs declaration
+_rt-async-lock = ["async-lock"]
+_rt-async-std = ["async-std", "_rt-async-io", "_rt-async-lock"]
 _rt-async-task = ["async-task"]
-_rt-smol = ["smol", "_rt-async-io", "_rt-async-task"]
-_rt-tokio = ["tokio", "tokio-stream"]
-
+_rt-smol = ["smol", "_rt-async-io", "_rt-async-lock", "_rt-async-task"]
+_rt-tokio = ["tokio", "tokio-stream", "ease-off/tokio"]
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
 _tls-rustls-ring-webpki = ["_tls-rustls", "rustls/ring", "webpki-roots"]
@@ -73,6 +73,7 @@ uuid = { workspace = true, optional = true }
 # work around bug in async-fs 2.0.0, which references futures-lite dependency wrongly, see https://github.com/launchbadge/sqlx/pull/3791#issuecomment-3043363281
 async-fs = { version = "2.1", optional = true }
 async-io = { version = "2.4.1", optional = true }
+async-lock = { version = "3.4.1", optional = true }
 async-task = { version = "4.7.1", optional = true }
 
 base64 = { version = "0.22.0", default-features = false, features = ["std"] }
@@ -83,7 +84,6 @@ crossbeam-queue = "0.3.2"
 either = "1.6.1"
 futures-core = { version = "0.3.19", default-features = false }
 futures-io = "0.3.24"
-futures-intrusive = "0.5.0"
 futures-util = { version = "0.3.19", default-features = false, features = ["alloc", "sink", "io"] }
 log = { version = "0.4.18", default-features = false }
 memchr = { version = "2.4.1", default-features = false }
@@ -103,10 +103,32 @@ indexmap = "2.0"
 event-listener = "5.2.0"
 hashbrown = "0.16.0"
 
+rand.workspace = true
 thiserror.workspace = true
 
+ease-off = { workspace = true, default-features = false }
+pin-project-lite = "0.2.14"
+
+# N.B. we don't actually utilize spinlocks, we just need a `Mutex` type with a few requirements:
+# * Guards that are `Send` (so `parking_lot` and `std::sync` are non-starters)
+# * Guards that can use `Arc` and so don't borrow (which is provided by `lock_api`)
+#
+# Where we actually use this (in `sqlx-core/src/pool/shard.rs`), we don't rely on the mutex itself for anything but
+# safe shared mutability. The `Shard` structure has its own synchronization, and only uses `Mutex::try_lock()`.
+#
+# We *could* use either `tokio::sync::Mutex` or `async_lock::Mutex` for this, but those have all the code for the
+# async support, which we don't need.
+[dependencies.spin]
+version = "0.10.0"
+default-features = false
+features = ["mutex", "lock_api", "spin_mutex"]
+
+[dependencies.lock_api]
+version = "0.4.13"
+features = ["arc_lock"]
+
 [dev-dependencies]
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "sync"] }
 
 [dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622

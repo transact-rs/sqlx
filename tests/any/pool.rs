@@ -1,41 +1,34 @@
 use sqlx::any::{AnyConnectOptions, AnyPoolOptions};
-use sqlx::Executor;
+use sqlx_core::connection::{ConnectOptions, Connection};
+use sqlx_core::pool::PoolConnectMetadata;
 use sqlx_core::sql_str::AssertSqlSafe;
 use std::sync::{
-    atomic::{AtomicI32, AtomicUsize, Ordering},
+    atomic::{AtomicI32, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
 
 #[sqlx_macros::test]
-async fn pool_should_invoke_after_connect() -> anyhow::Result<()> {
+async fn pool_basic_functions() -> anyhow::Result<()> {
     sqlx::any::install_default_drivers();
 
-    let counter = Arc::new(AtomicUsize::new(0));
-
     let pool = AnyPoolOptions::new()
-        .after_connect({
-            let counter = counter.clone();
-            move |_conn, _meta| {
-                let counter = counter.clone();
-                Box::pin(async move {
-                    counter.fetch_add(1, Ordering::SeqCst);
-
-                    Ok(())
-                })
-            }
-        })
+        .max_connections(2)
+        .acquire_timeout(Duration::from_secs(3))
         .connect(&dotenvy::var("DATABASE_URL")?)
         .await?;
 
-    let _ = pool.acquire().await?;
-    let _ = pool.acquire().await?;
-    let _ = pool.acquire().await?;
-    let _ = pool.acquire().await?;
+    let mut conn = pool.acquire().await?;
 
-    // since connections are released asynchronously,
-    // `.after_connect()` may be called more than once
-    assert!(counter.load(Ordering::SeqCst) >= 1);
+    conn.ping().await?;
+
+    drop(conn);
+
+    let i: i64 = sqlx::query_scalar("SELECT 12345678")
+        .fetch_one(&pool)
+        .await?;
+
+    assert_eq!(i, 12345678);
 
     Ok(())
 }
@@ -74,6 +67,7 @@ async fn pool_should_be_returned_failed_transactions() -> anyhow::Result<()> {
 #[sqlx_macros::test]
 async fn test_pool_callbacks() -> anyhow::Result<()> {
     sqlx::any::install_default_drivers();
+    tracing_subscriber::fmt::init();
 
     #[derive(sqlx::FromRow, Debug, PartialEq, Eq)]
     struct ConnStats {
@@ -84,38 +78,13 @@ async fn test_pool_callbacks() -> anyhow::Result<()> {
 
     sqlx_test::setup_if_needed();
 
-    let conn_options: AnyConnectOptions = std::env::var("DATABASE_URL")?.parse()?;
+    let conn_options: Arc<AnyConnectOptions> = Arc::new(std::env::var("DATABASE_URL")?.parse()?);
 
     let current_id = AtomicI32::new(0);
 
     let pool = AnyPoolOptions::new()
         .max_connections(1)
         .acquire_timeout(Duration::from_secs(5))
-        .after_connect(move |conn, meta| {
-            assert_eq!(meta.age, Duration::ZERO);
-            assert_eq!(meta.idle_for, Duration::ZERO);
-
-            let id = current_id.fetch_add(1, Ordering::AcqRel);
-
-            Box::pin(async move {
-                let statement = format!(
-                    // language=SQL
-                    r#"
-                    CREATE TEMPORARY TABLE conn_stats(
-                        id int primary key,
-                        before_acquire_calls int default 0,
-                        after_release_calls int default 0
-                    );
-                    INSERT INTO conn_stats(id) VALUES ({});
-                    "#,
-                    // Until we have generalized bind parameters
-                    id
-                );
-
-                conn.execute(AssertSqlSafe(statement)).await?;
-                Ok(())
-            })
-        })
         .before_acquire(|conn, meta| {
             // `age` and `idle_for` should both be nonzero
             assert_ne!(meta.age, Duration::ZERO);
@@ -166,7 +135,33 @@ async fn test_pool_callbacks() -> anyhow::Result<()> {
             })
         })
         // Don't establish a connection yet.
-        .connect_lazy_with(conn_options);
+        .connect_lazy_with_connector(move |_meta: PoolConnectMetadata| {
+            let connect_opts = Arc::clone(&conn_options);
+            let id = current_id.fetch_add(1, Ordering::AcqRel);
+
+            async move {
+                let mut conn = connect_opts.connect().await?;
+
+                let statement = format!(
+                    // language=SQL
+                    r#"
+                    CREATE TEMPORARY TABLE conn_stats(
+                        id int primary key,
+                        before_acquire_calls int default 0,
+                        after_release_calls int default 0
+                    );
+                    INSERT INTO conn_stats(id) VALUES ({});
+                    "#,
+                    // Until we have generalized bind parameters
+                    id
+                );
+
+                sqlx::raw_sql(AssertSqlSafe(statement))
+                    .execute(&mut conn)
+                    .await?;
+                Ok(conn)
+            }
+        });
 
     // Expected pattern of (id, before_acquire_calls, after_release_calls)
     let pattern = [
@@ -186,6 +181,8 @@ async fn test_pool_callbacks() -> anyhow::Result<()> {
     ];
 
     for (id, before_acquire_calls, after_release_calls) in pattern {
+        eprintln!("ID: {id}, before_acquire calls: {before_acquire_calls}, after_release calls: {after_release_calls}");
+
         let conn_stats: ConnStats = sqlx::query_as("SELECT * FROM conn_stats")
             .fetch_one(&pool)
             .await?;
@@ -215,6 +212,7 @@ async fn test_connection_maintenance() -> anyhow::Result<()> {
     let last_meta = Arc::new(Mutex::new(None));
     let last_meta_ = last_meta.clone();
     let pool = AnyPoolOptions::new()
+        .acquire_timeout(Duration::from_secs(1))
         .max_lifetime(Duration::from_millis(400))
         .min_connections(3)
         .before_acquire(move |_conn, _meta| {

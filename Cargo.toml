@@ -191,8 +191,10 @@ uuid = "1.1.2"
 
 # Common utility crates
 cfg-if = "1.0.0"
-dotenvy = { version = "0.15.0", default-features = false }
 thiserror = { version = "2.0.17", default-features = false, features = ["std"] }
+dotenvy = { version = "0.15.7", default-features = false }
+ease-off = "0.1.6"
+rand = "0.8.5"
 
 # Runtimes
 [workspace.dependencies.async-global-executor]
@@ -224,7 +226,6 @@ sqlx-sqlite = { workspace = true, optional = true }
 anyhow = "1.0.52"
 time_ = { version = "0.3.2", package = "time" }
 futures-util = { version = "0.3.19", default-features = false, features = ["alloc"] }
-env_logger = "0.11"
 async-std = { workspace = true, features = ["attributes"] }
 tokio = { version = "1.15.0", features = ["full"] }
 dotenvy = "0.15.0"
@@ -238,8 +239,12 @@ rand = "0.8.4"
 rand_xoshiro = "0.6.0"
 hex = "0.4.3"
 tempfile = "3.10.1"
-criterion = { version = "0.5.1", features = ["async_tokio"] }
+criterion = { version = "0.7.0", features = ["async_tokio"] }
 libsqlite3-sys = { version = "0.30.1" }
+
+tracing = "0.1.41"
+tracing-flame = "0.2.0"
+tracing-subscriber = "0.3.20"
 
 # If this is an unconditional dev-dependency then Cargo will *always* try to build `libsqlite3-sys`,
 # even when SQLite isn't the intended test target, and fail if the build environment is not set up for compiling C code.
@@ -456,3 +461,15 @@ required-features = ["postgres"]
 name = "postgres-rustsec"
 path = "tests/postgres/rustsec.rs"
 required-features = ["postgres", "macros", "migrate"]
+
+#
+# Benches
+#
+[[bench]]
+name = "any-pool"
+path = "benches/any/pool.rs"
+required-features = ["runtime-tokio", "any"]
+harness = false
+
+[profile.bench]
+debug = true

@@ -190,7 +190,7 @@ impl DatabaseError for PgDatabaseError {
         self
     }
 
-    fn is_transient_in_connect_phase(&self) -> bool {
+    fn is_retryable_connect_error(&self) -> bool {
         // https://www.postgresql.org/docs/current/errcodes-appendix.html
         [
             // too_many_connections

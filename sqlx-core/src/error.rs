@@ -1,15 +1,17 @@
 //! Types for working with errors produced by SQLx.
 
+use crate::database::Database;
 use std::any::type_name;
 use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt::Display;
 use std::io;
 
-use crate::database::Database;
-
 use crate::type_info::TypeInfo;
 use crate::types::Type;
+
+#[cfg(doc)]
+use crate::pool::{PoolConnector, PoolOptions};
 
 /// A specialized `Result` type for SQLx.
 pub type Result<T, E = Error> = ::std::result::Result<T, E>;
@@ -101,7 +103,10 @@ pub enum Error {
     ///
     /// [`Pool::acquire`]: crate::pool::Pool::acquire
     #[error("pool timed out while waiting for an open connection")]
-    PoolTimedOut,
+    PoolTimedOut {
+        #[source]
+        last_connect_error: Option<Box<Self>>,
+    },
 
     /// [`Pool::close`] was called while we were waiting in [`Pool::acquire`].
     ///
@@ -109,6 +114,19 @@ pub enum Error {
     /// [`Pool::close`]: crate::pool::Pool::close
     #[error("attempted to acquire a connection on a closed pool")]
     PoolClosed,
+
+    /// A custom error that may be returned from a [`PoolConnector`] implementation.
+    #[error("error returned from pool connector")]
+    PoolConnector {
+        #[source]
+        source: BoxDynError,
+
+        /// If `true`, `PoolConnector::connect()` is called again in an exponential backoff loop
+        /// up to [`PoolOptions::connect_timeout`].
+        ///
+        /// See [`PoolConnector::connect()`] for details.
+        retryable: bool,
+    },
 
     /// A background worker has crashed.
     #[error("attempted to communicate with a crashed background worker")]
@@ -228,11 +246,6 @@ pub trait DatabaseError: 'static + Send + Sync + StdError {
     #[doc(hidden)]
     fn into_error(self: Box<Self>) -> Box<dyn StdError + Send + Sync + 'static>;
 
-    #[doc(hidden)]
-    fn is_transient_in_connect_phase(&self) -> bool {
-        false
-    }
-
     /// Returns the name of the constraint that triggered the error, if applicable.
     /// If the error was caused by a conflict of a unique index, this will be the index name.
     ///
@@ -269,6 +282,24 @@ pub trait DatabaseError: 'static + Send + Sync + StdError {
     /// Returns whether the error kind is a violation of a check.
     fn is_check_violation(&self) -> bool {
         matches!(self.kind(), ErrorKind::CheckViolation)
+    }
+
+    /// Returns `true` if this error can be retried when connecting to the database.
+    ///
+    /// Defaults to `false`.
+    ///
+    /// For example, the Postgres driver overrides this to return `true` for the following error codes:
+    ///
+    /// * `53300 too_many_connections`: returned when the maximum connections are exceeded
+    ///   on the server. Assumed to be the result of a temporary overcommit
+    ///   (e.g. an extra application replica being spun up to replace one that is going down).
+    ///   * This error being consistently logged or returned is a likely indicator of a misconfiguration;
+    ///     the sum of [`PoolOptions::max_connections`] for all replicas should not exceed
+    ///     the maximum connections allowed by the server.
+    /// * `57P03 cannot_connect_now`: returned when the database server is still starting up
+    ///   and the tcop component is not ready to accept connections yet.
+    fn is_retryable_connect_error(&self) -> bool {
+        false
     }
 }
 
