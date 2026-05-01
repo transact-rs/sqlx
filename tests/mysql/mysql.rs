@@ -3,6 +3,7 @@ use futures_util::TryStreamExt;
 use sqlx::mysql::{MySql, MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Column, Connection, Executor, Row, SqlSafeStr, Statement, TypeInfo};
 use sqlx_core::connection::ConnectOptions;
+use sqlx_core::types::Type;
 use sqlx_mysql::MySqlConnectOptions;
 use sqlx_test::{new, setup_if_needed};
 use std::env;
@@ -663,6 +664,66 @@ async fn it_can_name_columns_issue_2206() -> anyhow::Result<()> {
     let name: String = row.get("name");
 
     assert_eq!(&name, "Alice");
+
+    Ok(())
+}
+
+#[cfg(feature = "any")]
+#[sqlx_macros::test]
+async fn any_blob_conversions() -> anyhow::Result<()> {
+    use sqlx::Any;
+    use sqlx::Decode;
+    use sqlx::ValueRef;
+
+    sqlx::any::install_default_drivers();
+
+    let mut conn = new::<Any>().await?;
+
+    sqlx::raw_sql(
+        r#"
+        CREATE TEMPORARY TABLE any_blob_conversions(
+            id INTEGER PRIMARY KEY,
+            regular_text TEXT NOT NULL,
+            text_binary TEXT COLLATE "utf8mb4_bin" NOT NULL,
+            binary_blob BLOB NOT NULL
+        );
+
+        INSERT INTO any_blob_conversions(id, regular_text, text_binary, binary_blob)
+        VALUES (1, 'Hello, world!', 'Lorem ipsum dolor sit amet', X'01020304DEADBEEF');
+   "#,
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let row = sqlx::query("SELECT * FROM any_blob_conversions")
+        .fetch_one(&mut conn)
+        .await?;
+
+    let id = row.try_get_raw("id")?;
+    let regular_text = row.try_get_raw("regular_text")?;
+    let text_binary = row.try_get_raw("text_binary")?;
+    let binary_blob = row.try_get_raw("binary_blob")?;
+
+    assert_eq!(*id.type_info(), <i32 as Type<Any>>::type_info());
+    assert_eq!(<i32 as Decode<Any>>::decode(id).unwrap(), 1);
+
+    assert_eq!(*regular_text.type_info(), <str as Type<Any>>::type_info());
+    assert_eq!(
+        <&str as Decode<Any>>::decode(regular_text).unwrap(),
+        "Hello, world!"
+    );
+
+    assert_eq!(*text_binary.type_info(), <str as Type<Any>>::type_info());
+    assert_eq!(
+        <&str as Decode<Any>>::decode(text_binary).unwrap(),
+        "Lorem ipsum dolor sit amet"
+    );
+
+    assert_eq!(*binary_blob.type_info(), <[u8] as Type<Any>>::type_info());
+    assert_eq!(
+        <&[u8] as Decode<Any>>::decode(binary_blob).unwrap(),
+        [0x01, 0x02, 0x03, 0x04, 0xDE, 0xAD, 0xBE, 0xEF],
+    );
 
     Ok(())
 }

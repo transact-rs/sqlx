@@ -16,6 +16,7 @@ use sqlx_core::database::Database;
 use sqlx_core::executor::Executor;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::transaction::TransactionManager;
+use sqlx_core::types::Type;
 use std::{future, pin::pin};
 
 sqlx_core::declare_driver_with_optional_migrate!(DRIVER = MySql);
@@ -164,13 +165,9 @@ impl<'a> TryFrom<&'a MySqlTypeInfo> for AnyTypeInfo {
                 ColumnType::LongLong => AnyTypeInfoKind::BigInt,
                 ColumnType::Float => AnyTypeInfoKind::Real,
                 ColumnType::Double => AnyTypeInfoKind::Double,
-                ColumnType::Blob
-                | ColumnType::TinyBlob
-                | ColumnType::MediumBlob
-                | ColumnType::LongBlob => AnyTypeInfoKind::Blob,
-                ColumnType::String | ColumnType::VarString | ColumnType::VarChar => {
-                    AnyTypeInfoKind::Text
-                }
+                // Checks for any applicable type and compatible collations
+                _ if <str as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Text,
+                _ if <[u8] as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Blob,
                 _ => {
                     return Err(sqlx_core::Error::AnyDriverError(
                         format!("Any driver does not support MySql type {type_info:?}").into(),
