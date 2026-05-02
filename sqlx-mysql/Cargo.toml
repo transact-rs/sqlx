@@ -14,7 +14,7 @@ default = []
 json = ["sqlx-core/json", "serde"]
 any = ["sqlx-core/any"]
 offline = ["sqlx-core/offline", "serde/derive", "bitflags/serde"]
-migrate = ["sqlx-core/migrate"]
+migrate = ["sqlx-core/migrate", "dep:crc"]
 rsa = ["dep:rand", "dep:rsa"]
 
 # Type Integration features
@@ -32,12 +32,12 @@ futures-core = { version = "0.3.32", default-features = false }
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
 
 # Cryptographic Primitives
-crc = "3.0.0"
-digest = { version = "0.10.7", default-features = false, features = ["std"] }
-rand = { version = "0.8.5", default-features = false, features = ["std", "std_rng"], optional = true }
-rsa = { version = "0.9", optional = true }
-sha1 = { version = "0.10.1", default-features = false }
-sha2 = { version = "0.10.0", default-features = false }
+crc = { workspace = true, optional = true }
+digest = { workspace = true }
+rand = { workspace = true, optional = true }
+rsa = { workspace = true, optional = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
 
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
 bigdecimal = { workspace = true, optional = true }

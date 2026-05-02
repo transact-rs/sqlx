@@ -194,6 +194,17 @@ cfg-if = "1.0.0"
 dotenvy = { version = "0.15.7", default-features = false }
 thiserror = { version = "2.0.17", default-features = false, features = ["std"] }
 
+# Cryptography
+crc = { version = "3.0.0" }
+digest = { version = "0.11.2", default-features = false, features = ["alloc"] }
+hkdf = { version = "0.13.0" }
+hmac = { version = "0.13.0", default-features = false }
+md-5 = { version = "0.11.0", default-features = false }
+rsa = { version = "0.9" }
+rand = { version = "0.10.1", features = ["thread_rng"], default-features = false }
+sha1 = { version = "0.11.0", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
+
 # Runtimes
 [workspace.dependencies.async-global-executor]
 version = "3.1"
@@ -234,8 +245,6 @@ paste = "1.0.6"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.142"
 url = "2.2.2"
-rand = "0.8.5"
-rand_xoshiro = "0.6.0"
 hex = "0.4.3"
 tempfile = "3.10.1"
 criterion = { version = "0.5.1", features = ["async_tokio"] }

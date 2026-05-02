@@ -8,15 +8,15 @@ edition = "2021"
 [dependencies]
 # Primary crates
 axum = { version = "0.8", features = ["macros"] }
-sqlx = { path = "../../../", features = [ "runtime-tokio", "tls-rustls-ring", "postgres", "time", "uuid" ] }
+sqlx = { path = "../../..", features = [ "runtime-tokio", "tls-rustls-ring", "postgres", "time", "uuid" ] }
 tokio = { version = "1.25.0", features = ["rt-multi-thread", "macros"] }
 
 # Important secondary crates
-argon2 = "0.4.1"
-rand = "0.8.5"
+argon2 = "0.6.0-rc.8" # FIXME: update to `0.6.0` when released
+rand = "0.10.1"
 regex = "1.6.0"
 serde = "1.0.219"
-serde_with = { version = "2.0.0", features = ["time_0_3"] }
+serde_with = { version = "3.18.0", features = ["time_0_3"] }
 time = "0.3.37"
 uuid = { version = "1.12.1", features = ["serde"] }
 validator = { version = "0.20.0", features = ["derive"] }
