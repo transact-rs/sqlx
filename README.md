@@ -334,7 +334,7 @@ use futures_util::TryStreamExt;
 use sqlx::Row;
 
 let mut rows = sqlx::query("SELECT * FROM users WHERE email = ?")
-    .bind(email)
+    .bind("user@example.com")
     .fetch(&mut conn);
 
 while let Some(row) = rows.try_next().await? {
@@ -358,8 +358,8 @@ let mut stream = sqlx::query("SELECT * FROM users")
 struct User { name: String, id: i64 }
 
 let mut stream = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ? OR name = ?")
-    .bind(user_email)
-    .bind(user_name)
+    .bind("user@example.com")
+    .bind("example_username")
     .fetch(&mut conn);
 ```
 
