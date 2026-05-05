@@ -56,7 +56,7 @@ _unstable-docs = [
 
 [dependencies.libsqlite3-sys]
 # See `sqlx-sqlite/src/lib.rs` for details.
-version = ">=0.30.1, <0.37.0"
+version = ">=0.30.1, <0.38.0"
 default-features = false
 features = [
     "pkg-config",
