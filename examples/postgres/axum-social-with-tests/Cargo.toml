@@ -17,14 +17,14 @@ rand = "0.10.1"
 regex = "1.6.0"
 serde = "1.0.219"
 serde_with = { version = "3.18.0", features = ["time_0_3"] }
-time = "0.3.37"
+time = "0.3.47"
 uuid = { version = "1.12.1", features = ["serde"] }
 validator = { version = "0.20.0", features = ["derive"] }
 
 # Auxilliary crates
 anyhow = "1.0.58"
 dotenvy = "0.15.7"
-thiserror = "2.0.17"
+thiserror = "2.0.18"
 tracing = "0.1.37"
 
 [dev-dependencies]

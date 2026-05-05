@@ -75,7 +75,7 @@ async-fs = { version = "2.1", optional = true }
 async-io = { version = "2.4.1", optional = true }
 async-task = { version = "4.7.1", optional = true }
 
-base64 = { version = "0.22.0", default-features = false, features = ["std"] }
+base64.workspace = true
 bytes = "1.2.0"
 cfg-if = { workspace = true }
 crc = { version = "3", optional = true }

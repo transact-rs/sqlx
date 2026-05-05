@@ -186,13 +186,14 @@ ipnet = "2.3.0"
 ipnetwork = "0.21.1"
 mac_address = "1.1.5"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
-time = { version = "0.3.37", features = ["formatting", "parsing", "macros"] }
+time = { version = "0.3.47", features = ["formatting", "parsing", "macros"] }
 uuid = "1.12.1"
 
 # Common utility crates
+base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
 cfg-if = "1.0.0"
 dotenvy = { version = "0.15.7", default-features = false }
-thiserror = { version = "2.0.17", default-features = false, features = ["std"] }
+thiserror = { version = "2.0.18", default-features = false, features = ["std"] }
 
 # Cryptography
 crc = { version = "3.0.0" }
@@ -233,7 +234,7 @@ sqlx-sqlite = { workspace = true, optional = true }
 
 [dev-dependencies]
 anyhow = "1.0.58"
-time_ = { version = "0.3.37", package = "time" }
+time_ = { version = "0.3.47", package = "time" }
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
 env_logger = "0.11"
 async-std = { workspace = true, features = ["attributes"] }

@@ -10,7 +10,7 @@ authors.workspace = true
 
 [dependencies]
 serde = "1.0.219"
-time = "0.3.37"
+time = "0.3.47"
 uuid = "1.12.1"
 
 [dependencies.sqlx]
