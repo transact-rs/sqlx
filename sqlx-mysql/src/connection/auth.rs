@@ -1,7 +1,6 @@
 use bytes::buf::Chain;
 use bytes::Bytes;
-use digest::{Digest, OutputSizeUser};
-use generic_array::GenericArray;
+use digest::Digest;
 use sha1::Sha1;
 use sha2::Sha256;
 
@@ -74,10 +73,7 @@ impl AuthPlugin {
     }
 }
 
-fn scramble_sha1(
-    password: &str,
-    nonce: &Chain<Bytes, Bytes>,
-) -> GenericArray<u8, <Sha1 as OutputSizeUser>::OutputSize> {
+fn scramble_sha1(password: &str, nonce: &Chain<Bytes, Bytes>) -> Vec<u8> {
     // SHA1( password ) ^ SHA1( seed + SHA1( SHA1( password ) ) )
     // https://mariadb.com/kb/en/connection/#mysql_native_password-plugin
 
@@ -99,13 +95,10 @@ fn scramble_sha1(
 
     xor_eq(&mut pw_hash, &pw_seed_hash_hash);
 
-    pw_hash
+    pw_hash.to_vec()
 }
 
-fn scramble_sha256(
-    password: &str,
-    nonce: &Chain<Bytes, Bytes>,
-) -> GenericArray<u8, <Sha256 as OutputSizeUser>::OutputSize> {
+fn scramble_sha256(password: &str, nonce: &Chain<Bytes, Bytes>) -> Vec<u8> {
     // XOR(SHA256(password), SHA256(SHA256(SHA256(password)), seed))
     // Order matches the server-side verification in MySQL's sha2_password
     // (generate_sha2_scramble): stage2 digest first, then the nonce.
@@ -127,7 +120,7 @@ fn scramble_sha256(
 
     xor_eq(&mut pw_hash, &pw_seed_hash_hash);
 
-    pw_hash
+    pw_hash.to_vec()
 }
 
 async fn encrypt_rsa<'s>(
@@ -185,15 +178,14 @@ fn to_asciz(s: &str) -> Vec<u8> {
 
 #[cfg(feature = "rsa")]
 mod rsa_backend {
-    use rand::thread_rng;
     use rsa::{pkcs8::DecodePublicKey, Oaep, RsaPublicKey};
 
     use super::Error;
 
     pub(super) fn encrypt(rsa_pub_key: &[u8], pass: &[u8]) -> Result<Vec<u8>, Error> {
         let pkey = parse_rsa_pub_key(rsa_pub_key)?;
-        let padding = Oaep::new::<sha1::Sha1>();
-        pkey.encrypt(&mut thread_rng(), padding, pass)
+        let padding = Oaep::<sha1::Sha1>::new();
+        pkey.encrypt(&mut rand::rng(), padding, pass)
             .map_err(Error::protocol)
     }
 

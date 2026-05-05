@@ -68,12 +68,12 @@ unsafe extern "C" fn sqlite3_regexp_func(
     }
 
     // arg0: Regex
-    let Some(regex) = get_regex_from_arg(ctx, *args.offset(0), 0) else {
+    let Some(regex) = get_regex_from_arg(ctx, *args, 0) else {
         return;
     };
 
     // arg1: value
-    let Some(value) = get_text_from_arg(ctx, *args.offset(1)) else {
+    let Some(value) = get_text_from_arg(ctx, *args.add(1)) else {
         return;
     };
 

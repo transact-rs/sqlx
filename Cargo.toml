@@ -200,7 +200,7 @@ digest = { version = "0.11.2", default-features = false, features = ["alloc"] }
 hkdf = { version = "0.13.0" }
 hmac = { version = "0.13.0", default-features = false }
 md-5 = { version = "0.11.0", default-features = false }
-rsa = { version = "0.9" }
+rsa = { version = "0.10.0-rc.18" } # FIXME: when `rsa 0.10` is released
 rand = { version = "0.10.1", features = ["thread_rng"], default-features = false }
 sha1 = { version = "0.11.0", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
