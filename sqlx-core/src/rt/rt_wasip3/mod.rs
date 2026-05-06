@@ -9,7 +9,6 @@ use wit_bindgen::rt::async_support;
 use futures::channel::oneshot;
 
 use crate::net::WithSocket;
-use tracing::debug;
 
 mod socket;
 
@@ -135,11 +134,9 @@ pub async fn connect_tcp<Ws: WithSocket>(
     //         })
     //     }
     // };
-    debug!("wasip3: creating tcp socket for port {}", port);
     let sock =
         wasip3::sockets::types::TcpSocket::create(wasip3::sockets::types::IpAddressFamily::Ipv4)
             .expect("failed to create TCP socket");
-    debug!("wasip3: created tcp socket for port {}", port);
     sock.connect(wasip3::sockets::types::IpSocketAddress::Ipv4(
         wasip3::sockets::types::Ipv4SocketAddress {
             address: (127, 0, 0, 1),
@@ -147,120 +144,59 @@ pub async fn connect_tcp<Ws: WithSocket>(
         },
     ))
     .await
-    .map_err(|e| {
-        debug!("wasip3: connect failed: {:?}", e);
-        e
-    })
     .expect(&format!("failed to connect to 127.0.0.1:{port}"));
 
-    // explicit channel item types so the compiler can infer types used below
     let (rx_tx, rx_rx) = mpsc::channel::<Vec<u8>>(1);
     let (tx_tx, mut tx_rx) = mpsc::channel::<Vec<u8>>(1);
     let (mut send_tx, send_rx) = wasip3::wit_stream::new();
-    debug!("wasip3: created wit_stream for send/recv");
     let (mut recv_rx, recv_fut) = sock.receive();
 
-    // Spawn a background task using the wasip3 async runtime and make it abortable.
     let (abort_handle, abort_registration) = AbortHandle::new_pair();
-    // Give the wasip3 scheduler a quick yield before spawning the background
-    // task. Use the host-aware `yield_async` so spawned tasks are eligible to
-    // be polled promptly by the local runtime.
     async_support::yield_async().await;
     let background = Abortable::new(
         async move {
             let sock = Arc::new(sock);
-            debug!("wasip3: background task starting; sock arc cloned");
-
             let (ready_tx, ready_rx) = oneshot::channel();
-            let spawn_ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or_default();
-            debug!("wasip3: spawning sock.send task at {}ms", spawn_ts);
 
             async_support::spawn({
                 let sock = Arc::clone(&sock);
                 async move {
-                    let start_ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or_default();
-                    debug!("wasip3: sock.send task started at {}ms", start_ts);
                     let fut = sock.send(send_rx);
-                    let sig_ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or_default();
                     _ = ready_tx.send(());
-                    debug!("wasip3: sock.send signalled ready at {}ms", sig_ts);
-                    match fut.await {
-                        Ok(_) => {
-                            let done_ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis())
-                                .unwrap_or_default();
-                            debug!("wasip3: sock.send completed at {}ms", done_ts);
-                        }
-                        Err(e) => {
-                            let err_ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis())
-                                .unwrap_or_default();
-                            debug!("wasip3: sock.send error at {}ms: {:?}", err_ts, e);
-                        }
-                    }
+                    let _ = fut.await;
                     drop(sock);
                 }
             });
-            // Yield after spawning the send task so the runtime can poll it.
             async_support::yield_async().await;
             async_support::spawn({
                 let sock = Arc::clone(&sock);
                 async move {
-                    let start_ts = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis())
-                        .unwrap_or_default();
-                    debug!("wasip3: recv_fut task started at {}ms", start_ts);
-                    match recv_fut.await {
-                        Ok(_) => {
-                            let done_ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis())
-                                .unwrap_or_default();
-                            debug!("wasip3: recv_fut completed at {}ms", done_ts);
-                        }
-                        Err(e) => {
-                            let err_ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis())
-                                .unwrap_or_default();
-                            debug!("wasip3: recv_fut error at {}ms: {:?}", err_ts, e);
-                        }
-                    }
+                    let _ = recv_fut.await;
                     drop(sock);
                 }
             });
-            // Yield to the wasip3 scheduler to give the spawned tasks a chance
-            // to be polled immediately. Without this yield the local runtime
-            // may not poll newly spawned tasks until the current task yields,
-            // which can cause head-of-line blocking observed during handshakes.
+            // Yield to give spawned tasks a chance to be polled before joining.
             async_support::yield_async().await;
             futures_util::join!(
                 async {
-                    while let Some(result) = recv_rx.next().await {
-                        // `recv_rx` yields single bytes from the wasip3 receive stream.
-                        debug!("wasip3: recv_rx.next yielded byte: {:#x}", result);
-                        _ = rx_tx.send(vec![result]).await;
+                    use wit_bindgen::rt::async_support::StreamResult;
+                    loop {
+                        let buf = Vec::with_capacity(4096);
+                        let (result, buf) = recv_rx.read(buf).await;
+                        if !buf.is_empty() && rx_tx.send(buf).await.is_err() {
+                            break;
+                        }
+                        match result {
+                            StreamResult::Dropped => break,
+                            StreamResult::Cancelled | StreamResult::Complete(_) => {}
+                        }
                     }
                     drop(recv_rx);
                     drop(rx_tx);
                 },
                 async {
                     _ = ready_rx.await;
-                    debug!("wasip3: send task ready, draining tx_rx -> send_tx");
                     while let Some(buf) = tx_rx.recv().await {
-                        debug!("wasip3: writing {} bytes to send_tx", buf.len());
                         let _ = send_tx.write(buf).await;
                     }
                     drop(tx_rx);

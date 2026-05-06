@@ -107,7 +107,7 @@ thiserror.workspace = true
 
 # WASM/WASIP3 dependencies (always enabled on wasm32)
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tokio = { workspace = true, features = ["sync", "rt"] }
+tokio = { workspace = true, features = ["sync", "rt", "macros"] }
 tokio-util = { workspace = true }
 wasip3 = { workspace = true }
 wit-bindgen = { workspace = true }

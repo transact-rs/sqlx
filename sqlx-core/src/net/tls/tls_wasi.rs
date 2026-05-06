@@ -16,7 +16,6 @@ use crate::io::ReadBuf;
 use crate::net::Socket;
 use crate::rt::rt_wasip3::WasiPollSender;
 use bytes::BufMut as _;
-use tracing::debug;
 
 use super::TlsConfig;
 
@@ -141,22 +140,17 @@ pub async fn handshake<S: Socket + 'static>(
     config: TlsConfig<'_>,
 ) -> crate::Result<WasiTlsSocket> {
     let hostname = config.hostname.to_string();
-    debug!("wasi-tls: starting handshake for {}", hostname);
 
-    // Create the wasi-tls connector resource.
     let connector = wasi::tls::client::Connector::new();
 
-    // Create two pairs of wit-streams:
-    // 1. cleartext pair: app writes cleartext → connector encrypts
-    // 2. ciphertext pair: TCP data → connector decrypts
     let (mut cleartext_tx, cleartext_rx) = wasip3::wit_stream::new::<u8>();
     let (mut ciphertext_tx, ciphertext_rx) = wasip3::wit_stream::new::<u8>();
 
-    // Wire up the TLS transform pipelines.
-    let (mut encrypted_rx, _send_done) = connector.send(cleartext_rx);
-    let (mut decrypted_rx, _recv_done) = connector.receive(ciphertext_rx);
+    // send_done and recv_done are completion futures — keep them alive for the
+    // full duration of the session so the host doesn't tear down the pipeline.
+    let (mut encrypted_rx, send_done) = connector.send(cleartext_rx);
+    let (mut decrypted_rx, recv_done) = connector.receive(ciphertext_rx);
 
-    // App-facing channels: the WasiTlsSocket will use these.
     let (app_cleartext_tx, mut app_cleartext_rx) = mpsc::channel::<Vec<u8>>(4);
     let (app_decrypted_tx, app_decrypted_rx) = mpsc::channel::<Vec<u8>>(4);
 
@@ -174,81 +168,122 @@ pub async fn handshake<S: Socket + 'static>(
     // `socket` exclusively.  Encrypted bytes to send arrive on `tcp_write_rx`;
     // raw bytes received from TCP are forwarded on `tcp_read_tx`.
     let socket_pump = async move {
+        use core::future::poll_fn;
         let mut read_storage = [0u8; 4096];
+        let mut pending_write: Option<Vec<u8>> = None;
+        let mut pending_pos = 0usize;
         loop {
-            // Try to drain any pending writes first.
-            while let Ok(data) = tcp_write_rx.try_recv() {
-                let mut pos = 0;
-                while pos < data.len() {
-                    match socket.try_write(&data[pos..]) {
-                        Ok(n) => pos += n,
-                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                            async_support::yield_async().await;
-                        }
-                        Err(e) => {
-                            debug!("wasi-tls: TCP write error: {:?}", e);
-                            return;
+            if pending_write.is_none() {
+                match tcp_write_rx.try_recv() {
+                    Ok(data) => {
+                        pending_write = Some(data);
+                        pending_pos = 0;
+                    }
+                    Err(_) => {
+                        tokio::select! {
+                            biased;
+                            maybe = tcp_write_rx.recv() => {
+                                match maybe {
+                                    Some(data) => {
+                                        pending_write = Some(data);
+                                        pending_pos = 0;
+                                    }
+                                    None => return,
+                                }
+                            }
+                            res = poll_fn(|cx| socket.poll_read_ready(cx)) => {
+                                if res.is_err() {
+                                    return;
+                                }
+                                let mut slice: &mut [u8] = &mut read_storage;
+                                match socket.try_read(&mut slice) {
+                                    Ok(0) => return,
+                                    Ok(n) => {
+                                        if tcp_read_tx.send(read_storage[..n].to_vec()).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                                    Err(_) => return,
+                                }
+                                continue;
+                            }
                         }
                     }
                 }
             }
-            // Try to read incoming data.
-            {
-                let mut slice: &mut [u8] = &mut read_storage;
-                match socket.try_read(&mut slice) {
-                    Ok(0) => return,
-                    Ok(n) => {
-                        let _ = tcp_read_tx.send(read_storage[..n].to_vec()).await;
-                    }
+
+            let data = pending_write.as_ref().unwrap();
+            while pending_pos < data.len() {
+                if poll_fn(|cx| socket.poll_write_ready(cx)).await.is_err() {
+                    return;
+                }
+                match socket.try_write(&data[pending_pos..]) {
+                    Ok(n) => pending_pos += n,
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                         async_support::yield_async().await;
                     }
-                    Err(e) => {
-                        debug!("wasi-tls: TCP read error: {:?}", e);
-                        return;
-                    }
+                    Err(_) => return,
                 }
             }
+            pending_write = None;
         }
     };
 
     let background = Abortable::new(
         async move {
             futures_util::join!(
-                socket_pump,
+                async move { socket_pump.await },
                 // Task 1: App cleartext → wit stream (for encryption)
                 async {
                     while let Some(data) = app_cleartext_rx.recv().await {
-                        debug!("wasi-tls: writing {} cleartext bytes to encrypt", data.len());
                         let _ = cleartext_tx.write(data).await;
                     }
                     drop(cleartext_tx);
                 },
-                // Task 2: Encrypted wit stream → tcp_write channel
+                // Task 2: Encrypted wit stream → tcp_write channel (batch reads)
                 async {
-                    while let Some(byte) = encrypted_rx.next().await {
-                        let _ = tcp_write_tx.send(vec![byte]).await;
+                    use wit_bindgen::rt::async_support::StreamResult;
+                    loop {
+                        let buf = Vec::with_capacity(4096);
+                        let (result, buf) = encrypted_rx.read(buf).await;
+                        if !buf.is_empty() && tcp_write_tx.send(buf).await.is_err() {
+                            break;
+                        }
+                        match result {
+                            StreamResult::Dropped => break,
+                            StreamResult::Cancelled | StreamResult::Complete(_) => {}
+                        }
                     }
                     drop(encrypted_rx);
                 },
-                // Task 3: tcp_read channel → ciphertext wit stream (for decryption)
+                // Task 3: tcp_read channel → ciphertext wit stream (batch writes)
                 async {
                     while let Some(data) = tcp_read_rx.recv().await {
-                        debug!("wasi-tls: forwarding {} bytes to decrypt", data.len());
-                        for b in data {
-                            let _ = ciphertext_tx.write(vec![b]).await;
-                        }
+                        ciphertext_tx.write_all(data).await;
                     }
                     drop(ciphertext_tx);
                 },
-                // Task 4: Decrypted wit stream → app-facing channel
+                // Task 4: Decrypted wit stream → app-facing channel (batch reads)
                 async {
-                    while let Some(byte) = decrypted_rx.next().await {
-                        let _ = app_decrypted_tx.send(vec![byte]).await;
+                    use wit_bindgen::rt::async_support::StreamResult;
+                    loop {
+                        let buf = Vec::with_capacity(4096);
+                        let (result, buf) = decrypted_rx.read(buf).await;
+                        if !buf.is_empty() && app_decrypted_tx.send(buf).await.is_err() {
+                            break;
+                        }
+                        match result {
+                            StreamResult::Dropped => break,
+                            StreamResult::Cancelled | StreamResult::Complete(_) => {}
+                        }
                     }
                     drop(decrypted_rx);
                     drop(app_decrypted_tx);
                 },
+                // Hold send_done and recv_done alive until all tasks complete.
+                async { let _ = send_done.await; },
+                async { let _ = recv_done.await; },
             );
         },
         abort_registration,
@@ -258,13 +293,13 @@ pub async fn handshake<S: Socket + 'static>(
         let _ = background.await;
     });
 
-    // Perform the TLS handshake. This drives the connector to exchange
-    // handshake bytes through the send/receive pipelines we set up above.
-    wasi::tls::client::Connector::connect(connector, hostname.clone())
-        .await
-        .map_err(|e| crate::Error::tls(e.to_debug_string()))?;
+    // Yield so the spawned background task gets a chance to run before we block
+    // on the handshake. Without this, `Connector::connect` may await handshake
+    // bytes that never get pumped because no one is polling `background`.
+    async_support::yield_async().await;
 
-    debug!("wasi-tls: handshake complete for {}", hostname);
+    let connect_res = wasi::tls::client::Connector::connect(connector, hostname.clone()).await;
+    connect_res.map_err(|e| crate::Error::tls(e.to_debug_string()))?;
 
     Ok(WasiTlsSocket {
         tx: WasiPollSender::new(app_cleartext_tx),
