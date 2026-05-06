@@ -1,7 +1,6 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::{routing::post, Json, Router};
-use rand::Rng;
 use regex::Regex;
 use std::{sync::LazyLock, time::Duration};
 
@@ -85,7 +84,7 @@ impl UserAuth {
 
         // Sleep a random amount of time to avoid leaking existence of a user in timing.
         let sleep_duration =
-            rand::thread_rng().gen_range(Duration::from_millis(100)..=Duration::from_millis(500));
+            rand::random_range(Duration::from_millis(100)..=Duration::from_millis(500));
         tokio::time::sleep(sleep_duration).await;
 
         Err(Error::UnprocessableEntity(
