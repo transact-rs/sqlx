@@ -7,7 +7,8 @@ edition = "2021"
 sqlx = { workspace = true, features = ["postgres", "time", "uuid", "macros", "sqlx-toml"] }
 tokio = { version = "1.25.0", features = ["rt", "sync"] }
 
-argon2 = { version = "0.5.3", features = ["password-hash"] }
+# FIXME: update when `0.6.0` is released
+argon2 = { version = "0.6.0-rc.8", features = ["password-hash"] }
 password-hash = { version = "0.6.1", features = ["alloc"] }
 
 uuid = { version = "1.12.1", features = ["serde"] }

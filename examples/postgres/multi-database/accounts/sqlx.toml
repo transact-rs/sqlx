@@ -3,7 +3,7 @@ database-url-var = "ACCOUNTS_DATABASE_URL"
 
 [macros.table-overrides.'account']
 'account_id' = "crate::AccountId"
-'password_hash' = "sqlx::types::Text<password_hash::PasswordHashString>"
+'password_hash' = "sqlx::types::Text<password_hash::phc::PasswordHash>"
 
 [macros.table-overrides.'session']
 'session_token' = "crate::SessionToken"

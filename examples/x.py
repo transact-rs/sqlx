@@ -2,6 +2,7 @@
 
 import sys
 import os
+import glob
 from os import path
 
 # base dir of sqlx workspace
@@ -16,6 +17,7 @@ sys.path.append(dir_tests)
 import subprocess
 import time
 import argparse
+import runpy
 from docker import start_database
 
 parser = argparse.ArgumentParser()
@@ -34,7 +36,7 @@ def run(command, env=None, cwd=None, display=None):
 
     res = subprocess.run(
         command.split(" "),
-        env=dict(**os.environ, **env),
+        env=os.environ | env,
         cwd=cwd,
     )
 
@@ -43,7 +45,7 @@ def run(command, env=None, cwd=None, display=None):
 
 
 def sqlx(command, url, cwd=None):
-    run(f"cargo --quiet run -p sqlx-cli --bin sqlx -- {command}", cwd=cwd, env={"DATABASE_URL": url},
+    run(f"cargo --quiet run -p sqlx-cli --bin sqlx -- {command} --database-url {url}", cwd=cwd, env={},
         display=f"sqlx {command}")
 
 
@@ -74,15 +76,41 @@ def project(name, database=None, driver=None):
         # database create
         sqlx("db create", database_url, cwd=cwd)
 
+        if path.exists(path.join(name, "setup.py")):
+            setup = runpy.run_path(path.join(name, "setup.py"))
+            res = setup["setup"](database_url=database_url,cwd=cwd,sqlx=sqlx)
+
+            if type(res) is dict:
+                env |= res
+
         # migrate
-        sqlx("migrate run", database_url, cwd=cwd)
+        if path.exists(path.join(name, "migrations")) or path.exists(path.join(name, "src/migrations")):
+            sqlx("migrate run", database_url, cwd=cwd)
 
     # check
     run("cargo check", cwd=cwd, env=env)
 
 
-# todos
-project("mysql/todos", driver="mysql_8", database="todos")
-project("postgres/todos", driver="postgres_12", database="todos")
-project("sqlite/todos", driver="sqlite", database="todos.db")
-project("sqlite/extension", driver="sqlite", database="extension.db")
+# MySQL
+for example_path in sorted(glob.iglob("mysql/*")):
+    if not path.isdir(example_path):
+        continue
+
+    example = path.relpath(example_path, start="mysql")
+    project(example_path, driver="mysql_8", database=f"example-{example}")
+
+# Postgres
+for example_path in sorted(glob.iglob("postgres/*")):
+    if not path.isdir(example_path):
+        continue
+
+    example = path.relpath(example_path, start="postgres")
+    project(example_path, driver="postgres_17", database=f"example-{example}")
+
+# SQLite
+for example_path in sorted(glob.iglob("sqlite/*")):
+    if not path.isdir(example_path):
+        continue
+
+    example = path.relpath(example_path, start="sqlite")
+    project(example_path, driver="sqlite", database=f"example-{example}.db")

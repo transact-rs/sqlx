@@ -84,7 +84,7 @@ pub struct AppliedMigration {
 }
 
 pub fn checksum(sql: &str) -> Vec<u8> {
-    Vec::from(Sha384::digest(sql).as_slice())
+    Sha384::digest(sql).to_vec()
 }
 
 pub fn checksum_fragments<'a>(fragments: impl Iterator<Item = &'a str>) -> Vec<u8> {
