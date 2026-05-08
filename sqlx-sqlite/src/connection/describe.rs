@@ -13,6 +13,8 @@ struct TableColumnInfo {
     name: String,
     not_null: bool,
     dflt_value: Option<String>,
+    type_info: String,
+    pk: bool,
 }
 
 fn is_insert_statement(query: &str) -> bool {
@@ -148,6 +150,12 @@ fn get_table_columns(
                 Err(_) => continue,
             };
 
+            // Get type info
+            let type_info = match stmt.handle.column_text(2) {
+                Ok(t) => t.to_string().to_uppercase(),
+                Err(_) => String::new(),
+            };
+
             // Get notnull flag
             let not_null = stmt.handle.column_int(3) != 0;
 
@@ -164,10 +172,15 @@ fn get_table_columns(
                 Err(_) => None,
             };
 
+            // Get primary key flag (column 5)
+            let pk = stmt.handle.column_int(5) != 0;
+
             columns.push(TableColumnInfo {
                 name,
                 not_null,
                 dflt_value,
+                type_info,
+                pk,
             });
         }
     }
@@ -188,10 +201,14 @@ fn validate_insert_statement(conn: &mut ConnectionState, query: &str) -> Result<
         Err(_) => return Ok(()), // Table doesn't exist or error querying schema - skip validation
     };
 
-    // Find NOT NULL columns without defaults
+    // Find NOT NULL columns without defaults, excluding INTEGER PRIMARY KEY (auto-increment)
     let required_cols = all_columns
         .iter()
-        .filter(|col| col.not_null && col.dflt_value.is_none())
+        .filter(|col| {
+            col.not_null
+                && col.dflt_value.is_none()
+                && !(col.pk && col.type_info.contains("INT"))
+        })
         .collect::<Vec<_>>();
 
     // If specific columns were listed, validate they include all required columns
