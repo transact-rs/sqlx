@@ -1115,13 +1115,10 @@ async fn it_validates_insert_with_all_required_columns() -> anyhow::Result<()> {
 
     // Explicit columns including all NOT NULL fields → should succeed
     let d = conn
-        .describe("INSERT INTO test_insert_valid (id, required_a, required_b) VALUES (?, ?, ?)")
+        .describe("INSERT INTO test_insert_valid (id, required_a, required_b) VALUES (?, ?, ?)".into_sql_str())
         .await;
 
-    assert!(
-        d.is_ok(),
-        "INSERT with all NOT NULL columns should succeed"
-    );
+    assert!(d.is_ok(), "INSERT with all NOT NULL columns should succeed");
 
     Ok(())
 }
@@ -1142,13 +1139,10 @@ async fn it_validates_insert_missing_required_column() -> anyhow::Result<()> {
 
     // Missing required_b → should error
     let err = conn
-        .describe("INSERT INTO test_insert_missing (id, required_a) VALUES (?, ?)")
+        .describe("INSERT INTO test_insert_missing (id, required_a) VALUES (?, ?)".into_sql_str())
         .await;
 
-    assert!(
-        err.is_err(),
-        "INSERT missing NOT NULL column should error"
-    );
+    assert!(err.is_err(), "INSERT missing NOT NULL column should error");
 
     let err_msg = format!("{:?}", err);
     assert!(
@@ -1176,7 +1170,7 @@ async fn it_validates_insert_missing_multiple_required_columns() -> anyhow::Resu
 
     // Missing required_b and required_c → error should list both
     let err = conn
-        .describe("INSERT INTO test_insert_multi_missing (id, required_a) VALUES (?, ?)")
+        .describe("INSERT INTO test_insert_multi_missing (id, required_a) VALUES (?, ?)".into_sql_str())
         .await;
 
     assert!(err.is_err());
@@ -1206,7 +1200,7 @@ async fn it_validates_insert_without_column_list() -> anyhow::Result<()> {
     // No explicit column list → VALUES implies all columns
     // Runtime will validate; we skip compile-time check
     let d = conn
-        .describe("INSERT INTO test_insert_no_cols VALUES (?, ?, ?)")
+        .describe("INSERT INTO test_insert_no_cols VALUES (?, ?, ?)".into_sql_str())
         .await;
 
     assert!(
@@ -1233,9 +1227,7 @@ async fn it_validates_insert_with_column_defaults() -> anyhow::Result<()> {
 
     // required_with_default has DEFAULT → not required in INSERT
     let d = conn
-        .describe(
-            "INSERT INTO test_insert_defaults (id, required_no_default) VALUES (?, ?)",
-        )
+        .describe("INSERT INTO test_insert_defaults (id, required_no_default) VALUES (?, ?)".into_sql_str())
         .await;
 
     assert!(
@@ -1260,13 +1252,10 @@ async fn it_validates_insert_case_insensitive() -> anyhow::Result<()> {
 
     // Mixed case table/column names
     let d = conn
-        .describe("INSERT INTO testinsertcase (id, requiredcol) VALUES (?, ?)")
+        .describe("INSERT INTO testinsertcase (id, requiredcol) VALUES (?, ?)".into_sql_str())
         .await;
 
-    assert!(
-        d.is_ok(),
-        "Case-insensitive matching should work for SQLite identifiers"
-    );
+    assert!(d.is_ok(), "Case-insensitive matching should work for SQLite identifiers");
 
     Ok(())
 }
@@ -1286,13 +1275,10 @@ async fn it_validates_insert_with_quoted_identifiers() -> anyhow::Result<()> {
 
     // Quoted identifiers in both table and columns
     let d = conn
-        .describe("INSERT INTO \"test_quoted\" (\"col_a\", col_b) VALUES (?, ?)")
+        .describe("INSERT INTO \"test_quoted\" (\"col_a\", col_b) VALUES (?, ?)".into_sql_str())
         .await;
 
-    assert!(
-        d.is_ok(),
-        "Quoted identifiers should be parsed correctly"
-    );
+    assert!(d.is_ok(), "Quoted identifiers should be parsed correctly");
 
     Ok(())
 }
@@ -1304,7 +1290,7 @@ async fn it_validates_insert_gracefully_skips_nonexistent_table() -> anyhow::Res
     // Table doesn't exist → validation skips gracefully
     // Runtime will error with "no such table"
     let d = conn
-        .describe("INSERT INTO nonexistent_table (col_a) VALUES (?)")
+        .describe("INSERT INTO nonexistent_table (col_a) VALUES (?)".into_sql_str())
         .await;
 
     // Should succeed (or error with different message from actual SQLite),
@@ -1332,7 +1318,7 @@ async fn it_validates_insert_from_issue_4206() -> anyhow::Result<()> {
 
     // This INSERT is missing prop_c → should error
     let err = conn
-        .describe("INSERT INTO session_group (prop_a, prop_b) VALUES (?, ?)")
+        .describe("INSERT INTO session_group (prop_a, prop_b) VALUES (?, ?)".into_sql_str())
         .await;
 
     assert!(

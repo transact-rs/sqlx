@@ -168,10 +168,7 @@ fn get_table_columns(
     Ok(columns)
 }
 
-fn validate_insert_statement(
-    conn: &mut ConnectionState,
-    query: &str,
-) -> Result<(), Error> {
+fn validate_insert_statement(conn: &mut ConnectionState, query: &str) -> Result<(), Error> {
     // Extract table name and specified columns from INSERT
     let (table_name, specified_cols_opt) = match extract_insert_info(query) {
         Some(info) => info,
@@ -208,10 +205,13 @@ fn validate_insert_statement(
                 .map(|c| c.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(Error::Configuration(format!(
-                "INSERT into {} missing NOT NULL column(s) without defaults: {}",
-                table_name, missing_names
-            ).into()));
+            return Err(Error::Configuration(
+                format!(
+                    "INSERT into {} missing NOT NULL column(s) without defaults: {}",
+                    table_name, missing_names
+                )
+                .into(),
+            ));
         }
     }
     // If no specific columns listed, VALUES (...) implies all columns in table order
