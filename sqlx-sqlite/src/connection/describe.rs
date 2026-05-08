@@ -130,7 +130,7 @@ fn get_table_columns(
 ) -> Result<Vec<TableColumnInfo>, Error> {
     // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
     // Column indices: 0=cid, 1=name, 2=type, 3=notnull, 4=dflt_value, 5=pk
-    let pragma_query = format!("PRAGMA table_info({})", table_name);
+    let pragma_query = format!("PRAGMA table_info(\"{}\")", table_name);
 
     let mut statement = match VirtualStatement::new(&pragma_query, false) {
         Ok(stmt) => stmt,
@@ -151,9 +151,16 @@ fn get_table_columns(
             // Get notnull flag
             let not_null = stmt.handle.column_int(3) != 0;
 
-            // Get default value
+            // Get default value (SQLite returns empty string for no default)
             let dflt_value = match stmt.handle.column_text(4) {
-                Ok(v) => Some(v.to_string()),
+                Ok(v) => {
+                    let s = v.to_string();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                }
                 Err(_) => None,
             };
 
