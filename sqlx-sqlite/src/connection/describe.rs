@@ -205,9 +205,7 @@ fn validate_insert_statement(conn: &mut ConnectionState, query: &str) -> Result<
     let required_cols = all_columns
         .iter()
         .filter(|col| {
-            col.not_null
-                && col.dflt_value.is_none()
-                && !(col.pk && col.type_info.contains("INT"))
+            col.not_null && col.dflt_value.is_none() && !(col.pk && col.type_info.contains("INT"))
         })
         .collect::<Vec<_>>();
 
