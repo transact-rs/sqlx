@@ -21,12 +21,11 @@ json = ["serde", "serde_json"]
 
 # for conditional compilation
 _rt-async-global-executor = ["async-global-executor", "_rt-async-io", "_rt-async-task"]
-_rt-async-io = ["async-io", "async-fs"] # see note at async-fs declaration
+_rt-async-io = ["async-io", "async-fs", "socket2"] # see note at async-fs declaration
 _rt-async-std = ["async-std", "_rt-async-io"]
 _rt-async-task = ["async-task"]
 _rt-smol = ["smol", "_rt-async-io", "_rt-async-task"]
-_rt-tokio = ["tokio", "tokio-stream"]
-
+_rt-tokio = ["tokio", "tokio-stream", "socket2"]
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
 _tls-rustls-ring-webpki = ["_tls-rustls", "rustls/ring", "webpki-roots"]
@@ -102,6 +101,7 @@ hashlink = "0.11.0"
 indexmap = "2.0"
 event-listener = "5.2.0"
 hashbrown = "0.16.0"
+socket2 = { version = "0.5", features = ["all"], optional = true }
 
 thiserror.workspace = true
 

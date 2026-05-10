@@ -3,6 +3,7 @@ use std::io;
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
+use std::time::Duration;
 
 pub use buffered::{BufferedSocket, WriteBuffer};
 use bytes::BufMut;
@@ -11,6 +12,25 @@ use cfg_if::cfg_if;
 use crate::io::ReadBuf;
 
 mod buffered;
+
+/// Configuration for TCP keepalive probes on a connection.
+///
+/// All fields default to `None`, meaning the OS default is used.
+/// Constructing a `KeepaliveConfig::default()` and passing it enables keepalive
+/// with OS defaults for all parameters.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct KeepaliveConfig {
+    /// Time the connection must be idle before keepalive probes begin.
+    /// `None` means the OS default.
+    pub idle: Option<Duration>,
+    /// Interval between keepalive probes.
+    /// `None` means the OS default.
+    pub interval: Option<Duration>,
+    /// Maximum number of failed probes before the connection is dropped.
+    /// Only supported on Unix; ignored on other platforms.
+    /// `None` means the OS default.
+    pub retries: Option<u32>,
+}
 
 pub trait Socket: Send + Sync + Unpin + 'static {
     fn try_read(&mut self, buf: &mut dyn ReadBuf) -> io::Result<usize>;
@@ -181,23 +201,63 @@ impl<S: Socket + ?Sized> Socket for Box<S> {
     }
 }
 
+#[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))]
+fn build_tcp_keepalive(config: &KeepaliveConfig) -> socket2::TcpKeepalive {
+    let mut ka = socket2::TcpKeepalive::new();
+
+    if let Some(idle) = config.idle {
+        ka = ka.with_time(idle);
+    }
+
+    // socket2's `with_interval` is unavailable on these platforms.
+    #[cfg(not(any(
+        target_os = "haiku",
+        target_os = "openbsd",
+        target_os = "redox",
+        target_os = "solaris",
+    )))]
+    if let Some(interval) = config.interval {
+        ka = ka.with_interval(interval);
+    }
+
+    // socket2's `with_retries` is unavailable on these platforms.
+    #[cfg(not(any(
+        target_os = "haiku",
+        target_os = "openbsd",
+        target_os = "redox",
+        target_os = "solaris",
+        target_os = "windows",
+    )))]
+    if let Some(retries) = config.retries {
+        ka = ka.with_retries(retries);
+    }
+
+    ka
+}
+
 pub async fn connect_tcp<Ws: WithSocket>(
     host: &str,
     port: u16,
+    keepalive: Option<&KeepaliveConfig>,
     with_socket: Ws,
 ) -> crate::Result<Ws::Output> {
     #[cfg(feature = "_rt-tokio")]
     if crate::rt::rt_tokio::available() {
-        return Ok(with_socket
-            .with_socket(tokio::net::TcpStream::connect((host, port)).await?)
-            .await);
+        let stream = tokio::net::TcpStream::connect((host, port)).await?;
+
+        if let Some(ka) = keepalive {
+            let sock = socket2::SockRef::from(&stream);
+            sock.set_tcp_keepalive(&build_tcp_keepalive(ka))?;
+        }
+
+        return Ok(with_socket.with_socket(stream).await);
     }
 
     cfg_if! {
         if #[cfg(feature = "_rt-async-io")] {
-            Ok(with_socket.with_socket(connect_tcp_async_io(host, port).await?).await)
+            Ok(with_socket.with_socket(connect_tcp_async_io(host, port, keepalive).await?).await)
         } else {
-            crate::rt::missing_rt((host, port, with_socket))
+            crate::rt::missing_rt((host, port, keepalive, with_socket))
         }
     }
 }
@@ -208,7 +268,11 @@ pub async fn connect_tcp<Ws: WithSocket>(
 ///
 /// This implements the same behavior as [`tokio::net::TcpStream::connect()`].
 #[cfg(feature = "_rt-async-io")]
-async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socket> {
+async fn connect_tcp_async_io(
+    host: &str,
+    port: u16,
+    keepalive: Option<&KeepaliveConfig>,
+) -> crate::Result<impl Socket> {
     use async_io::Async;
     use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 
@@ -216,7 +280,14 @@ async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socke
     let host = host.trim_matches(&['[', ']'][..]);
 
     if let Ok(addr) = host.parse::<IpAddr>() {
-        return Ok(Async::<TcpStream>::connect((addr, port)).await?);
+        let stream = Async::<TcpStream>::connect((addr, port)).await?;
+
+        if let Some(ka) = keepalive {
+            let sock = socket2::SockRef::from(stream.get_ref());
+            sock.set_tcp_keepalive(&build_tcp_keepalive(ka))?;
+        }
+
+        return Ok(stream);
     }
 
     let host = host.to_string();
@@ -232,7 +303,14 @@ async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socke
     // Loop through all the Socket Addresses that the hostname resolves to
     for socket_addr in addresses {
         match Async::<TcpStream>::connect(socket_addr).await {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => {
+                if let Some(ka) = keepalive {
+                    let sock = socket2::SockRef::from(stream.get_ref());
+                    sock.set_tcp_keepalive(&build_tcp_keepalive(ka))?;
+                }
+
+                return Ok(stream);
+            }
             Err(e) => last_err = Some(e),
         }
     }

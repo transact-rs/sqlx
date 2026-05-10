@@ -3582,6 +3582,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "smol",
+ "socket2",
  "sqlx",
  "thiserror 2.0.17",
  "time",

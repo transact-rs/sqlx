@@ -1,9 +1,12 @@
-use crate::error::Error;
-use crate::{PgConnectOptions, PgSslMode};
-use sqlx_core::percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
-use sqlx_core::Url;
 use std::net::IpAddr;
 use std::str::FromStr;
+use std::time::Duration;
+
+use sqlx_core::percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
+use sqlx_core::Url;
+
+use crate::error::Error;
+use crate::{PgConnectOptions, PgSslMode};
 
 impl PgConnectOptions {
     pub(crate) fn parse_from_url(url: &Url) -> Result<Self, Error> {
@@ -104,6 +107,41 @@ impl PgConnectOptions {
                     }
                 }
 
+                "keepalives" => match value.as_ref() {
+                    "0" | "1" => {
+                        options = options.keepalives(value.as_ref() == "1");
+                    }
+                    _ => {
+                        return Err(Error::Configuration(
+                            format!("keepalives must be 0 or 1, got: {value}").into(),
+                        ));
+                    }
+                },
+
+                "keepalives_idle" => {
+                    let secs: u64 = value.parse().map_err(Error::config)?;
+                    if secs > 0 {
+                        options = options.keepalives_idle(Duration::from_secs(secs));
+                    }
+                }
+
+                "keepalives_interval" => {
+                    let secs: u64 = value.parse().map_err(Error::config)?;
+                    if secs > 0 {
+                        options = options.keepalives_interval(Duration::from_secs(secs));
+                    }
+                }
+
+                "keepalives_count" => {
+                    let _count: u32 = value.parse().map_err(Error::config)?;
+                    // On non-Unix, TCP_KEEPCNT is not supported; the value is
+                    // parsed for validation only (see `keepalives_retries` docs).
+                    #[cfg(unix)]
+                    {
+                        options = options.keepalives_retries(_count);
+                    }
+                }
+
                 _ => tracing::warn!(%key, %value, "ignoring unrecognized connect parameter"),
             }
         }
@@ -165,6 +203,26 @@ impl PgConnectOptions {
             "statement-cache-capacity",
             &self.statement_cache_capacity.to_string(),
         );
+
+        url.query_pairs_mut()
+            .append_pair("keepalives", if self.keepalives { "1" } else { "0" });
+
+        if self.keepalives {
+            if let Some(idle) = self.keepalive_config.idle {
+                url.query_pairs_mut()
+                    .append_pair("keepalives_idle", &idle.as_secs().to_string());
+            }
+
+            if let Some(interval) = self.keepalive_config.interval {
+                url.query_pairs_mut()
+                    .append_pair("keepalives_interval", &interval.as_secs().to_string());
+            }
+
+            if let Some(retries) = self.keepalive_config.retries {
+                url.query_pairs_mut()
+                    .append_pair("keepalives_count", &retries.to_string());
+            }
+        }
 
         url
     }
@@ -309,8 +367,8 @@ fn it_returns_the_parsed_url_when_socket() {
     let opts = PgConnectOptions::from_str(url).unwrap();
 
     let mut expected_url = Url::parse(url).unwrap();
-    // PgConnectOptions defaults
-    let query_string = "sslmode=prefer&statement-cache-capacity=100";
+    // PgConnectOptions defaults (keepalives=1 is enabled by default)
+    let query_string = "sslmode=prefer&statement-cache-capacity=100&keepalives=1";
     let port = 5432;
     expected_url.set_query(Some(query_string));
     let _ = expected_url.set_port(Some(port));
@@ -324,8 +382,8 @@ fn it_returns_the_parsed_url_when_host() {
     let opts = PgConnectOptions::from_str(url).unwrap();
 
     let mut expected_url = Url::parse(url).unwrap();
-    // PgConnectOptions defaults
-    let query_string = "sslmode=prefer&statement-cache-capacity=100";
+    // PgConnectOptions defaults (keepalives=1 is enabled by default)
+    let query_string = "sslmode=prefer&statement-cache-capacity=100&keepalives=1";
     expected_url.set_query(Some(query_string));
 
     assert_eq!(expected_url, opts.build_url());
@@ -339,4 +397,86 @@ fn built_url_can_be_parsed() {
     let parsed = PgConnectOptions::from_str(opts.build_url().as_ref());
 
     assert!(parsed.is_ok());
+}
+
+#[test]
+fn it_parses_keepalives_enabled() {
+    let url = "postgres://localhost/db?keepalives=1";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert!(opts.keepalives);
+    assert_eq!(opts.keepalive_config.idle, None);
+    assert_eq!(opts.keepalive_config.interval, None);
+    assert_eq!(opts.keepalive_config.retries, None);
+}
+
+#[test]
+fn it_parses_keepalives_disabled() {
+    let url = "postgres://localhost/db?keepalives_idle=60&keepalives=0";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert!(!opts.keepalives);
+    // timer values are preserved even when keepalives is disabled
+    assert_eq!(opts.keepalive_config.idle, Some(Duration::from_secs(60)));
+}
+
+#[test]
+fn it_parses_keepalives_idle() {
+    let url = "postgres://localhost/db?keepalives_idle=60";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(opts.keepalive_config.idle, Some(Duration::from_secs(60)));
+}
+
+#[test]
+fn it_parses_keepalives_interval_before_idle() {
+    // interval appears before idle — must not be silently lost
+    let url = "postgres://localhost/db?keepalives_interval=5&keepalives_idle=60";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(opts.keepalive_config.idle, Some(Duration::from_secs(60)));
+    assert_eq!(opts.keepalive_config.interval, Some(Duration::from_secs(5)));
+}
+
+#[test]
+fn it_parses_keepalives_all_params() {
+    let url = "postgres://localhost/db?keepalives_count=3&keepalives_interval=5&keepalives_idle=60";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(opts.keepalive_config.idle, Some(Duration::from_secs(60)));
+    assert_eq!(opts.keepalive_config.interval, Some(Duration::from_secs(5)));
+    #[cfg(unix)]
+    assert_eq!(opts.keepalive_config.retries, Some(3));
+}
+
+#[test]
+fn it_treats_zero_keepalive_timers_as_os_default() {
+    let url = "postgres://localhost/db?keepalives_idle=0&keepalives_interval=0";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    // 0 means "use OS default" — the value should not be stored
+    assert_eq!(opts.keepalive_config.idle, None);
+    assert_eq!(opts.keepalive_config.interval, None);
+}
+
+#[test]
+fn it_rejects_invalid_keepalives_value() {
+    let url = "postgres://localhost/db?keepalives=2";
+    assert!(PgConnectOptions::from_str(url).is_err());
+}
+
+#[test]
+fn it_roundtrips_keepalive_through_build_url() {
+    let url = "postgres://localhost/db?keepalives_idle=60&keepalives_interval=5&keepalives_count=3";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+    let rebuilt = PgConnectOptions::from_str(&opts.build_url().to_string()).unwrap();
+
+    assert!(rebuilt.keepalives);
+    assert_eq!(rebuilt.keepalive_config.idle, Some(Duration::from_secs(60)));
+    assert_eq!(
+        rebuilt.keepalive_config.interval,
+        Some(Duration::from_secs(5))
+    );
+    #[cfg(unix)]
+    assert_eq!(rebuilt.keepalive_config.retries, Some(3));
 }

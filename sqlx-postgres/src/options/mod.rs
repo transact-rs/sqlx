@@ -2,9 +2,11 @@ use std::borrow::Cow;
 use std::env::var;
 use std::fmt::{self, Display, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub use ssl_mode::PgSslMode;
 
+use crate::net::KeepaliveConfig;
 use crate::{connection::LogSettings, net::tls::CertificateInput};
 
 mod connect;
@@ -30,6 +32,8 @@ pub struct PgConnectOptions {
     pub(crate) log_settings: LogSettings,
     pub(crate) extra_float_digits: Option<Cow<'static, str>>,
     pub(crate) options: Option<String>,
+    pub(crate) keepalives: bool,
+    pub(crate) keepalive_config: KeepaliveConfig,
 }
 
 impl Default for PgConnectOptions {
@@ -97,6 +101,9 @@ impl PgConnectOptions {
             extra_float_digits: Some("2".into()),
             log_settings: Default::default(),
             options: var("PGOPTIONS").ok(),
+            // Matches libpq default: keepalives=1 with OS defaults for timers.
+            keepalives: true,
+            keepalive_config: KeepaliveConfig::default(),
         }
     }
 
@@ -452,6 +459,85 @@ impl PgConnectOptions {
         self
     }
 
+    /// Enables or disables TCP keepalive on the connection.
+    ///
+    /// This option is ignored for Unix domain sockets.
+    ///
+    /// Keepalive is enabled by default.
+    ///
+    /// When enabled, OS defaults are used for all timer parameters unless
+    /// overridden by [`keepalives_idle`][Self::keepalives_idle],
+    /// [`keepalives_interval`][Self::keepalives_interval], or
+    /// [`keepalives_retries`][Self::keepalives_retries].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new()
+    ///     .keepalives(false);
+    /// ```
+    pub fn keepalives(mut self, enable: bool) -> Self {
+        self.keepalives = enable;
+        self
+    }
+
+    /// Sets the idle time before TCP keepalive probes begin.
+    ///
+    /// This is ignored for Unix domain sockets, or if the `keepalives`
+    /// option is disabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new()
+    ///     .keepalives_idle(Duration::from_secs(60));
+    /// ```
+    pub fn keepalives_idle(mut self, idle: Duration) -> Self {
+        self.keepalive_config.idle = Some(idle);
+        self
+    }
+
+    /// Sets the interval between TCP keepalive probes.
+    ///
+    /// This is ignored for Unix domain sockets, or if the `keepalives`
+    /// option is disabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new()
+    ///     .keepalives_interval(Duration::from_secs(5));
+    /// ```
+    pub fn keepalives_interval(mut self, interval: Duration) -> Self {
+        self.keepalive_config.interval = Some(interval);
+        self
+    }
+
+    /// Sets the maximum number of TCP keepalive probes before the connection is dropped.
+    ///
+    /// This is ignored for Unix domain sockets, or if the `keepalives`
+    /// option is disabled.
+    ///
+    /// Only supported on Unix platforms; ignored on other platforms.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new()
+    ///     .keepalives_retries(3);
+    /// ```
+    #[cfg(unix)]
+    pub fn keepalives_retries(mut self, retries: u32) -> Self {
+        self.keepalive_config.retries = Some(retries);
+        self
+    }
+
     /// We try using a socket if hostname starts with `/` or if socket parameter
     /// is specified.
     pub(crate) fn fetch_socket(&self) -> Option<String> {
@@ -579,6 +665,34 @@ impl PgConnectOptions {
     /// ```
     pub fn get_options(&self) -> Option<&str> {
         self.options.as_deref()
+    }
+
+    /// Get whether TCP keepalives are enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new();
+    /// assert!(options.get_keepalives());
+    /// ```
+    pub fn get_keepalives(&self) -> bool {
+        self.keepalives
+    }
+
+    /// Get the idle time before TCP keepalive probes begin.
+    pub fn get_keepalives_idle(&self) -> Option<Duration> {
+        self.keepalive_config.idle
+    }
+
+    /// Get the interval between TCP keepalive probes.
+    pub fn get_keepalives_interval(&self) -> Option<Duration> {
+        self.keepalive_config.interval
+    }
+
+    /// Get the maximum number of TCP keepalive probes.
+    pub fn get_keepalives_retries(&self) -> Option<u32> {
+        self.keepalive_config.retries
     }
 }
 
