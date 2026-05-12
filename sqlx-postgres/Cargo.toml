@@ -82,7 +82,7 @@ path = ".."
 features = ["postgres", "derive"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
-etcetera = "0.10.0"
+etcetera = "0.11.0"
 
 [lints]
 workspace = true
