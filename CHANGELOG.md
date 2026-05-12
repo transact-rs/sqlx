@@ -187,6 +187,10 @@ As per our [MSRV policy](FAQ.md#MSRV), the supported Rust version for this relea
 * [[#4233]]: Change reference to dotenvy [[@graemer957]]
 * [[#4235]]: chore: Update to validator 0.20 [[@tottoto]]
 * [[#4253]]: chore: update example to axum 0.8 [[@tottoto]]
+* Release PR:
+  * Upgraded all Rust-Crypto crates, `rand`
+  * Upgraded `etcetera` to `0.11.0`
+  * Increased max of `libsqlite3-sys` version range to `<0.38.0`
 
 
 ### Fixed
