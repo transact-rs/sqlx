@@ -1,7 +1,7 @@
 use anyhow::Context;
 use futures_util::TryStreamExt;
 use sqlx::mysql::{MySql, MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlRow};
-use sqlx::{Column, Connection, Executor, Row, SqlSafeStr, Statement, TypeInfo};
+use sqlx::{AssertSqlSafe, Column, Connection, Executor, Row, SqlSafeStr, Statement, TypeInfo};
 use sqlx_core::connection::ConnectOptions;
 use sqlx_core::types::Type;
 use sqlx_mysql::MySqlConnectOptions;
@@ -599,7 +599,7 @@ async fn select_statement_count(conn: &mut MySqlConnection) -> Result<i64, sqlx:
         SELECT COUNT(*)
         FROM performance_schema.threads AS t
         INNER JOIN performance_schema.prepared_statements_instances AS psi
-            ON psi.OWNER_THREAD_ID = t.THREAD_ID 
+            ON psi.OWNER_THREAD_ID = t.THREAD_ID
         WHERE t.processlist_id = CONNECTION_ID()
         "#,
     )
@@ -724,6 +724,46 @@ async fn any_blob_conversions() -> anyhow::Result<()> {
         <&[u8] as Decode<Any>>::decode(binary_blob).unwrap(),
         [0x01, 0x02, 0x03, 0x04, 0xDE, 0xAD, 0xBE, 0xEF],
     );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_can_load_a_file() -> anyhow::Result<()> {
+    let mut conn = new::<MySql>().await?;
+
+    let _ = conn
+        .execute(
+            r#"
+CREATE TEMPORARY TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+            "#,
+        )
+        .await?;
+
+    let _ = conn.execute("SET GLOBAL local_infile = 1;").await?;
+
+    let file_path = env::current_dir()
+        .unwrap()
+        .join("tests/mysql/fixtures/load_data_infile.txt");
+
+    // Execute LOAD DATA LOCAL INFILE
+    let load_query = format!(
+        "LOAD DATA LOCAL INFILE '{}' INTO TABLE users FIELDS TERMINATED BY ',' LINES TERMINATED BY '\\n'",
+        file_path.display()
+    );
+
+    let result = conn.execute(AssertSqlSafe(load_query)).await;
+
+    if let Err(e) = result {
+        assert!(false, "{:?}", e)
+    }
+
+    let name = sqlx::query("SELECT name FROM users WHERE id = 1")
+        .try_map(|row: MySqlRow| row.try_get::<String, _>(0))
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!("a", name);
 
     Ok(())
 }

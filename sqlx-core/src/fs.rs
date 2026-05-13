@@ -94,3 +94,22 @@ impl ReadDir {
         }
     }
 }
+
+#[cfg(feature = "_rt-tokio")]
+pub async fn open_file<P: AsRef<Path>>(path: P) -> Result<tokio::fs::File, io::Error> {
+    if rt::rt_tokio::available() {
+        return tokio::fs::File::open(path).await;
+    }
+
+    rt::missing_rt(path);
+}
+
+#[cfg(all(feature = "_rt-async-io", not(feature = "_rt-tokio")))]
+pub async fn open_file<P: AsRef<Path>>(path: P) -> Result<async_fs::File, io::Error> {
+    async_fs::File::open(path).await
+}
+
+#[cfg(all(not(feature = "_rt-async-io"), not(feature = "_rt-tokio")))]
+pub async fn open_file<P: AsRef<Path>>(path: P) -> Result<futures_util::io::Empty, io::Error> {
+    rt::missing_rt(path)
+}
