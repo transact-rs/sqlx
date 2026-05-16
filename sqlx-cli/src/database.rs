@@ -1,10 +1,9 @@
 use crate::opt::{ConnectOpts, MigrationSourceOpt};
 use crate::{migrate, Config};
-use console::{style, Term};
-use dialoguer::Confirm;
+use console::style;
 use sqlx::any::Any;
 use sqlx::migrate::MigrateDatabase;
-use std::{io, mem};
+use std::io::{self, BufRead, Write};
 use tokio::task;
 
 pub async fn create(connect_opts: &ConnectOpts) -> anyhow::Result<()> {
@@ -75,45 +74,30 @@ pub async fn setup(
 }
 
 async fn ask_to_continue_drop(db_url: String) -> bool {
-    // If the setup operation is cancelled while we are waiting for the user to decide whether
-    // or not to drop the database, this will restore the terminal's cursor to its normal state.
-    struct RestoreCursorGuard {
-        disarmed: bool,
-    }
+    // Plain line-based prompt rather than dialoguer::Confirm. dialoguer puts
+    // the terminal into raw mode for the y/N toggle even with
+    // wait_for_newline(true), which means keypresses never echo and the whole
+    // prompt gets repainted on every flip. That's confusing in general and
+    // hostile to screen-reader users (#4236). Reading a line of stdin echoes
+    // input the way users expect and doesn't need a cursor-restore guard.
+    let prompt = format!("Drop database at {}? (y/N): ", style(&db_url).cyan());
 
-    impl Drop for RestoreCursorGuard {
-        fn drop(&mut self) {
-            if !self.disarmed {
-                Term::stderr().show_cursor().unwrap()
-            }
-        }
-    }
+    let decision = task::spawn_blocking(move || -> io::Result<bool> {
+        let mut stderr = io::stderr().lock();
+        stderr.write_all(prompt.as_bytes())?;
+        stderr.flush()?;
 
-    let mut guard = RestoreCursorGuard { disarmed: false };
-
-    let decision_result = task::spawn_blocking(move || {
-        Confirm::new()
-            .with_prompt(format!("Drop database at {}?", style(&db_url).cyan()))
-            .wait_for_newline(true)
-            .default(false)
-            .show_default(true)
-            .interact()
+        let mut line = String::new();
+        io::stdin().lock().read_line(&mut line)?;
+        let answer = line.trim();
+        Ok(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"))
     })
     .await
-    .expect("Confirm thread panicked");
-    match decision_result {
-        Ok(decision) => {
-            guard.disarmed = true;
-            decision
-        }
-        Err(dialoguer::Error::IO(err)) if err.kind() == io::ErrorKind::Interrupted => {
-            // Sometimes CTRL + C causes this error to be returned
-            mem::drop(guard);
-            false
-        }
-        Err(err) => {
-            mem::drop(guard);
-            panic!("Confirm dialog failed with {err}")
-        }
+    .expect("drop-confirm thread panicked");
+
+    match decision {
+        Ok(d) => d,
+        Err(err) if err.kind() == io::ErrorKind::Interrupted => false,
+        Err(err) => panic!("Confirm dialog failed with {err}"),
     }
 }
