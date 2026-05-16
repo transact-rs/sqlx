@@ -59,8 +59,6 @@ pub fn maybe_apply_dotenv() {
 pub async fn run(opt: Opt) -> anyhow::Result<()> {
     // This `select!` is here so that when the process receives a `SIGINT` (CTRL + C),
     // the futures currently running on this task get dropped before the program exits.
-    // This is currently necessary for the consumers of the `dialoguer` crate to restore
-    // the user's terminal if the process is interrupted while a dialog is being displayed.
 
     let ctrlc_fut = signal::ctrl_c();
     let do_run_fut = do_run(opt);
