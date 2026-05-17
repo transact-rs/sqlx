@@ -270,6 +270,30 @@ impl Migrate for MssqlConnection {
             Ok(elapsed)
         })
     }
+
+    fn skip<'e>(
+        &'e mut self,
+        table_name: &'e str,
+        migration: &'e Migration,
+    ) -> BoxFuture<'e, Result<(), MigrateError>> {
+        Box::pin(async move {
+            let ident = escape_table_name(table_name);
+            // language=TSQL
+            let _ = query(AssertSqlSafe(format!(
+                r#"
+    INSERT INTO {ident} ( version, description, success, checksum, execution_time )
+    VALUES ( @p1, @p2, 1, @p3, -1 )
+                "#
+            )))
+            .bind(migration.version)
+            .bind(&*migration.description)
+            .bind(&*migration.checksum)
+            .execute(self)
+            .await?;
+
+            Ok(())
+        })
+    }
 }
 
 async fn execute_migration(
