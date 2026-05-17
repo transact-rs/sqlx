@@ -66,7 +66,7 @@ pub struct PgConnectionInner {
     cache_type_info: HashMap<Oid, PgTypeInfo>,
     cache_type_oid: HashMap<UStr, Oid>,
     cache_elem_type_to_array: HashMap<Oid, Oid>,
-    cache_table_to_column_names: HashMap<Oid, TableColumns>,
+    cache_table_data: HashMap<Oid, TableData>,
 
     // number of ReadyForQuery messages that we are currently expecting
     pub(crate) pending_ready_for_query_count: usize,
@@ -78,7 +78,7 @@ pub struct PgConnectionInner {
     log_settings: LogSettings,
 }
 
-pub(crate) struct TableColumns {
+pub(crate) struct TableData {
     table_name: Arc<str>,
     /// Attribute number -> name.
     columns: BTreeMap<i16, Arc<str>>,

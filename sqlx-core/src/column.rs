@@ -84,6 +84,11 @@ impl ColumnOrigin {
 /// This trait is implemented for strings which are used to look up a column by name, and for
 /// `usize` which is used as a positional index into the row.
 ///
+/// *Caution*: The column index may differ between a [`Statement`] and a [`Row`] returned by the
+/// statement. This can happen with some databases if, for example, the schema changes between
+/// prepare and execute or if the database does not provide column information when the statement
+/// is prepared.
+///
 /// [`Row`]: crate::row::Row
 /// [`Statement`]: crate::statement::Statement
 /// [`get`]: crate::row::Row::get

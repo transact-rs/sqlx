@@ -128,7 +128,7 @@ impl PgPolygon {
             .into());
         }
 
-        if bytes.len() % BYTE_WIDTH * 2 != 0 {
+        if bytes.len() % (BYTE_WIDTH * 2) != 0 {
             return Err(format!(
                 "data length not divisible by pairs of {BYTE_WIDTH}: {}",
                 bytes.len()

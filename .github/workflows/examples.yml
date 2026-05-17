@@ -28,7 +28,7 @@ jobs:
           -p sqlx-cli
           --release
           --no-default-features
-          --features mysql,postgres,sqlite,sqlx-toml
+          --features mysql,postgres,sqlite,sqlx-toml,mysql-rsa
 
       - uses: actions/upload-artifact@v4
         with:

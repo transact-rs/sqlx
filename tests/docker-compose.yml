@@ -47,6 +47,8 @@ services:
             dockerfile: mysql/Dockerfile
             args:
                 IMAGE: mysql:5.7
+                SSL_CERT_DIR: certs/rsa
+                SSL_KEY_DIR: certs/rsa/keys
         volumes:
             - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
         ports:

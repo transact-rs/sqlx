@@ -1,4 +1,4 @@
-use crate::{type_info::PgType, PgArgumentBuffer, PgHasArrayType, PgTypeInfo, Postgres};
+use crate::{PgArgumentBuffer, PgHasArrayType, PgTypeInfo, Postgres};
 use core::cell::Cell;
 use sqlx_core::{
     database::Database,
@@ -95,13 +95,10 @@ where
         buf.extend(&1_i32.to_be_bytes()); // number of dimensions
         buf.extend(&0_i32.to_be_bytes()); // flags
 
-        match type_info.0 {
-            PgType::DeclareWithName(name) => buf.patch_type_by_name(&name),
-            PgType::DeclareArrayOf(array) => buf.patch_array_type(array),
-
-            ty => {
-                buf.extend(&ty.oid().0.to_be_bytes());
-            }
+        if let Some(oid) = type_info.oid() {
+            buf.extend(oid.0.to_be_bytes());
+        } else {
+            buf.push_hole(type_info);
         }
 
         let len_start = buf.len();

@@ -39,7 +39,7 @@ impl SqliteError {
             let msg = sqlite3_errmsg(handle);
             debug_assert!(!msg.is_null());
 
-            str::from_utf8_unchecked(CStr::from_ptr(msg).to_bytes()).to_owned()
+            String::from_utf8_lossy(CStr::from_ptr(msg).to_bytes()).into_owned()
         };
 
         Some(Self {
