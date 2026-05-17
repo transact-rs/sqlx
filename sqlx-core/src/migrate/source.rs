@@ -248,8 +248,7 @@ pub fn resolve_blocking_with_config(
         ));
     }
 
-    // Ensure that we are sorted by version in ascending order.
-    migrations.sort_by_key(|(m, _)| m.version);
+    migrations.sort();
 
     Ok(migrations)
 }

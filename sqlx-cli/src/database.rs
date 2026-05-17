@@ -62,7 +62,16 @@ pub async fn setup(
     connect_opts: &ConnectOpts,
 ) -> anyhow::Result<()> {
     create(connect_opts).await?;
-    migrate::run(config, migration_source, connect_opts, false, false, None).await
+    migrate::run(
+        config,
+        migration_source,
+        connect_opts,
+        false,
+        false,
+        None,
+        false,
+    )
+    .await
 }
 
 async fn ask_to_continue_drop(db_url: String) -> bool {

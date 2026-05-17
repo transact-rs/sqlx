@@ -1,5 +1,6 @@
+use axum::extract::State;
 use axum::http::StatusCode;
-use axum::{routing::post, Extension, Json, Router};
+use axum::{routing::post, Json, Router};
 use rand::Rng;
 use regex::Regex;
 use std::{sync::LazyLock, time::Duration};
@@ -13,7 +14,7 @@ use crate::http::{Error, Result};
 
 pub type UserId = Uuid;
 
-pub fn router() -> Router {
+pub fn router() -> Router<PgPool> {
     Router::new().route("/v1/user", post(create_user))
 }
 
@@ -24,7 +25,7 @@ static USERNAME_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9A-Za
 #[derive(Deserialize, Validate)]
 #[serde(rename_all = "camelCase")]
 pub struct UserAuth {
-    #[validate(length(min = 3, max = 16), regex = "USERNAME_REGEX")]
+    #[validate(length(min = 3, max = 16), regex(path = USERNAME_REGEX))]
     username: String,
     #[validate(length(min = 8, max = 32))]
     password: String,
@@ -32,7 +33,7 @@ pub struct UserAuth {
 
 // WARNING: this API has none of the checks that a normal user signup flow implements,
 // such as email or phone verification.
-async fn create_user(db: Extension<PgPool>, Json(req): Json<UserAuth>) -> Result<StatusCode> {
+async fn create_user(db: State<PgPool>, Json(req): Json<UserAuth>) -> Result<StatusCode> {
     req.validate()?;
 
     let UserAuth { username, password } = req;

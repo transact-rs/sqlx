@@ -26,6 +26,7 @@ members = [
     "examples/postgres/transaction",
     "examples/sqlite/todos",
     "examples/sqlite/extension",
+    "examples/sqlite/serialize",
 ]
 
 [workspace.package]
@@ -123,6 +124,7 @@ any = ["sqlx-core/any", "sqlx-mssql?/any", "sqlx-mysql?/any", "sqlx-postgres?/an
 mssql = ["sqlx-mssql", "sqlx-macros?/mssql"]
 postgres = ["sqlx-postgres", "sqlx-macros?/postgres"]
 mysql = ["sqlx-mysql", "sqlx-macros?/mysql"]
+mysql-rsa = ["mysql", "sqlx-mysql/rsa", "sqlx-macros?/mysql-rsa"]
 sqlite = ["sqlite-bundled", "sqlite-deserialize", "sqlite-load-extension", "sqlite-unlock-notify"]
 
 # SQLite base features
@@ -172,7 +174,7 @@ sqlx-macros = { version = "=0.9.0-alpha.1", path = "sqlx-macros" }
 
 # Driver crates
 sqlx-mssql = { version = "=0.9.0-alpha.1", path = "sqlx-mssql" }
-sqlx-mysql = { version = "=0.9.0-alpha.1", path = "sqlx-mysql" }
+sqlx-mysql = { version = "=0.9.0-alpha.1", path = "sqlx-mysql", default-features = false }
 sqlx-postgres = { version = "=0.9.0-alpha.1", path = "sqlx-postgres" }
 sqlx-sqlite = { version = "=0.9.0-alpha.1", path = "sqlx-sqlite" }
 
@@ -187,13 +189,13 @@ chrono = { version = "0.4.34", default-features = false, features = ["std", "clo
 ipnet = "2.3.0"
 ipnetwork = "0.21.1"
 mac_address = "1.1.5"
-rust_decimal = { version = "1.26.1", default-features = false, features = ["std"] }
-time = { version = "0.3.36", features = ["formatting", "parsing", "macros"] }
-uuid = "1.1.2"
+rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }
+time = { version = "0.3.37", features = ["formatting", "parsing", "macros"] }
+uuid = "1.12.1"
 
 # Common utility crates
 cfg-if = "1.0.0"
-dotenvy = { version = "0.15.0", default-features = false }
+dotenvy = { version = "0.15.7", default-features = false }
 thiserror = { version = "2.0.17", default-features = false, features = ["std"] }
 
 # Runtimes
@@ -210,7 +212,7 @@ version = "2.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1"
+version = "1.25.0"
 features = ["time", "net", "sync", "fs", "io-util", "rt"]
 default-features = false
 
@@ -219,25 +221,25 @@ sqlx-core = { workspace = true, features = ["migrate"] }
 sqlx-macros = { workspace = true, optional = true }
 
 sqlx-mssql = { workspace = true, optional = true }
-sqlx-mysql = { workspace = true, optional = true }
+sqlx-mysql = { workspace = true, optional = true, default-features = false }
 sqlx-postgres = { workspace = true, optional = true }
 sqlx-sqlite = { workspace = true, optional = true }
 
 [dev-dependencies]
-anyhow = "1.0.52"
-time_ = { version = "0.3.2", package = "time" }
-futures-util = { version = "0.3.19", default-features = false, features = ["alloc"] }
+anyhow = "1.0.58"
+time_ = { version = "0.3.37", package = "time" }
+futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
 env_logger = "0.11"
 async-std = { workspace = true, features = ["attributes"] }
-tokio = { version = "1.15.0", features = ["full"] }
-dotenvy = "0.15.0"
+tokio = { version = "1.25.0", features = ["full"] }
+dotenvy = "0.15.7"
 trybuild = "1.0.53"
 sqlx-test = { path = "./sqlx-test" }
 paste = "1.0.6"
-serde = { version = "1.0.132", features = ["derive"] }
-serde_json = "1.0.73"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
 url = "2.2.2"
-rand = "0.8.4"
+rand = "0.8.5"
 rand_xoshiro = "0.6.0"
 hex = "0.4.3"
 tempfile = "3.10.1"

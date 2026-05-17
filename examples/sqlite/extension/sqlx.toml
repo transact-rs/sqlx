@@ -1,4 +1,4 @@
-[common.drivers.sqlite]
+[drivers.sqlite]
 # Including the full path to the extension is somewhat unusual,
 # because normally an extension will be installed in a standard
 # directory which is part of the library search path. If that were the
@@ -9,4 +9,7 @@
 # * Provide the full path the the extension, as seen below.
 # * Add the non-standard location to the library search path, which on
 #   Linux means adding it to the LD_LIBRARY_PATH environment variable.
-unsafe-load-extensions = ["/tmp/sqlite3-lib/ipaddr"]
+unsafe-load-extensions = [
+	"/tmp/sqlite3-lib/ipaddr",
+	{ path = "/tmp/sqlite3-lib/uuid_renamed", entrypoint = "sqlite3_uuid_init" },
+]

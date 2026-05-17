@@ -2086,6 +2086,7 @@ async fn test_issue_3052() {
 }
 
 #[sqlx_macros::test]
+#[cfg(feature = "chrono")]
 async fn test_bind_iter() -> anyhow::Result<()> {
     use sqlx::postgres::PgBindIterExt;
     use sqlx::types::chrono::{DateTime, Utc};

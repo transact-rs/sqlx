@@ -22,7 +22,13 @@ $ cargo install sqlx-cli --no-default-features --features rustls
 
 # only for sqlite and use the system sqlite library
 $ cargo install sqlx-cli --no-default-features --features sqlite-unbundled
+
+# if you connect to MySQL/MariaDB without TLS and the server requires RSA auth
+$ cargo install sqlx-cli --features mysql-rsa
 ```
+
+Add `mysql-rsa` only for non-TLS MySQL/MariaDB connections that use
+`caching_sha2_password` or `sha256_password`. If you use TLS, it is not needed.
 
 ## Usage
 

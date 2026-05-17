@@ -161,7 +161,7 @@ fn run_prepare_step(ctx: &PrepareCtx, cache_dir: &Path) -> anyhow::Result<()> {
     let tmp_dir = ctx.metadata.target_directory().join("sqlx-tmp");
     fs::create_dir_all(&tmp_dir).context(format!(
         "Failed to create temporary query cache directory: {:?}",
-        cache_dir
+        tmp_dir
     ))?;
 
     // Only delete sqlx-*.json files to avoid accidentally deleting any user data.

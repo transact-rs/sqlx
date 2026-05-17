@@ -34,6 +34,7 @@ sqlx-toml = ["sqlx-core/sqlx-toml", "sqlx-sqlite?/sqlx-toml"]
 # database
 mssql = ["sqlx-mssql"]
 mysql = ["sqlx-mysql"]
+mysql-rsa = ["mysql", "sqlx-mysql/rsa"]
 postgres = ["sqlx-postgres"]
 sqlite = ["_sqlite", "sqlx-sqlite/bundled"]
 sqlite-unbundled = ["_sqlite", "sqlx-sqlite/unbundled"]
@@ -57,7 +58,7 @@ uuid = ["sqlx-core/uuid", "sqlx-mssql?/uuid", "sqlx-mysql?/uuid", "sqlx-postgres
 [dependencies]
 sqlx-core = { workspace = true, features = ["offline"] }
 sqlx-mssql = { workspace = true, features = ["offline", "migrate"], optional = true }
-sqlx-mysql = { workspace = true, features = ["offline", "migrate"], optional = true }
+sqlx-mysql = { workspace = true, features = ["offline", "migrate"], optional = true, default-features = false }
 sqlx-postgres = { workspace = true, features = ["offline", "migrate"], optional = true }
 sqlx-sqlite = { workspace = true, features = ["offline", "migrate"], optional = true }
 
@@ -73,12 +74,12 @@ thiserror = { workspace = true, optional = true }
 hex = { version = "0.4.3" }
 heck = { version = "0.5" }
 either = "1.6.1"
-proc-macro2 = { version = "1.0.79", default-features = false }
-serde = { version = "1.0.132", features = ["derive"] }
-serde_json = { version = "1.0.73" }
+proc-macro2 = { version = "1.0.83", default-features = false }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = { version = "1.0.142" }
 sha2 = { version = "0.10.0" }
-syn = { version = "2.0.52", default-features = false, features = ["full", "derive", "parsing", "printing", "clone-impls"] }
-quote = { version = "1.0.26", default-features = false }
+syn = { version = "2.0.87", default-features = false, features = ["full", "derive", "parsing", "printing", "clone-impls"] }
+quote = { version = "1.0.35", default-features = false }
 url = { version = "2.2.2" }
 
 [lints.rust.unexpected_cfgs]
