@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::ext::ustr::UStr;
 use crate::io::MySqlBufExt;
-use crate::logger::QueryLogger;
+use crate::logger::{InstrumentedStream, QueryLogger};
 use crate::protocol::response::Status;
 use crate::protocol::statement::{
     BinaryRow, Execute as StatementExecute, Prepare, PrepareOk, StmtClose,
@@ -107,12 +107,14 @@ impl MySqlConnection {
         persistent: bool,
     ) -> Result<impl Stream<Item = Result<Either<MySqlQueryResult, MySqlRow>, Error>> + 'e, Error>
     {
-        let mut logger = QueryLogger::new(sql, self.inner.log_settings.clone());
+        let mut logger =
+            QueryLogger::new(sql, self.inner.log_settings.clone()).with_db_system_name("mysql");
+        let span = logger.span();
 
         self.inner.stream.wait_until_ready().await?;
         self.inner.stream.waiting.push_back(Waiting::Result);
 
-        Ok(try_stream! {
+        let stream = try_stream! {
         let sql = logger.sql().as_str();
 
             // make a slot for the shared column data
@@ -266,7 +268,9 @@ impl MySqlConnection {
                     r#yield!(v);
                 }
             }
-        })
+        };
+
+        Ok(InstrumentedStream::new(stream, span))
     }
 }
 
