@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::io::{PortalId, StatementId};
-use crate::logger::QueryLogger;
+use crate::logger::{InstrumentedStream, QueryLogger};
 use crate::message::{
     self, BackendMessageFormat, Bind, Close, CommandComplete, DataRow, ParameterDescription, Parse,
     ParseComplete, RowDescription,
@@ -203,7 +203,9 @@ impl PgConnection {
         persistent: bool,
         metadata_opt: Option<Arc<PgStatementMetadata>>,
     ) -> Result<impl Stream<Item = Result<Either<PgQueryResult, PgRow>, Error>> + 'e, Error> {
-        let mut logger = QueryLogger::new(query, self.inner.log_settings.clone());
+        let mut logger = QueryLogger::new(query, self.inner.log_settings.clone())
+            .with_db_system_name("postgresql");
+        let span = logger.span();
         let sql = logger.sql().as_str();
 
         // before we continue, wait until we are "ready" to accept more queries
@@ -292,7 +294,7 @@ impl PgConnection {
 
         self.inner.stream.flush().await?;
 
-        Ok(try_stream! {
+        let stream = try_stream! {
             loop {
                 let message = self.inner.stream.recv().await?;
 
@@ -372,7 +374,9 @@ impl PgConnection {
             }
 
             Ok(())
-        })
+        };
+
+        Ok(InstrumentedStream::new(stream, span))
     }
 }
 

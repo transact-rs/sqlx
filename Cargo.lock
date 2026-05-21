@@ -3574,6 +3574,7 @@ dependencies = [
  "memchr",
  "native-tls",
  "percent-encoding",
+ "pin-project-lite",
  "rust_decimal",
  "rustls",
  "rustls-native-certs",
