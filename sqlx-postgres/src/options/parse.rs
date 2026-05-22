@@ -5,6 +5,9 @@ use sqlx_core::Url;
 use std::net::IpAddr;
 use std::str::FromStr;
 
+#[cfg(all(test, unix, not(target_arch = "wasm32")))]
+use std::sync::Mutex;
+
 impl PgConnectOptions {
     pub(crate) fn parse_from_url(url: &Url) -> Result<Self, Error> {
         let mut options = Self::new_without_pgpass();
@@ -339,4 +342,33 @@ fn built_url_can_be_parsed() {
     let parsed = PgConnectOptions::from_str(opts.build_url().as_ref());
 
     assert!(parsed.is_ok());
+}
+
+#[cfg(all(test, unix, not(target_arch = "wasm32")))]
+struct PgUserTestGuard(Option<std::ffi::OsString>);
+
+#[cfg(all(test, unix, not(target_arch = "wasm32")))]
+impl Drop for PgUserTestGuard {
+    fn drop(&mut self) {
+        if let Some(old_pguser) = &self.0 {
+            std::env::set_var("PGUSER", old_pguser);
+        } else {
+            std::env::remove_var("PGUSER");
+        }
+    }
+}
+
+#[test]
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+fn it_uses_the_os_username_when_url_omits_user() {
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    let _guard = ENV_LOCK.lock().unwrap();
+    let _pguser_guard = PgUserTestGuard(std::env::var_os("PGUSER"));
+
+    std::env::remove_var("PGUSER");
+
+    let opts = PgConnectOptions::from_str("postgresql:///database").unwrap();
+
+    assert_ne!(opts.username, "anonymous");
 }
