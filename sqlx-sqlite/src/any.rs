@@ -235,8 +235,5 @@ fn map_arguments(args: AnyArguments) -> SqliteArguments {
 }
 
 fn map_result(res: SqliteQueryResult) -> AnyQueryResult {
-    AnyQueryResult {
-        rows_affected: res.rows_affected(),
-        last_insert_id: None,
-    }
+    AnyQueryResult::from(res)
 }
