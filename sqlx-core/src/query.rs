@@ -370,7 +370,7 @@ where
     }
 
     /// Execute the query and return the generated results as a stream.
-    pub fn fetch<'e, 'c: 'e, E>(self, executor: E) -> BoxStream<'e, Result<O, Error>>
+    pub fn fetch<'e, 'c: 'e, E>(mut self, executor: E) -> BoxStream<'e, Result<O, Error>>
     where
         'q: 'e,
         E: 'e + Executor<'c, Database = DB>,
@@ -378,16 +378,9 @@ where
         F: 'e,
         O: 'e,
     {
-        // FIXME: this should have used `executor.fetch()` but that's a breaking change
-        // because this technically allows multiple statements in one query string.
-        #[allow(deprecated)]
-        self.fetch_many(executor)
-            .try_filter_map(|step| async move {
-                Ok(match step {
-                    Either::Left(_) => None,
-                    Either::Right(o) => Some(o),
-                })
-            })
+        executor
+            .fetch(self.inner)
+            .map(move |row| (self.mapper)(row?))
             .boxed()
     }
 

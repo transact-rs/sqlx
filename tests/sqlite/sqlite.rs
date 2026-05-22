@@ -1437,3 +1437,55 @@ async fn issue_3982() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Regression test for https://github.com/launchbadge/sqlx/issues/4126
+// Map::fetch() stream must continue past row-level mapper errors instead
+// of terminating the entire stream at the first error.
+#[sqlx_macros::test]
+async fn it_fetch_stream_continues_past_mapper_error() -> anyhow::Result<()> {
+    use futures_util::StreamExt;
+
+    let mut conn = new::<Sqlite>().await?;
+
+    // Insert rows: values 1..=5
+    sqlx::query("CREATE TEMPORARY TABLE test_stream (val INTEGER NOT NULL)")
+        .execute(&mut conn)
+        .await?;
+    for i in 1..=5i32 {
+        sqlx::query("INSERT INTO test_stream (val) VALUES (?)")
+            .bind(i)
+            .execute(&mut conn)
+            .await?;
+    }
+
+    // Use try_map with a mapper that fails on val == 3
+    let mut stream = sqlx::query("SELECT val FROM test_stream ORDER BY val")
+        .try_map(|row: SqliteRow| {
+            let val: i32 = row.try_get("val")?;
+            if val == 3 {
+                return Err(sqlx::Error::Protocol(format!("bad row: {val}")));
+            }
+            Ok(val)
+        })
+        .fetch(&mut conn);
+
+    let mut successes = Vec::new();
+    let mut errors = 0;
+
+    while let Some(result) = stream.next().await {
+        match result {
+            Ok(val) => successes.push(val),
+            Err(_) => errors += 1,
+        }
+    }
+
+    // The stream should yield all 5 items: 4 successes + 1 error
+    assert_eq!(
+        successes,
+        vec![1, 2, 4, 5],
+        "stream should continue past the error for val=3"
+    );
+    assert_eq!(errors, 1, "there should be exactly one error");
+
+    Ok(())
+}
