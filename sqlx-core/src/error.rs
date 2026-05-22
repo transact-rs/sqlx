@@ -351,3 +351,129 @@ macro_rules! err_protocol {
         )
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_display_wrapper_variants() {
+        let io = || std::io::Error::new(std::io::ErrorKind::Other, "oops");
+
+        assert_eq!(
+            Error::Configuration(Box::new(io())).to_string(),
+            "error with configuration: oops"
+        );
+        assert_eq!(
+            Error::Io(io()).to_string(),
+            "error communicating with database: oops"
+        );
+        assert_eq!(
+            Error::Tls(Box::new(io())).to_string(),
+            "error occurred while attempting to establish a TLS connection: oops"
+        );
+        assert_eq!(
+            Error::Protocol("bad".into()).to_string(),
+            "encountered unexpected or invalid data: bad"
+        );
+        assert_eq!(
+            Error::ColumnDecode {
+                index: "1".into(),
+                source: Box::new(io()),
+            }
+            .to_string(),
+            "error occurred while decoding column 1: oops"
+        );
+        assert_eq!(
+            Error::Encode(Box::new(io())).to_string(),
+            "error occurred while encoding a value: oops"
+        );
+        assert_eq!(
+            Error::Decode(Box::new(io())).to_string(),
+            "error occurred while decoding: oops"
+        );
+        assert_eq!(
+            Error::AnyDriverError(Box::new(io())).to_string(),
+            "error in Any driver mapping: oops"
+        );
+    }
+
+    #[test]
+    fn test_display_message_variants() {
+        assert_eq!(
+            Error::InvalidArgument("missing host".into()).to_string(),
+            "missing host"
+        );
+        assert_eq!(
+            Error::TypeNotFound {
+                type_name: "custom".into(),
+            }
+            .to_string(),
+            "type named custom not found"
+        );
+        assert_eq!(
+            Error::ColumnIndexOutOfBounds { index: 5, len: 3 }.to_string(),
+            "column index out of bounds: the len is 3, but the index is 5"
+        );
+        assert_eq!(
+            Error::ColumnNotFound("foo".into()).to_string(),
+            "no column found for name: foo"
+        );
+    }
+
+    #[test]
+    fn test_display_unit_variants() {
+        assert_eq!(
+            Error::RowNotFound.to_string(),
+            "no rows returned by a query that expected to return at least one row"
+        );
+        assert_eq!(
+            Error::PoolTimedOut.to_string(),
+            "pool timed out while waiting for an open connection"
+        );
+        assert_eq!(
+            Error::PoolClosed.to_string(),
+            "attempted to acquire a connection on a closed pool"
+        );
+        assert_eq!(
+            Error::WorkerCrashed.to_string(),
+            "attempted to communicate with a crashed background worker"
+        );
+        assert_eq!(
+            Error::InvalidSavePointStatement.to_string(),
+            "attempted to call begin_with at non-zero transaction depth"
+        );
+        assert_eq!(
+            Error::BeginFailed.to_string(),
+            "got unexpected connection status after attempting to begin transaction"
+        );
+    }
+
+    #[test]
+    fn test_debug_contains_variant_name() {
+        let io = || std::io::Error::new(std::io::ErrorKind::Other, "oops");
+
+        assert!(format!("{:?}", Error::Configuration(Box::new(io()))).contains("Configuration"));
+        assert!(format!("{:?}", Error::InvalidArgument("x".into())).contains("InvalidArgument"));
+        assert!(format!("{:?}", Error::Io(io())).contains("Io"));
+        assert!(format!("{:?}", Error::Protocol("x".into())).contains("Protocol"));
+        assert!(format!("{:?}", Error::RowNotFound).contains("RowNotFound"));
+        assert!(
+            format!("{:?}", Error::TypeNotFound { type_name: "x".into() }).contains("TypeNotFound")
+        );
+        assert!(
+            format!("{:?}", Error::ColumnIndexOutOfBounds { index: 0, len: 0 })
+                .contains("ColumnIndexOutOfBounds")
+        );
+        assert!(
+            format!("{:?}", Error::ColumnNotFound("x".into())).contains("ColumnNotFound")
+        );
+        assert!(format!("{:?}", Error::PoolTimedOut).contains("PoolTimedOut"));
+        assert!(format!("{:?}", Error::PoolClosed).contains("PoolClosed"));
+        assert!(format!("{:?}", Error::WorkerCrashed).contains("WorkerCrashed"));
+        assert!(
+            format!("{:?}", Error::InvalidSavePointStatement).contains("InvalidSavePointStatement")
+        );
+        assert!(format!("{:?}", Error::BeginFailed).contains("BeginFailed"));
+    }
+}
