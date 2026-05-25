@@ -120,3 +120,8 @@ impl SocketHost<'_> {
         }
     }
 }
+#[cfg(feature = "_rt-tokio")]
+pub use socket::async_rw_adapter::TokioStream;
+
+#[cfg(feature = "_rt-async-io")]
+pub use socket::async_rw_adapter::FuturesStream;
