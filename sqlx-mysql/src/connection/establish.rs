@@ -32,6 +32,82 @@ impl MySqlConnection {
             }),
         })
     }
+
+    /// Connect to a MySQL server over a pre-connected stream implementing
+    /// tokio's [`AsyncRead`][tokio::io::AsyncRead] + [`AsyncWrite`][tokio::io::AsyncWrite].
+    ///
+    /// This allows using custom transport layers (e.g., vsock for AWS Nitro Enclaves,
+    /// QUIC streams, simulation frameworks like `turmoil`, or proxied connections)
+    /// without forking sqlx.
+    ///
+    /// TLS upgrade is negotiated automatically based on `options.ssl_mode`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use sqlx::mysql::{MySqlConnectOptions, MySqlConnection};
+    ///
+    /// # async fn example() -> Result<(), sqlx::Error> {
+    /// let stream = tokio::net::TcpStream::connect("127.0.0.1:3306").await?;
+    /// let options = MySqlConnectOptions::new()
+    ///     .username("root")
+    ///     .database("mydb");
+    /// let conn = MySqlConnection::connect_raw_tokio(stream, &options).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "_rt-tokio")]
+    pub async fn connect_raw_tokio<S>(
+        stream: S,
+        options: &MySqlConnectOptions,
+    ) -> Result<Self, Error>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + Unpin + 'static,
+    {
+        use crate::net::TokioStream;
+        let do_handshake = DoHandshake::new(options)?;
+        let stream = do_handshake.do_handshake(TokioStream::new(stream)).await?;
+        Ok(Self {
+            inner: Box::new(MySqlConnectionInner {
+                stream,
+                transaction_depth: 0,
+                status_flags: Default::default(),
+                cache_statement: StatementCache::new(options.statement_cache_capacity),
+                log_settings: options.log_settings.clone(),
+            }),
+        })
+    }
+
+    /// Connect to a MySQL server over a pre-connected stream implementing
+    /// futures-io's [`AsyncRead`][futures_io::AsyncRead] + [`AsyncWrite`][futures_io::AsyncWrite].
+    ///
+    /// This allows using custom transport layers (e.g., vsock, QUIC streams,
+    /// simulation frameworks, or proxied connections) without forking sqlx.
+    ///
+    /// TLS upgrade is negotiated automatically based on `options.ssl_mode`.
+    #[cfg(feature = "_rt-async-io")]
+    pub async fn connect_raw_futures<S>(
+        stream: S,
+        options: &MySqlConnectOptions,
+    ) -> Result<Self, Error>
+    where
+        S: futures_io::AsyncRead + futures_io::AsyncWrite + Send + Sync + Unpin + 'static,
+    {
+        use crate::net::FuturesStream;
+        let do_handshake = DoHandshake::new(options)?;
+        let stream = do_handshake
+            .do_handshake(FuturesStream::new(stream))
+            .await?;
+        Ok(Self {
+            inner: Box::new(MySqlConnectionInner {
+                stream,
+                transaction_depth: 0,
+                status_flags: Default::default(),
+                cache_statement: StatementCache::new(options.statement_cache_capacity),
+                log_settings: options.log_settings.clone(),
+            }),
+        })
+    }
 }
 
 struct DoHandshake<'a> {
