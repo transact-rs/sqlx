@@ -2218,3 +2218,123 @@ async fn it_can_recover_from_copy_in_invalid_params() -> anyhow::Result<()> {
     )
     .await
 }
+
+#[cfg(feature = "_rt-tokio")]
+#[sqlx_macros::test]
+async fn it_connects_raw_tokio() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let db_url = env::var("DATABASE_URL")?;
+    let options: PgConnectOptions = db_url.parse()?;
+
+    let stream =
+        tokio::net::TcpStream::connect(format!("{}:{}", options.get_host(), options.get_port()))
+            .await?;
+
+    let mut conn = PgConnection::connect_raw_tokio(stream, &options).await?;
+    conn.ping().await?;
+
+    let value: (i32,) = sqlx::query_as("SELECT 1 + 1").fetch_one(&mut conn).await?;
+    assert_eq!(value.0, 2);
+
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "_rt-tokio",
+    any(
+        feature = "tls-native-tls",
+        feature = "tls-rustls",
+        feature = "tls-rustls-aws-lc-rs",
+        feature = "tls-rustls-ring",
+        feature = "tls-rustls-ring-webpki",
+        feature = "tls-rustls-ring-native-roots",
+    )
+))]
+#[sqlx_macros::test]
+async fn it_connects_raw_tokio_with_tls() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let db_url = env::var("DATABASE_URL")?;
+    let options: PgConnectOptions = db_url
+        .parse::<PgConnectOptions>()?
+        .ssl_mode(sqlx::postgres::PgSslMode::Require);
+
+    let stream =
+        tokio::net::TcpStream::connect(format!("{}:{}", options.get_host(), options.get_port()))
+            .await?;
+
+    let mut conn = PgConnection::connect_raw_tokio(stream, &options).await?;
+    conn.ping().await?;
+
+    // Verify TLS is actually in use by checking the connection's SSL status
+    let ssl: bool = sqlx::query_scalar("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+        .fetch_one(&mut conn)
+        .await?;
+    assert!(ssl, "expected connection to be using TLS");
+
+    Ok(())
+}
+
+#[cfg(feature = "_rt-async-std")]
+#[sqlx_macros::test]
+async fn it_connects_raw_futures() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let db_url = env::var("DATABASE_URL")?;
+    let options: PgConnectOptions = db_url.parse()?;
+
+    let stream = async_std::net::TcpStream::connect(format!(
+        "{}:{}",
+        options.get_host(),
+        options.get_port()
+    ))
+    .await?;
+
+    let mut conn = PgConnection::connect_raw_futures(stream, &options).await?;
+    conn.ping().await?;
+
+    let value: (i32,) = sqlx::query_as("SELECT 1 + 1").fetch_one(&mut conn).await?;
+    assert_eq!(value.0, 2);
+
+    Ok(())
+}
+
+#[cfg(all(
+    feature = "_rt-async-std",
+    any(
+        feature = "tls-native-tls",
+        feature = "tls-rustls",
+        feature = "tls-rustls-aws-lc-rs",
+        feature = "tls-rustls-ring",
+        feature = "tls-rustls-ring-webpki",
+        feature = "tls-rustls-ring-native-roots",
+    )
+))]
+#[sqlx_macros::test]
+async fn it_connects_raw_futures_with_tls() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let db_url = env::var("DATABASE_URL")?;
+    let options: PgConnectOptions = db_url
+        .parse::<PgConnectOptions>()?
+        .ssl_mode(sqlx::postgres::PgSslMode::Require);
+
+    let stream = async_std::net::TcpStream::connect(format!(
+        "{}:{}",
+        options.get_host(),
+        options.get_port()
+    ))
+    .await?;
+
+    let mut conn = PgConnection::connect_raw_futures(stream, &options).await?;
+    conn.ping().await?;
+
+    // Verify TLS is actually in use by checking the connection's SSL status
+    let ssl: bool = sqlx::query_scalar("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
+        .fetch_one(&mut conn)
+        .await?;
+    assert!(ssl, "expected connection to be using TLS");
+
+    Ok(())
+}

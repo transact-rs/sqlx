@@ -26,176 +26,196 @@ use crate::net::Socket;
 /// Internal buffer size for the read-ahead used by `poll_read_ready`.
 const ADAPTER_BUF_SIZE: usize = 8192;
 
-/// Generates an adapter struct + `Socket` impl for a given async I/O trait family.
-macro_rules! impl_socket_adapter {
-    (
-        $(#[$meta:meta])*
-        $name:ident,
-        feature = $feature:literal,
-        bounds($($bound:path),+),
-        poll_read($self:ident, $cx:ident, $buf:ident) => $poll_read_expr:expr,
-        poll_write($self_w:ident, $cx_w:ident, $buf_w:ident) => $poll_write_expr:expr,
-        poll_flush($self_f:ident, $cx_f:ident) => $poll_flush_expr:expr,
-        poll_shutdown($self_s:ident, $cx_s:ident) => $poll_shutdown_expr:expr $(,)?
-    ) => {
-        $(#[$meta])*
-        #[cfg(feature = $feature)]
-        pub struct $name<S> {
-            inner: S,
-            read_buf: Vec<u8>,
-            read_len: usize,
-            read_pos: usize,
-        }
+// ─── Tokio adapter ───────────────────────────────────────────────────────────
 
-        #[cfg(feature = $feature)]
-        impl<S> $name<S> {
-            pub fn new(inner: S) -> Self {
-                Self {
-                    inner,
-                    read_buf: vec![0u8; ADAPTER_BUF_SIZE],
-                    read_len: 0,
-                    read_pos: 0,
-                }
-            }
-
-            fn buffered(&self) -> &[u8] {
-                &self.read_buf[self.read_pos..self.read_len]
-            }
-        }
-
-        #[cfg(feature = $feature)]
-        impl<S> Socket for $name<S>
-        where
-            S: $($bound +)+ Send + Sync + Unpin + 'static,
-        {
-            fn try_read(&mut self, buf: &mut dyn ReadBuf) -> io::Result<usize> {
-                let buffered = self.buffered();
-                if !buffered.is_empty() {
-                    let to_copy = std::cmp::min(buffered.len(), buf.remaining_mut());
-                    buf.put_slice(&buffered[..to_copy]);
-                    self.read_pos += to_copy;
-                    if self.read_pos == self.read_len {
-                        self.read_pos = 0;
-                        self.read_len = 0;
-                    }
-                    return Ok(to_copy);
-                }
-                Err(io::Error::from(io::ErrorKind::WouldBlock))
-            }
-
-            fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                // Safe to use noop_waker here: if Pending is returned, the caller
-                // (Socket::write future) will call poll_write_ready(cx) with the real
-                // task context, which re-registers the proper waker.
-                let waker = futures_util::task::noop_waker();
-                let mut cx = Context::from_waker(&waker);
-                let $self_w = &mut self.inner;
-                let $buf_w = buf;
-                let $cx_w = &mut cx;
-                match $poll_write_expr {
-                    Poll::Ready(result) => result,
-                    Poll::Pending => Err(io::Error::from(io::ErrorKind::WouldBlock)),
-                }
-            }
-
-            fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-                if !self.buffered().is_empty() {
-                    return Poll::Ready(Ok(()));
-                }
-
-                self.read_pos = 0;
-                self.read_len = 0;
-
-                let $cx = cx;
-                let $self = &mut self.inner;
-                let $buf = &mut self.read_buf;
-                match $poll_read_expr {
-                    Poll::Ready(Ok(n)) => {
-                        if n == 0 {
-                            return Poll::Ready(Err(io::Error::from(
-                                io::ErrorKind::UnexpectedEof,
-                            )));
-                        }
-                        self.read_len = n;
-                        Poll::Ready(Ok(()))
-                    }
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                    Poll::Pending => Poll::Pending,
-                }
-            }
-
-            fn poll_write_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-                // Attempt a zero-byte write to check if the underlying stream is writable.
-                // This registers the real waker with the I/O resource so we get woken
-                // when the socket becomes writable.
-                let $cx_w = cx;
-                let $self_w = &mut self.inner;
-                let $buf_w: &[u8] = &[];
-                match $poll_write_expr {
-                    Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
-                    Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                    Poll::Pending => Poll::Pending,
-                }
-            }
-
-            fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-                let $cx_f = cx;
-                let $self_f = &mut self.inner;
-                $poll_flush_expr
-            }
-
-            fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-                let $cx_s = cx;
-                let $self_s = &mut self.inner;
-                $poll_shutdown_expr
-            }
-        }
-    };
+/// Adapter that wraps a tokio [`AsyncRead`][tokio::io::AsyncRead] +
+/// [`AsyncWrite`][tokio::io::AsyncWrite] into a [`Socket`] implementation.
+#[cfg(feature = "_rt-tokio")]
+pub struct TokioStream<S> {
+    inner: S,
+    read_buf: Vec<u8>,
+    read_len: usize,
+    read_pos: usize,
 }
 
-impl_socket_adapter! {
-    /// Adapter that wraps a tokio [`AsyncRead`][tokio::io::AsyncRead] +
-    /// [`AsyncWrite`][tokio::io::AsyncWrite] into a [`Socket`] implementation.
-    TokioStream,
-    feature = "_rt-tokio",
-    bounds(tokio::io::AsyncRead, tokio::io::AsyncWrite),
-    poll_read(inner, cx, buf) => {
-        let mut read_buf = tokio::io::ReadBuf::new(buf);
-        match Pin::new(inner).poll_read(cx, &mut read_buf) {
-            Poll::Ready(Ok(())) => Poll::Ready(Ok(read_buf.filled().len())),
+#[cfg(feature = "_rt-tokio")]
+impl<S> TokioStream<S> {
+    pub fn new(inner: S) -> Self {
+        Self {
+            inner,
+            read_buf: vec![0u8; ADAPTER_BUF_SIZE],
+            read_len: 0,
+            read_pos: 0,
+        }
+    }
+
+    fn buffered(&self) -> &[u8] {
+        &self.read_buf[self.read_pos..self.read_len]
+    }
+}
+
+#[cfg(feature = "_rt-tokio")]
+impl<S> Socket for TokioStream<S>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + Unpin + 'static,
+{
+    fn try_read(&mut self, buf: &mut dyn ReadBuf) -> io::Result<usize> {
+        let buffered = self.buffered();
+        if !buffered.is_empty() {
+            let to_copy = std::cmp::min(buffered.len(), buf.remaining_mut());
+            buf.put_slice(&buffered[..to_copy]);
+            self.read_pos += to_copy;
+            if self.read_pos == self.read_len {
+                self.read_pos = 0;
+                self.read_len = 0;
+            }
+            return Ok(to_copy);
+        }
+        Err(io::Error::from(io::ErrorKind::WouldBlock))
+    }
+
+    fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let waker = futures_util::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        match Pin::new(&mut self.inner).poll_write(&mut cx, buf) {
+            Poll::Ready(result) => result,
+            Poll::Pending => Err(io::Error::from(io::ErrorKind::WouldBlock)),
+        }
+    }
+
+    fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if !self.buffered().is_empty() {
+            return Poll::Ready(Ok(()));
+        }
+
+        self.read_pos = 0;
+        self.read_len = 0;
+
+        let mut read_buf = tokio::io::ReadBuf::new(&mut self.read_buf);
+        match Pin::new(&mut self.inner).poll_read(cx, &mut read_buf) {
+            Poll::Ready(Ok(())) => {
+                let n = read_buf.filled().len();
+                if n == 0 {
+                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::UnexpectedEof)));
+                }
+                self.read_len = n;
+                Poll::Ready(Ok(()))
+            }
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             Poll::Pending => Poll::Pending,
         }
-    },
-    poll_write(inner, cx, buf) => {
-        Pin::new(inner).poll_write(cx, buf)
-    },
-    poll_flush(inner, cx) => {
-        Pin::new(inner).poll_flush(cx)
-    },
-    poll_shutdown(inner, cx) => {
-        Pin::new(inner).poll_shutdown(cx)
-    },
+    }
+
+    fn poll_write_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.inner).poll_write(cx, &[]) {
+            Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
 }
 
-impl_socket_adapter! {
-    /// Adapter that wraps a futures-io [`AsyncRead`][futures_io::AsyncRead] +
-    /// [`AsyncWrite`][futures_io::AsyncWrite] into a [`Socket`] implementation.
-    FuturesStream,
-    feature = "_rt-async-io",
-    bounds(futures_io::AsyncRead, futures_io::AsyncWrite),
-    poll_read(inner, cx, buf) => {
-        Pin::new(inner).poll_read(cx, buf)
-    },
-    poll_write(inner, cx, buf) => {
-        Pin::new(inner).poll_write(cx, buf)
-    },
-    poll_flush(inner, cx) => {
-        Pin::new(inner).poll_flush(cx)
-    },
-    poll_shutdown(inner, cx) => {
-        Pin::new(inner).poll_close(cx)
-    },
+// ─── Futures-io adapter ──────────────────────────────────────────────────────
+
+/// Adapter that wraps a futures-io [`AsyncRead`][futures_io::AsyncRead] +
+/// [`AsyncWrite`][futures_io::AsyncWrite] into a [`Socket`] implementation.
+#[cfg(feature = "_rt-async-io")]
+pub struct FuturesStream<S> {
+    inner: S,
+    read_buf: Vec<u8>,
+    read_len: usize,
+    read_pos: usize,
+}
+
+#[cfg(feature = "_rt-async-io")]
+impl<S> FuturesStream<S> {
+    pub fn new(inner: S) -> Self {
+        Self {
+            inner,
+            read_buf: vec![0u8; ADAPTER_BUF_SIZE],
+            read_len: 0,
+            read_pos: 0,
+        }
+    }
+
+    fn buffered(&self) -> &[u8] {
+        &self.read_buf[self.read_pos..self.read_len]
+    }
+}
+
+#[cfg(feature = "_rt-async-io")]
+impl<S> Socket for FuturesStream<S>
+where
+    S: futures_io::AsyncRead + futures_io::AsyncWrite + Send + Sync + Unpin + 'static,
+{
+    fn try_read(&mut self, buf: &mut dyn ReadBuf) -> io::Result<usize> {
+        let buffered = self.buffered();
+        if !buffered.is_empty() {
+            let to_copy = std::cmp::min(buffered.len(), buf.remaining_mut());
+            buf.put_slice(&buffered[..to_copy]);
+            self.read_pos += to_copy;
+            if self.read_pos == self.read_len {
+                self.read_pos = 0;
+                self.read_len = 0;
+            }
+            return Ok(to_copy);
+        }
+        Err(io::Error::from(io::ErrorKind::WouldBlock))
+    }
+
+    fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let waker = futures_util::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        match Pin::new(&mut self.inner).poll_write(&mut cx, buf) {
+            Poll::Ready(result) => result,
+            Poll::Pending => Err(io::Error::from(io::ErrorKind::WouldBlock)),
+        }
+    }
+
+    fn poll_read_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        if !self.buffered().is_empty() {
+            return Poll::Ready(Ok(()));
+        }
+
+        self.read_pos = 0;
+        self.read_len = 0;
+
+        match Pin::new(&mut self.inner).poll_read(cx, &mut self.read_buf) {
+            Poll::Ready(Ok(n)) => {
+                if n == 0 {
+                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::UnexpectedEof)));
+                }
+                self.read_len = n;
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_write_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.inner).poll_write(cx, &[]) {
+            Poll::Ready(Ok(_)) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_close(cx)
+    }
 }
 
 #[cfg(test)]
@@ -370,7 +390,6 @@ mod tests {
                 assert_eq!(&received[..], &data[..]);
             });
         }
-
     }
 
     #[cfg(feature = "_rt-async-io")]
