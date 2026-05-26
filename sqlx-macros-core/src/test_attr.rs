@@ -6,6 +6,7 @@ use syn::parse::Parser;
 struct Args {
     fixtures: Vec<(FixturesType, Vec<syn::LitStr>)>,
     migrations: MigrationsOpt,
+    database_url_var: DatabaseUrlOpt,
 }
 
 #[cfg(feature = "migrate")]
@@ -22,6 +23,19 @@ enum MigrationsOpt {
     ExplicitPath(syn::LitStr),
     ExplicitMigrator(syn::Path),
     Disabled,
+}
+
+#[cfg(feature = "migrate")]
+enum DatabaseUrlOpt {
+    EnvironmentVariable(syn::LitStr),
+    ExplicitVariable(syn::Path),
+}
+
+#[cfg(feature = "migrate")]
+struct ParsedArgs {
+    fixtures: Vec<TokenStream>,
+    migrations: TokenStream,
+    database_url_var: TokenStream,
 }
 
 type AttributeArgs = syn::punctuated::Punctuated<syn::Meta, syn::Token![,]>;
@@ -85,9 +99,119 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
     let body = &input.block;
     let attrs = &input.attrs;
 
-    let args = parse_args(args)?;
+    let parsed_args_list = parse_attr_args(&args, &input, &config)?;
 
     let fn_arg_types = inputs.iter().map(|_| quote! { _ });
+
+    match parsed_args_list.len() {
+        0 => {
+            return Err(Box::new(syn::Error::new_spanned(
+                args.first().unwrap(),
+                "BUG: unexpected args.",
+            )));
+        }
+        args_num @ 1..=4 => {
+            use proc_macro2::Span;
+            use syn::Ident;
+
+            let mut run_fn_args = Vec::with_capacity(args_num);
+            for i in 1..=args_num {
+                run_fn_args.push(Ident::new(&format!("args{i}"), Span::call_site()));
+            }
+            let run_fn = if args_num == 1 {
+                quote! { ::sqlx::testing::TestFn::run_test(f, #(#run_fn_args,)*) }
+            } else {
+                let test_fn = Ident::new(&format!("TestFn{args_num}"), Span::call_site());
+                quote! { ::sqlx::testing::#test_fn::run_test(f, #(#run_fn_args,)*) }
+            };
+
+            let mut args = Vec::new();
+            for (i, parsed_args) in parsed_args_list.iter().enumerate() {
+                let args_name = Ident::new(&format!("args{}", i + 1), Span::call_site());
+                let test_path_suffix = if i == 0 {
+                    String::new()
+                } else {
+                    format!("_{}", i + 1)
+                };
+                let database_url_var = &parsed_args.database_url_var;
+                let migrations = &parsed_args.migrations;
+                let fixtures = parsed_args.fixtures.as_slice();
+
+                args.push(quote! {
+                    let mut #args_name = ::sqlx::testing::TestArgs::new(concat!(module_path!(), "::", stringify!(#name), #test_path_suffix));
+                    #args_name.#migrations
+                    #args_name.fixtures(&[#(#fixtures),*]);
+                    #args_name.database_url_var(#database_url_var);
+                });
+            }
+
+            return Ok(quote! {
+                #(#attrs)*
+                #[::core::prelude::v1::test]
+                fn #name() #ret {
+                    async fn #name(#inputs) #ret {
+                        #body
+                    }
+
+                    #(#args)*
+
+                    // We need to give a coercion site or else we get "unimplemented trait" errors.
+                    let f: fn(#(#fn_arg_types),*) -> _ = #name;
+
+                    #run_fn
+                }
+            });
+        }
+        _ => {
+            return Err(Box::new(syn::Error::new_spanned(
+                args.first().unwrap(),
+                "expect to no more than 4 env attributes.",
+            )));
+        }
+    }
+}
+
+#[cfg(feature = "migrate")]
+fn parse_attr_args(
+    args: &AttributeArgs,
+    input: &syn::ItemFn,
+    config: &sqlx_core::config::Config,
+) -> crate::Result<Vec<ParsedArgs>> {
+    let parser = AttributeArgs::parse_terminated;
+
+    let mut parsed_args: Vec<ParsedArgs> = Vec::new();
+
+    if args.is_empty() {
+        let parsed = parse_one_attr_args(args, input, config)?;
+        return Ok(vec![parsed]);
+    }
+
+    for arg in args {
+        match arg {
+            syn::Meta::List(list) if list.path.is_ident("env") => {
+                let args = parser.parse2(list.tokens.clone())?;
+                let parsed = parse_one_attr_args(&args, input, config)?;
+                parsed_args.push(parsed);
+            }
+            _ => {
+                let parsed = parse_one_attr_args(args, input, config)?;
+                return Ok(vec![parsed]);
+            }
+        }
+    }
+
+    Ok(parsed_args)
+}
+
+#[cfg(feature = "migrate")]
+fn parse_one_attr_args(
+    args: &AttributeArgs,
+    input: &syn::ItemFn,
+    config: &sqlx_core::config::Config,
+) -> crate::Result<ParsedArgs> {
+    let inputs = &input.sig.inputs;
+
+    let args = parse_args(args)?;
 
     let mut fixtures = Vec::new();
 
@@ -146,7 +270,7 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
     let migrations = match args.migrations {
         MigrationsOpt::ExplicitPath(path) => {
             let migrator = crate::migrate::expand(Some(path))?;
-            quote! { args.migrator(&#migrator); }
+            quote! { migrator(&#migrator); }
         }
         MigrationsOpt::InferredPath if !inputs.is_empty() => {
             let path = crate::migrate::default_path(&config);
@@ -155,41 +279,34 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
 
             if resolved_path.is_dir() {
                 let migrator = crate::migrate::expand_with_path(&config, &resolved_path)?;
-                quote! { args.migrator(&#migrator); }
+                quote! { migrator(&#migrator); }
             } else {
-                quote! {}
+                quote! { no_migrator(); }
             }
         }
         MigrationsOpt::ExplicitMigrator(path) => {
-            quote! { args.migrator(&#path); }
+            quote! { migrator(&#path); }
         }
-        _ => quote! {},
+        _ => quote! { no_migrator(); },
     };
 
-    Ok(quote! {
-        #(#attrs)*
-        #[::core::prelude::v1::test]
-        fn #name() #ret {
-            async fn #name(#inputs) #ret {
-                #body
-            }
-
-            let mut args = ::sqlx::testing::TestArgs::new(concat!(module_path!(), "::", stringify!(#name)));
-
-            #migrations
-
-            args.fixtures(&[#(#fixtures),*]);
-
-            // We need to give a coercion site or else we get "unimplemented trait" errors.
-            let f: fn(#(#fn_arg_types),*) -> _ = #name;
-
-            ::sqlx::testing::TestFn::run_test(f, args)
+    let database_url_var = match args.database_url_var {
+        DatabaseUrlOpt::EnvironmentVariable(name) => {
+            quote! { #name }
         }
+        DatabaseUrlOpt::ExplicitVariable(path) => quote! { #path },
+    };
+
+    Ok(ParsedArgs {
+        fixtures,
+        migrations,
+        database_url_var,
     })
 }
 
 #[cfg(feature = "migrate")]
-fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
+fn parse_args(attr_args: &AttributeArgs) -> syn::Result<Args> {
+    use proc_macro2::Span;
     use syn::{
         parenthesized, parse::Parse, punctuated::Punctuated, token::Comma, Expr, Lit, LitStr, Meta,
         MetaNameValue, Token,
@@ -197,6 +314,8 @@ fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
 
     let mut fixtures = Vec::new();
     let mut migrations = MigrationsOpt::InferredPath;
+    let mut database_url_var =
+        DatabaseUrlOpt::EnvironmentVariable(LitStr::new("DATABASE_URL", Span::call_site()));
 
     for arg in attr_args {
         let path = arg.path().clone();
@@ -255,7 +374,7 @@ fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
                     }
                 }
 
-                let Some(lit) = recurse_lit_lookup(value.value) else {
+                let Some(lit) = recurse_lit_lookup(value.value.clone()) else {
                     return Err(syn::Error::new_spanned(path, "expected string or `false`"));
                 };
 
@@ -292,11 +411,27 @@ fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
 
                 migrations = MigrationsOpt::ExplicitMigrator(lit.parse()?);
             }
+            // var = "<path>"
+            Meta::NameValue(MetaNameValue { value, .. }) if path.is_ident("var") => {
+                let Expr::Lit(syn::ExprLit {
+                    lit: Lit::Str(lit), ..
+                }) = value
+                else {
+                    return Err(syn::Error::new_spanned(path, "expected string"));
+                };
+
+                database_url_var = DatabaseUrlOpt::ExplicitVariable(lit.parse()?);
+            }
+            // var("<environment variable name>")
+            Meta::List(list) if path.is_ident("var") => {
+                let s: LitStr = list.parse_args()?;
+                database_url_var = DatabaseUrlOpt::EnvironmentVariable(s);
+            }
             arg => {
                 return Err(syn::Error::new_spanned(
                     arg,
-                    r#"expected `fixtures("<filename>", ...)` or `migrations = "<path>" | false` or `migrator = "<rust path>"`"#,
-                ))
+                    r#"expected `fixtures("<filename>", ...)` or `migrations = "<path>" | false` or `migrator = "<rust path>"` or `var("DATABASE_URL")` or `var = "<rust path>"`"#,
+                ));
             }
         }
     }
@@ -304,6 +439,7 @@ fn parse_args(attr_args: AttributeArgs) -> syn::Result<Args> {
     Ok(Args {
         fixtures,
         migrations,
+        database_url_var,
     })
 }
 

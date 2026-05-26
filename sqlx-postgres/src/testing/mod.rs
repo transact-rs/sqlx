@@ -1,13 +1,14 @@
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use sqlx_core::connection::Connection;
 use sqlx_core::query_builder::QueryBuilder;
 use sqlx_core::query_scalar::query_scalar;
 use sqlx_core::sql_str::AssertSqlSafe;
+use sqlx_core::HashMap;
 
 use crate::error::Error;
 use crate::executor::Executor;
@@ -17,8 +18,8 @@ use crate::{PgConnectOptions, PgConnection, Postgres};
 
 pub(crate) use sqlx_core::testing::*;
 
-// Using a blocking `OnceLock` here because the critical sections are short.
-static MASTER_POOL: OnceLock<Pool<Postgres>> = OnceLock::new();
+static MASTER_POOLS: LazyLock<Mutex<HashMap<&'static str, Pool<Postgres>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 // Automatically delete any databases created before the start of the test binary.
 
 impl TestSupport for Postgres {
@@ -28,20 +29,25 @@ impl TestSupport for Postgres {
         test_context(args)
     }
 
-    async fn cleanup_test(db_name: &str) -> Result<(), Error> {
-        let mut conn = MASTER_POOL
-            .get()
-            .expect("cleanup_test() invoked outside `#[sqlx::test]`")
-            .acquire()
-            .await?;
+    async fn cleanup_test(args: &TestArgs) -> Result<(), Error> {
+        let db_name = Self::db_name(args);
 
-        do_cleanup(&mut conn, db_name).await
+        let master_pool = get_master_pool(args.database_url_var);
+        let mut conn = master_pool.acquire().await?;
+
+        do_cleanup(&mut conn, &db_name).await
     }
 
     async fn cleanup_test_dbs() -> Result<Option<usize>, Error> {
         let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-        let mut conn = PgConnection::connect(&url).await?;
+        let count = Self::cleanup_test_dbs_by_url(&url).await?;
+
+        Ok(count)
+    }
+
+    async fn cleanup_test_dbs_by_url(url: &str) -> Result<Option<usize>, Error> {
+        let mut conn = PgConnection::connect(url).await?;
 
         let delete_db_names: Vec<String> = query_scalar("select db_name from _sqlx_test.databases")
             .fetch_all(&mut conn)
@@ -90,7 +96,9 @@ impl TestSupport for Postgres {
 }
 
 async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
-    let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url_var = args.database_url_var;
+
+    let url = dotenvy::var(database_url_var).expect("DATABASE_URL must be set");
 
     let master_opts = PgConnectOptions::from_str(&url).expect("failed to parse DATABASE_URL");
 
@@ -103,7 +111,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
         .after_release(|_conn, _| Box::pin(async move { Ok(false) }))
         .connect_lazy_with(master_opts);
 
-    let master_pool = match once_lock_try_insert_polyfill(&MASTER_POOL, pool) {
+    let master_pool = match try_insert_polyfill(database_url_var, pool) {
         Ok(inserted) => inserted,
         Err((existing, pool)) => {
             // Sanity checks.
@@ -143,7 +151,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
             created_at timestamptz not null default now()
         );
 
-        create index if not exists databases_created_at 
+        create index if not exists databases_created_at
             on _sqlx_test.databases(created_at);
 
         create sequence if not exists _sqlx_test.database_ids;
@@ -167,6 +175,8 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
     let create_command = format!("create database {db_name:?}");
     debug_assert!(create_command.starts_with("create database \""));
     conn.execute(AssertSqlSafe(create_command)).await?;
+
+    eprintln!("created database {db_name}");
 
     Ok(TestContext {
         pool_opts: PoolOptions::new()
@@ -197,11 +207,30 @@ async fn do_cleanup(conn: &mut PgConnection, db_name: &str) -> Result<(), Error>
     Ok(())
 }
 
-fn once_lock_try_insert_polyfill<T>(this: &OnceLock<T>, value: T) -> Result<&T, (&T, T)> {
-    let mut value = Some(value);
-    let res = this.get_or_init(|| value.take().unwrap());
-    match value {
-        None => Ok(res),
-        Some(value) => Err((res, value)),
+fn get_master_pool(database_url_var: &'static str) -> Pool<Postgres> {
+    let guard = MASTER_POOLS
+        .lock()
+        .expect("failed to acquire lock of master pools");
+    guard
+        .get(database_url_var)
+        .expect("cleanup_test() invoked outside `#[sqlx::test]`")
+        .clone()
+}
+
+fn try_insert_polyfill(
+    database_url_var: &'static str,
+    pool: Pool<Postgres>,
+) -> Result<Pool<Postgres>, (Pool<Postgres>, Pool<Postgres>)> {
+    let mut guard = MASTER_POOLS
+        .lock()
+        .expect("failed to acquire lock of master pools");
+    let master_pool = guard.get(database_url_var);
+
+    match master_pool {
+        None => {
+            guard.insert(database_url_var, pool.clone());
+            Ok(pool)
+        }
+        Some(master_pool) => Err((master_pool.clone(), pool)),
     }
 }

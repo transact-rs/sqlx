@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use crate::error::Error;
@@ -13,11 +13,12 @@ use sqlx_core::connection::Connection;
 use sqlx_core::query_builder::QueryBuilder;
 use sqlx_core::query_scalar::query_scalar;
 use sqlx_core::sql_str::AssertSqlSafe;
+use sqlx_core::HashMap;
 
 pub(crate) use sqlx_core::testing::*;
 
-// Using a blocking `OnceLock` here because the critical sections are short.
-static MASTER_POOL: OnceLock<Pool<MySql>> = OnceLock::new();
+static MASTER_POOLS: LazyLock<Mutex<HashMap<&'static str, Pool<MySql>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl TestSupport for MySql {
     fn test_context(
@@ -26,20 +27,25 @@ impl TestSupport for MySql {
         test_context(args)
     }
 
-    async fn cleanup_test(db_name: &str) -> Result<(), Error> {
-        let mut conn = MASTER_POOL
-            .get()
-            .expect("cleanup_test() invoked outside `#[sqlx::test]`")
-            .acquire()
-            .await?;
+    async fn cleanup_test(args: &TestArgs) -> Result<(), Error> {
+        let db_name = Self::db_name(args);
 
-        do_cleanup(&mut conn, db_name).await
+        let master_pool = get_master_pool(args.database_url_var);
+        let mut conn = master_pool.acquire().await?;
+
+        do_cleanup(&mut conn, &db_name).await
     }
 
     async fn cleanup_test_dbs() -> Result<Option<usize>, Error> {
         let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-        let mut conn = MySqlConnection::connect(&url).await?;
+        let count = Self::cleanup_test_dbs_by_url(&url).await?;
+
+        Ok(count)
+    }
+
+    async fn cleanup_test_dbs_by_url(url: &str) -> Result<Option<usize>, Error> {
+        let mut conn = MySqlConnection::connect(url).await?;
 
         let delete_db_names: Vec<String> = query_scalar("select db_name from _sqlx_test_databases")
             .fetch_all(&mut conn)
@@ -97,7 +103,9 @@ impl TestSupport for MySql {
 }
 
 async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
-    let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url_var = args.database_url_var;
+
+    let url = dotenvy::var(database_url_var).expect("DATABASE_URL must be set");
 
     let master_opts = MySqlConnectOptions::from_str(&url).expect("failed to parse DATABASE_URL");
 
@@ -110,7 +118,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
         .after_release(|_conn, _| Box::pin(async move { Ok(false) }))
         .connect_lazy_with(master_opts);
 
-    let master_pool = match once_lock_try_insert_polyfill(&MASTER_POOL, pool) {
+    let master_pool = match try_insert_polyfill(database_url_var, pool) {
         Ok(inserted) => inserted,
         Err((existing, pool)) => {
             // Sanity checks.
@@ -144,7 +152,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
             -- BLOB/TEXT columns can only be used as index keys with a prefix length:
             -- https://dev.mysql.com/doc/refman/8.4/en/column-indexes.html#column-indexes-prefix
             primary key(db_name(63))
-        );        
+        );
     "#,
     )
     .await?;
@@ -243,11 +251,30 @@ async fn cleanup_old_dbs(conn: &mut MySqlConnection) -> Result<(), Error> {
     Ok(())
 }
 
-fn once_lock_try_insert_polyfill<T>(this: &OnceLock<T>, value: T) -> Result<&T, (&T, T)> {
-    let mut value = Some(value);
-    let res = this.get_or_init(|| value.take().unwrap());
-    match value {
-        None => Ok(res),
-        Some(value) => Err((res, value)),
+fn get_master_pool(database_url_var: &'static str) -> Pool<MySql> {
+    let guard = MASTER_POOLS
+        .lock()
+        .expect("failed to acquire lock of master pools");
+    guard
+        .get(database_url_var)
+        .expect("cleanup_test() invoked outside `#[sqlx::test]`")
+        .clone()
+}
+
+fn try_insert_polyfill(
+    database_url_var: &'static str,
+    pool: Pool<MySql>,
+) -> Result<Pool<MySql>, (Pool<MySql>, Pool<MySql>)> {
+    let mut guard = MASTER_POOLS
+        .lock()
+        .expect("failed to acquire lock of master pools");
+    let master_pool = guard.get(database_url_var);
+
+    match master_pool {
+        None => {
+            guard.insert(database_url_var, pool.clone());
+            Ok(pool)
+        }
+        Some(master_pool) => Err((master_pool.clone(), pool)),
     }
 }
