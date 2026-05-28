@@ -153,20 +153,40 @@ impl PgConnection {
         }) = explains.first()
         {
             nullables.resize(outputs.len(), None);
-            visit_plan(plan, outputs, &mut nullables);
+            visit_plan(plan, None, outputs, &mut nullables);
         }
 
         Ok(nullables)
     }
 }
 
-fn visit_plan(plan: &Plan, outputs: &[String], nullables: &mut Vec<Option<bool>>) {
+fn visit_plan(
+    plan: &Plan,
+    parent_join_type: Option<&str>,
+    outputs: &[String],
+    nullables: &mut Vec<Option<bool>>,
+) {
     if let Some(plan_outputs) = &plan.output {
-        // all outputs of a Full Join must be marked nullable
-        // otherwise, all outputs of the inner half of an outer join must be marked nullable
-        if plan.join_type.as_deref() == Some("Full")
-            || plan.parent_relation.as_deref() == Some("Inner")
-        {
+        // Determine whether THIS plan's outputs can be NULL due to its parent join.
+        //
+        // PostgreSQL may execute `A LEFT JOIN B` as a `Right` join when the planner
+        // swaps the build/probe sides for hash join efficiency (e.g. when B is the
+        // smaller of the two and is cheaper as the hash-build side). After that
+        // swap, the operand that *was* the SQL right side (B, the nullable one)
+        // appears as the "Outer" child of the plan node — not the "Inner" child.
+        //
+        // So the side that needs the nullable mark depends on `parent_join_type`:
+        //   * Left  : Inner child is the nullable side (SQL right operand)
+        //   * Right : Outer child is the nullable side (SQL right operand, after swap)
+        //   * Full  : both sides nullable
+        let parent_nulls_this_side = matches!(
+            (parent_join_type, plan.parent_relation.as_deref()),
+            (Some("Full"), _) | (Some("Left"), Some("Inner")) | (Some("Right"), Some("Outer"))
+        );
+
+        let self_is_full_join = plan.join_type.as_deref() == Some("Full");
+
+        if parent_nulls_this_side || self_is_full_join {
             for output in plan_outputs {
                 if let Some(i) = outputs.iter().position(|o| o == output) {
                     // N.B. this may produce false positives but those don't cause runtime errors
@@ -177,10 +197,11 @@ fn visit_plan(plan: &Plan, outputs: &[String], nullables: &mut Vec<Option<bool>>
     }
 
     if let Some(plans) = &plan.plans {
-        if let Some("Left") | Some("Right") = plan.join_type.as_deref() {
-            for plan in plans {
-                visit_plan(plan, outputs, nullables);
-            }
+        // Recurse into all child plans so nested LEFT/RIGHT joins are reached even
+        // if intermediate nodes are not joins themselves (e.g. a `Hash` node sitting
+        // between two join nodes).
+        for child in plans {
+            visit_plan(child, plan.join_type.as_deref(), outputs, nullables);
         }
     }
 }
@@ -275,4 +296,262 @@ fn explain_parsing() {
         matches!(utility_statement_parsed, [Explain::Other(_)]),
         "unexpected parse from {utility_statement:?}: {utility_statement_parsed:?}"
     )
+}
+
+#[cfg(test)]
+fn nullables_from_plan(plan_json: &str) -> Vec<Option<bool>> {
+    let [Explain::Plan { plan }] = serde_json::from_str::<[Explain; 1]>(plan_json).unwrap() else {
+        panic!("expected Explain::Plan, got something else");
+    };
+    let outputs = plan.output.clone().unwrap_or_default();
+    let mut nullables = vec![None; outputs.len()];
+    visit_plan(&plan, None, &outputs, &mut nullables);
+    nullables
+}
+
+// https://github.com/launchbadge/sqlx/issues/3202
+//
+// PostgreSQL rewrites `A LEFT JOIN B` as `B RIGHT JOIN A` to put the smaller
+// relation on the hash-build side. After the swap, the SQL right operand (the
+// nullable side) appears as the plan's `Outer` child, not the `Inner`.
+//
+// Plan is verbatim EXPLAIN (VERBOSE, FORMAT JSON) output of (the only SET
+// here, `plan_cache_mode`, is what `sqlx-macros-core` itself runs on each
+// connection used for describe):
+//
+//     CREATE TABLE a (id uuid NOT NULL);
+//     CREATE TABLE b (id uuid NOT NULL, name text NOT NULL);
+//     INSERT INTO a SELECT gen_random_uuid() FROM generate_series(1, 1000);
+//     INSERT INTO b SELECT gen_random_uuid(), 'b' FROM generate_series(1, 50000);
+//     ANALYZE a; ANALYZE b;
+//     SET plan_cache_mode = force_generic_plan;
+//     PREPARE q(int) AS
+//       SELECT a.id, b.name FROM a LEFT JOIN b ON a.id = b.id LIMIT $1;
+//     EXPLAIN (VERBOSE, FORMAT JSON) EXECUTE q(NULL);
+#[test]
+fn nullable_inference_left_join_rewritten_as_right() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 28.50,
+              "Total Cost": 130.15,
+              "Plan Rows": 100,
+              "Plan Width": 18,
+              "Output": ["a.id", "b.name"],
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Join Type": "Right",
+                  "Startup Cost": 28.50,
+                  "Total Cost": 1045.00,
+                  "Plan Rows": 1000,
+                  "Plan Width": 18,
+                  "Output": ["a.id", "b.name"],
+                  "Inner Unique": false,
+                  "Hash Cond": "(b.id = a.id)",
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "b",
+                      "Schema": "public",
+                      "Alias": "b",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 819.00,
+                      "Plan Rows": 50000,
+                      "Plan Width": 18,
+                      "Output": ["b.id", "b.name"]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Parent Relationship": "Inner",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 16.00,
+                      "Total Cost": 16.00,
+                      "Plan Rows": 1000,
+                      "Plan Width": 16,
+                      "Output": ["a.id"],
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "a",
+                          "Schema": "public",
+                          "Alias": "a",
+                          "Startup Cost": 0.00,
+                          "Total Cost": 16.00,
+                          "Plan Rows": 1000,
+                          "Plan Width": 16,
+                          "Output": ["a.id"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    // a.id (Inner branch, SQL left operand): preserved
+    // b.name (Outer branch, SQL right operand): nullable
+    assert_eq!(nullables_from_plan(plan), vec![None, Some(true)]);
+}
+
+// Two nested LEFT JOINs both rewritten as Hash Right Join. Exercises
+// (a) recursion through a non-join `Hash` node sitting between two join
+// nodes, and (b) the rewrite being handled at every level.
+//
+// Plan is verbatim EXPLAIN (VERBOSE, FORMAT JSON) output of:
+//
+//     CREATE TABLE c (id uuid NOT NULL, x text NOT NULL);
+//     INSERT INTO c SELECT gen_random_uuid(), 'c' FROM generate_series(1, 50000);
+//     ANALYZE c;
+//     -- `a` and `b` are seeded as in the test above
+//     SET plan_cache_mode = force_generic_plan;
+//     PREPARE q(int) AS
+//       SELECT a.id, b.name, c.x
+//       FROM a
+//       LEFT JOIN b ON a.id = b.id
+//       LEFT JOIN c ON a.id = c.id
+//       LIMIT $1;
+//     EXPLAIN (VERBOSE, FORMAT JSON) EXECUTE q(NULL);
+#[test]
+fn nullable_inference_nested_left_joins_rewritten() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 1057.50,
+              "Total Cost": 1159.15,
+              "Plan Rows": 100,
+              "Plan Width": 20,
+              "Output": ["a.id", "b.name", "c.x"],
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Join Type": "Right",
+                  "Startup Cost": 1057.50,
+                  "Total Cost": 2074.00,
+                  "Plan Rows": 1000,
+                  "Plan Width": 20,
+                  "Output": ["a.id", "b.name", "c.x"],
+                  "Inner Unique": false,
+                  "Hash Cond": "(c.id = a.id)",
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "c",
+                      "Schema": "public",
+                      "Alias": "c",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 819.00,
+                      "Plan Rows": 50000,
+                      "Plan Width": 18,
+                      "Output": ["c.id", "c.x"]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Parent Relationship": "Inner",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 1045.00,
+                      "Total Cost": 1045.00,
+                      "Plan Rows": 1000,
+                      "Plan Width": 18,
+                      "Output": ["a.id", "b.name"],
+                      "Plans": [
+                        {
+                          "Node Type": "Hash Join",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Join Type": "Right",
+                          "Startup Cost": 28.50,
+                          "Total Cost": 1045.00,
+                          "Plan Rows": 1000,
+                          "Plan Width": 18,
+                          "Output": ["a.id", "b.name"],
+                          "Inner Unique": false,
+                          "Hash Cond": "(b.id = a.id)",
+                          "Plans": [
+                            {
+                              "Node Type": "Seq Scan",
+                              "Parent Relationship": "Outer",
+                              "Parallel Aware": false,
+                              "Async Capable": false,
+                              "Relation Name": "b",
+                              "Schema": "public",
+                              "Alias": "b",
+                              "Startup Cost": 0.00,
+                              "Total Cost": 819.00,
+                              "Plan Rows": 50000,
+                              "Plan Width": 18,
+                              "Output": ["b.id", "b.name"]
+                            },
+                            {
+                              "Node Type": "Hash",
+                              "Parent Relationship": "Inner",
+                              "Parallel Aware": false,
+                              "Async Capable": false,
+                              "Startup Cost": 16.00,
+                              "Total Cost": 16.00,
+                              "Plan Rows": 1000,
+                              "Plan Width": 16,
+                              "Output": ["a.id"],
+                              "Plans": [
+                                {
+                                  "Node Type": "Seq Scan",
+                                  "Parent Relationship": "Outer",
+                                  "Parallel Aware": false,
+                                  "Async Capable": false,
+                                  "Relation Name": "a",
+                                  "Schema": "public",
+                                  "Alias": "a",
+                                  "Startup Cost": 0.00,
+                                  "Total Cost": 16.00,
+                                  "Plan Rows": 1000,
+                                  "Plan Width": 16,
+                                  "Output": ["a.id"]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    // a.id (driving table) preserved through both LEFT JOINs.
+    // b.name and c.x become NULL when their respective JOIN finds no match.
+    assert_eq!(
+        nullables_from_plan(plan),
+        vec![None, Some(true), Some(true)]
+    );
 }
