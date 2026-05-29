@@ -120,7 +120,7 @@ impl SqliteArgumentsBuffer {
         Self(values)
     }
 
-    pub(crate) fn push(&mut self, value: SqliteArgumentValue) {
+    pub fn push(&mut self, value: SqliteArgumentValue) {
         self.0.push(value);
     }
 }
