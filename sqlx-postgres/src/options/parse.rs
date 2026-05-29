@@ -273,6 +273,26 @@ fn it_parses_socket_correctly_percent_encoded() {
 
     assert_eq!(Some("/var/lib/postgres/".into()), opts.socket);
 }
+
+#[test]
+fn it_uses_default_socket_if_host_is_skipped() {
+    let path_to_socket = format!("{}/.s.PGSQL.5432", default_socket_dir());
+    let _ = std::fs::File::create(&path_to_socket)
+        .unwrap_or_else(|e| panic!("error while creating tmp socket file: {}", e));
+
+    let url = "postgresql:///database";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    let _ = std::fs::remove_file(&path_to_socket)
+        .unwrap_or_else(|e| panic!("error while deleting tmp socket file: {}", e));
+
+    assert_eq!(
+        Some(std::path::PathBuf::from(default_socket_dir())),
+        opts.socket
+    );
+    assert_eq!(Some("database".into()), opts.database);
+}
+
 #[test]
 fn it_parses_socket_correctly_with_username_percent_encoded() {
     let url = "postgres://some_user@%2Fvar%2Flib%2Fpostgres/database";
@@ -316,6 +336,48 @@ fn it_returns_the_parsed_url_when_socket() {
     let _ = expected_url.set_port(Some(port));
 
     assert_eq!(expected_url, opts.build_url());
+}
+
+#[test]
+fn it_returns_the_parsed_url_with_default_socket_when_host_is_not_defined() {
+    let port = 5432;
+    let path_to_socket =
+        std::path::PathBuf::from(format!("{}/.s.PGSQL.{}", default_socket_dir(), port));
+
+    let _ = std::fs::File::create(&path_to_socket)
+        .unwrap_or_else(|e| panic!("error while creating tmp socket file: {}", e));
+
+    let url = "postgresql:///database";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    let _ = std::fs::remove_file(&path_to_socket)
+        .unwrap_or_else(|e| panic!("error while deleting tmp socket file: {}", e));
+
+    let encoded_socket = utf8_percent_encode(&default_socket_dir(), NON_ALPHANUMERIC).to_string();
+    let encoded_url = format!(
+        "postgres://{}@{}/database",
+        whoami::username(),
+        encoded_socket
+    );
+    let mut expected_url = Url::parse(&encoded_url).unwrap();
+    // PgConnectOptions defaults
+    let query_string = "sslmode=prefer&statement-cache-capacity=100";
+    expected_url.set_query(Some(query_string));
+    let _ = expected_url.set_port(Some(port));
+
+    assert_eq!(expected_url, opts.build_url());
+}
+
+#[cfg(test)]
+fn default_socket_dir() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        "/private/tmp".into()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "/tmp".into()
+    }
 }
 
 #[test]
