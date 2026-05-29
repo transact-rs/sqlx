@@ -153,57 +153,281 @@ impl PgConnection {
         }) = explains.first()
         {
             nullables.resize(outputs.len(), None);
-            visit_plan(plan, None, outputs, &mut nullables);
+            visit_plan(plan, false, outputs, &mut nullables);
         }
 
         Ok(nullables)
     }
 }
 
+/// Outer-join types from a plan node's `Join Type` field. Other values
+/// (`Inner`, `Anti`, `Semi`, …) don't introduce nullability and don't get
+/// parsed — they fall through to `None`.
+#[derive(Copy, Clone)]
+enum JoinType {
+    Left,
+    Right,
+    Full,
+}
+
+impl JoinType {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "Left" => Some(Self::Left),
+            "Right" => Some(Self::Right),
+            "Full" => Some(Self::Full),
+            _ => None,
+        }
+    }
+
+    /// The `Parent Relationship` of this join's preserved-side child, or
+    /// `None` for `Full` (both sides nullable).
+    fn preserved_side(self) -> Option<ParentRelation> {
+        match self {
+            Self::Left => Some(ParentRelation::Outer), // SQL left operand
+            Self::Right => Some(ParentRelation::Inner), // preserved after build/probe swap
+            Self::Full => None,
+        }
+    }
+
+    /// Whether a child with the given `Parent Relationship` is on this
+    /// join's nullable side.
+    fn child_is_nullable(self, child_rel: Option<ParentRelation>) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Left => child_rel == Some(ParentRelation::Inner),
+            Self::Right => child_rel == Some(ParentRelation::Outer),
+        }
+    }
+}
+
+/// A child's `Parent Relationship` field from the EXPLAIN plan.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ParentRelation {
+    Outer,
+    Inner,
+}
+
+impl ParentRelation {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "Outer" => Some(Self::Outer),
+            "Inner" => Some(Self::Inner),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Outer => "Outer",
+            Self::Inner => "Inner",
+        }
+    }
+}
+
+/// Walk the EXPLAIN plan tree marking each root output that may be NULL due
+/// to an outer join above it.
+///
+/// At every node we ask: "which of this node's outputs are preserved (i.e.
+/// definitely NOT made nullable here)?" Anything else is potentially NULL
+/// and gets marked in the root vector. The preserved set depends on context:
+///
+///   * In a nullable subtree (ancestor outer join already nulled this branch),
+///     or at a `Full` join: nothing is preserved — mark everything.
+///   * At a `Left` join: pass-throughs from the `Outer` child are preserved.
+///   * At a `Right` join (the planner's build/probe-swapped form of a SQL
+///     `LEFT JOIN`): pass-throughs from the `Inner` child are preserved.
+///   * Elsewhere: this node introduces no nullability — skip marking.
 fn visit_plan(
     plan: &Plan,
-    parent_join_type: Option<&str>,
+    in_nullable: bool,
     outputs: &[String],
     nullables: &mut Vec<Option<bool>>,
 ) {
-    if let Some(plan_outputs) = &plan.output {
-        // Determine whether THIS plan's outputs can be NULL due to its parent join.
-        //
-        // PostgreSQL may execute `A LEFT JOIN B` as a `Right` join when the planner
-        // swaps the build/probe sides for hash join efficiency (e.g. when B is the
-        // smaller of the two and is cheaper as the hash-build side). After that
-        // swap, the operand that *was* the SQL right side (B, the nullable one)
-        // appears as the "Outer" child of the plan node — not the "Inner" child.
-        //
-        // So the side that needs the nullable mark depends on `parent_join_type`:
-        //   * Left  : Inner child is the nullable side (SQL right operand)
-        //   * Right : Outer child is the nullable side (SQL right operand, after swap)
-        //   * Full  : both sides nullable
-        let parent_nulls_this_side = matches!(
-            (parent_join_type, plan.parent_relation.as_deref()),
-            (Some("Full"), _) | (Some("Left"), Some("Inner")) | (Some("Right"), Some("Outer"))
-        );
+    let join = plan.join_type.as_deref().and_then(JoinType::parse);
 
-        let self_is_full_join = plan.join_type.as_deref() == Some("Full");
+    let preserved: Option<&[String]> = if in_nullable {
+        Some(&[])
+    } else {
+        join.map(|j| match j.preserved_side() {
+            Some(rel) => child_outputs(plan, rel),
+            None => &[], // Full join: every output is nullable
+        })
+    };
 
-        if parent_nulls_this_side || self_is_full_join {
-            for output in plan_outputs {
-                if let Some(i) = outputs.iter().position(|o| o == output) {
-                    // N.B. this may produce false positives but those don't cause runtime errors
-                    nullables[i] = Some(true);
-                }
+    if let Some(preserved) = preserved {
+        let is_preserved = |o: &String| preserved.iter().any(|p| outputs_match(p, o));
+        for output in plan.output.iter().flatten().filter(|o| !is_preserved(o)) {
+            if let Some(i) = outputs.iter().position(|o| outputs_match(o, output)) {
+                // N.B. may produce false positives (e.g. a downstream WHERE
+                // that eliminates NULLs is not modeled here), but those
+                // don't cause runtime errors — they just leave a column
+                // marked nullable when the application could rely on it.
+                nullables[i] = Some(true);
             }
         }
     }
 
-    if let Some(plans) = &plan.plans {
-        // Recurse into all child plans so nested LEFT/RIGHT joins are reached even
-        // if intermediate nodes are not joins themselves (e.g. a `Hash` node sitting
-        // between two join nodes).
-        for child in plans {
-            visit_plan(child, plan.join_type.as_deref(), outputs, nullables);
+    for child in plan.plans.iter().flatten() {
+        let child_rel = child
+            .parent_relation
+            .as_deref()
+            .and_then(ParentRelation::parse);
+        let child_in_nullable = in_nullable || join.is_some_and(|j| j.child_is_nullable(child_rel));
+        visit_plan(child, child_in_nullable, outputs, nullables);
+    }
+}
+
+fn child_outputs(plan: &Plan, parent_relation: ParentRelation) -> &[String] {
+    plan.plans
+        .iter()
+        .flatten()
+        .find(|c| c.parent_relation.as_deref() == Some(parent_relation.label()))
+        .and_then(|c| c.output.as_deref())
+        .unwrap_or(&[])
+}
+
+/// Compare two `Output` entries from an EXPLAIN plan, tolerating differences
+/// in redundant outer-paren wrapping.
+///
+/// Postgres deparses the same computed expression with a different number of
+/// outer paren pairs at different plan levels: empirically (PG 17) a Limit's
+/// root target list emits `((b.x || 'y'::text))` while the underlying join
+/// node's `Output` for the same expression is `(b.x || 'y'::text)`. The
+/// two come from different deparse paths (`ruleutils.c` target-list rendering
+/// vs. plan-output rendering in `explain.c`). Without normalization,
+/// exact-string matching misses these and leaves nullability unset — and
+/// because the choice of join algorithm can shift with table statistics,
+/// `cargo sqlx prepare --check` can flip between runs on populated vs.
+/// unpopulated databases.
+fn outputs_match(a: &str, b: &str) -> bool {
+    a == b || strip_redundant_outer_parens(a) == strip_redundant_outer_parens(b)
+}
+
+/// Strip balanced outer paren pairs from `s` (`((x))` → `x`).
+///
+/// A pair is balanced when the leading `(` matches the trailing `)` — verified
+/// by walking the interior and ensuring paren depth never goes negative and
+/// ends at zero. Postgres lexical literals (standard `'…'`, quoted identifier
+/// `"…"`, escape `E'…'`, dollar-quoted `$tag$…$tag$`) are skipped as opaque
+/// so parens inside them don't affect the count. If the interior can't be
+/// tokenized cleanly (e.g. an unterminated literal), we conservatively decline
+/// to strip.
+fn strip_redundant_outer_parens(s: &str) -> &str {
+    let mut s = s;
+    while let Some(inner) = try_strip_one_paren_pair(s) {
+        s = inner;
+    }
+    s
+}
+
+fn try_strip_one_paren_pair(s: &str) -> Option<&str> {
+    let inner = s.strip_prefix('(')?.strip_suffix(')')?;
+    let bytes = inner.as_bytes();
+    let mut i = 0;
+    let mut depth: i32 = 0;
+    // Lexical forms below mirror Postgres's scanner (src/backend/parser/scan.l)
+    // and the manual chapter on lexical structure:
+    // https://www.postgresql.org/docs/current/sql-syntax-lexical.html
+    while i < bytes.len() {
+        i = match bytes[i..] {
+            // Standard string constant — §4.1.2.1. `''` is the only in-string
+            // escape (assuming `standard_conforming_strings = on`, the default,
+            // and what `ruleutils.c` deparses against).
+            [b'\'', ..] => skip_quoted_doubled(bytes, i + 1, b'\'')?,
+            // Quoted identifier — §4.1.1. `""` is the in-identifier escape.
+            [b'"', ..] => skip_quoted_doubled(bytes, i + 1, b'"')?,
+            // C-style escape string `E'…'` — §4.1.2.2. Both `\'` and `''`
+            // escape the quote; `\\` produces a literal backslash.
+            [b'E' | b'e', b'\'', ..] => skip_e_string(bytes, i + 2)?,
+            // Bit / hex string constant `B'…'` / `X'…'` — §4.1.2.5.
+            [b'B' | b'b' | b'X' | b'x', b'\'', ..] => skip_quoted_doubled(bytes, i + 2, b'\'')?,
+            // Unicode-escape string `U&'…'` (§4.1.2.3) or quoted identifier
+            // `U&"…"` (§4.1.1). The scanner finds the terminator via the
+            // doubled-quote rule; `\nnnn` / `\+nnnnnn` are expanded in a
+            // post-pass and don't affect termination.
+            [b'U' | b'u', b'&', q @ (b'\'' | b'"'), ..] => skip_quoted_doubled(bytes, i + 3, q)?,
+            // Dollar-quoted string constant `$tag$…$tag$` — §4.1.2.4.
+            // Also disambiguates parameter refs (`$1`) and stray `$`.
+            [b'$', ..] => skip_dollar_or_pass(bytes, i + 1)?,
+            [b'(', ..] => {
+                depth += 1;
+                i + 1
+            }
+            [b')', ..] => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+                i + 1
+            }
+            _ => i + 1,
+        };
+    }
+    (depth == 0).then_some(inner)
+}
+
+/// Skip past the closing `quote` of a literal that uses doubled-quote
+/// (`''` or `""`) as the in-literal escape. Returns the byte index AFTER
+/// the closing quote, or `None` if the literal never terminates.
+fn skip_quoted_doubled(bytes: &[u8], start: usize, quote: u8) -> Option<usize> {
+    let mut i = start;
+    loop {
+        match bytes.get(i..)? {
+            [q, q2, ..] if *q == quote && *q2 == quote => i += 2,
+            [q, ..] if *q == quote => return Some(i + 1),
+            [_, ..] => i += 1,
+            [] => return None,
         }
     }
+}
+
+/// Skip past the closing `'` of an `E'…'` escape-string literal. Inside an
+/// E-string both `\'` and `''` produce a literal quote; `\\` produces a
+/// literal backslash (so the byte after `\\` does NOT start a new escape).
+fn skip_e_string(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    loop {
+        match bytes.get(i..)? {
+            [b'\\', _, ..] => i += 2,
+            [b'\'', b'\'', ..] => i += 2,
+            [b'\'', ..] => return Some(i + 1),
+            [_, ..] => i += 1,
+            [] => return None,
+        }
+    }
+}
+
+/// Handle the byte just after a `$`. If it opens a dollar-quoted string
+/// (`$tag$…$tag$`, tag empty or `[A-Za-z_][A-Za-z0-9_]*`), skip past the
+/// closing tag. Otherwise (parameter ref like `$1`, stray `$`, unterminated
+/// `$tag$…`), just advance past the `$`.
+fn skip_dollar_or_pass(bytes: &[u8], start: usize) -> Option<usize> {
+    let suffix = &bytes[start..];
+    let tag_len = suffix
+        .iter()
+        .position(|&b| !(b.is_ascii_alphanumeric() || b == b'_'))
+        .unwrap_or(suffix.len());
+
+    // Tag must end on a `$`; if non-empty, first char must be a letter or `_`.
+    if suffix.get(tag_len) != Some(&b'$')
+        || (tag_len > 0 && !(suffix[0].is_ascii_alphabetic() || suffix[0] == b'_'))
+    {
+        return Some(start);
+    }
+
+    let tag = &suffix[..tag_len];
+    let body_start = start + tag_len + 1;
+    find_dollar_close(bytes, body_start, tag).or(Some(start))
+}
+
+fn find_dollar_close(bytes: &[u8], start: usize, tag: &[u8]) -> Option<usize> {
+    let needle_len = tag.len() + 2; // $ + tag + $
+    bytes
+        .get(start..)?
+        .windows(needle_len)
+        .position(|w| w[0] == b'$' && w[needle_len - 1] == b'$' && &w[1..needle_len - 1] == tag)
+        .map(|p| start + p + needle_len)
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -305,8 +529,137 @@ fn nullables_from_plan(plan_json: &str) -> Vec<Option<bool>> {
     };
     let outputs = plan.output.clone().unwrap_or_default();
     let mut nullables = vec![None; outputs.len()];
-    visit_plan(&plan, None, &outputs, &mut nullables);
+    visit_plan(&plan, false, &outputs, &mut nullables);
     nullables
+}
+
+#[test]
+fn strip_redundant_outer_parens_cases() {
+    assert_eq!(strip_redundant_outer_parens(""), "");
+    assert_eq!(strip_redundant_outer_parens("a.id"), "a.id");
+    assert_eq!(
+        strip_redundant_outer_parens("(b.x || 'y'::text)"),
+        "b.x || 'y'::text"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens("((b.x || 'y'::text))"),
+        "b.x || 'y'::text"
+    );
+    assert_eq!(strip_redundant_outer_parens("(((x)))"), "x");
+    // Not a single outer pair — leave alone.
+    assert_eq!(strip_redundant_outer_parens("(a) + (b)"), "(a) + (b)");
+    assert_eq!(
+        strip_redundant_outer_parens("(a) + (b) + (c)"),
+        "(a) + (b) + (c)"
+    );
+    // One outer pair around an inner sum of parenthesized terms — strip just one.
+    assert_eq!(strip_redundant_outer_parens("((a) + (b))"), "(a) + (b)");
+    // Quoted literal containing an unbalanced paren should not be miscounted.
+    assert_eq!(
+        strip_redundant_outer_parens("('foo(' || b.x)"),
+        "'foo(' || b.x"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens("('it''s' || b.x)"),
+        "'it''s' || b.x"
+    );
+    // Double-quoted identifier containing an unbalanced paren.
+    assert_eq!(
+        strip_redundant_outer_parens(r#"("we(ird" || b.x)"#),
+        r#""we(ird" || b.x"#
+    );
+    assert_eq!(
+        strip_redundant_outer_parens(r#"("a""b" || b.x)"#),
+        r#""a""b" || b.x"#
+    );
+    // Unterminated literal: decline to strip rather than mis-count.
+    assert_eq!(
+        strip_redundant_outer_parens("('unterminated"),
+        "('unterminated"
+    );
+
+    // E-strings: backslash escape, `\'` is escaped, `\\` is literal backslash
+    // (so the following `'` is the terminator).
+    assert_eq!(
+        strip_redundant_outer_parens(r"(E'foo\nbar')"),
+        r"E'foo\nbar'"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens(r"(E'a\'b' || x)"),
+        r"E'a\'b' || x"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens(r"(E'a\\' || x)"),
+        r"E'a\\' || x"
+    );
+    // Lowercase `e` prefix is also valid.
+    assert_eq!(strip_redundant_outer_parens(r"(e'(' || x)"), r"e'(' || x");
+    // An unprefixed `E` followed by anything other than `'` is just an identifier.
+    assert_eq!(strip_redundant_outer_parens("(E + x)"), "E + x");
+
+    // Dollar-quoted strings: empty tag and named tag.
+    assert_eq!(
+        strip_redundant_outer_parens("($$weird('$$ || x)"),
+        "$$weird('$$ || x"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens("($tag$has $$nested$$ stuff$tag$ || x)"),
+        "$tag$has $$nested$$ stuff$tag$ || x"
+    );
+    // Parameter reference `$1` must NOT be treated as a dollar-quote start.
+    assert_eq!(strip_redundant_outer_parens("($1 + $2)"), "$1 + $2");
+    // Dollar-tag with invalid first char falls through to plain `$`.
+    assert_eq!(strip_redundant_outer_parens("($9$ + 1)"), "$9$ + 1");
+    // Dollar-quoted body containing parens must not affect depth count
+    // (PG docs §4.1.2.4).
+    assert_eq!(
+        strip_redundant_outer_parens("($tag$ has ) and ( in body $tag$ || x)"),
+        "$tag$ has ) and ( in body $tag$ || x"
+    );
+    // Unterminated dollar-quote: tokenizer falls back to advancing past the
+    // single `$`. Inner unbalanced parens then prevent stripping.
+    assert_eq!(
+        strip_redundant_outer_parens("($tag$ has ( unclosed)"),
+        "($tag$ has ( unclosed)"
+    );
+
+    // Bit-string and hex-string constants (PG docs §4.1.2.5).
+    assert_eq!(
+        strip_redundant_outer_parens("(B'10(1' || x)"),
+        "B'10(1' || x"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens("(X'1F)F' || x)"),
+        "X'1F)F' || x"
+    );
+    // Lowercase prefixes are also valid.
+    assert_eq!(strip_redundant_outer_parens("(b'(' || x)"), "b'(' || x");
+    assert_eq!(strip_redundant_outer_parens("(x')' || y)"), "x')' || y");
+    // `B` / `X` not followed by `'` are ordinary identifiers/keywords.
+    assert_eq!(strip_redundant_outer_parens("(B + 1)"), "B + 1");
+    assert_eq!(strip_redundant_outer_parens("(X + 1)"), "X + 1");
+
+    // Unicode escape strings and identifiers (PG docs §§4.1.1, 4.1.2.3).
+    assert_eq!(
+        strip_redundant_outer_parens(r"(U&'\0028' || x)"),
+        r"U&'\0028' || x"
+    );
+    assert_eq!(
+        strip_redundant_outer_parens(r#"(U&"weird(col" || x)"#),
+        r#"U&"weird(col" || x"#
+    );
+    // `U&` not followed by `'` or `"` is not a Unicode-escape prefix.
+    assert_eq!(strip_redundant_outer_parens("(U & 1)"), "U & 1");
+    assert_eq!(strip_redundant_outer_parens("(U + 1)"), "U + 1");
+}
+
+#[test]
+fn outputs_match_cases() {
+    assert!(outputs_match("a.id", "a.id"));
+    assert!(outputs_match("(b.x)", "b.x"));
+    assert!(outputs_match("((b.x || 'y'::text))", "(b.x || 'y'::text)"));
+    assert!(!outputs_match("a.id", "b.id"));
+    assert!(!outputs_match("(a + b)", "(a - b)"));
 }
 
 // https://github.com/launchbadge/sqlx/issues/3202
@@ -554,4 +907,385 @@ fn nullable_inference_nested_left_joins_rewritten() {
         nullables_from_plan(plan),
         vec![None, Some(true), Some(true)]
     );
+}
+
+// https://github.com/transact-rs/sqlx/pull/4285#issuecomment-4572525414
+//
+// Postgres deparses the same computed expression with a different number of
+// outer paren pairs at different plan levels: the root target list emits
+// `((<expr>))` while the underlying join/projection node emits `(<expr>)`.
+// The exact-string match in `visit_plan` then misses, leaving the column's
+// nullability unset.
+//
+// Hand-built plan models the Right-join (build/probe-swapped) shape with
+// the computed expression pushed onto a nullable-side child node so the
+// paren-mismatch path is exercised directly. The plan is loosely modeled
+// on:
+//
+//     CREATE TABLE a (id uuid NOT NULL);
+//     CREATE TABLE b (id uuid NOT NULL, x text NOT NULL);
+//     SELECT a.id, b.x || 'y' FROM a LEFT JOIN b ON a.id = b.id LIMIT 100;
+#[test]
+fn nullable_inference_root_output_has_extra_outer_parens() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 0.00,
+              "Total Cost": 130.15,
+              "Plan Rows": 100,
+              "Plan Width": 36,
+              "Output": ["a.id", "((b.x || 'y'::text))"],
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Join Type": "Right",
+                  "Startup Cost": 28.50,
+                  "Total Cost": 1045.00,
+                  "Plan Rows": 1000,
+                  "Plan Width": 36,
+                  "Output": ["a.id", "(b.x || 'y'::text)"],
+                  "Inner Unique": false,
+                  "Hash Cond": "(b.id = a.id)",
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "b",
+                      "Schema": "public",
+                      "Alias": "b",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 819.00,
+                      "Plan Rows": 50000,
+                      "Plan Width": 36,
+                      "Output": ["b.id", "(b.x || 'y'::text)"]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Parent Relationship": "Inner",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 16.00,
+                      "Total Cost": 16.00,
+                      "Plan Rows": 1000,
+                      "Plan Width": 16,
+                      "Output": ["a.id"],
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "a",
+                          "Schema": "public",
+                          "Alias": "a",
+                          "Startup Cost": 0.00,
+                          "Total Cost": 16.00,
+                          "Plan Rows": 1000,
+                          "Plan Width": 16,
+                          "Output": ["a.id"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    // a.id (Inner branch, SQL left operand): preserved.
+    // The b.x-derived expression (Outer branch, SQL right operand): nullable.
+    assert_eq!(nullables_from_plan(plan), vec![None, Some(true)]);
+}
+
+// Verbatim EXPLAIN (VERBOSE, FORMAT JSON) output captured from PG 17 against
+// an unpopulated DB (no ANALYZE, `plan_cache_mode = force_generic_plan`) for:
+//
+//     CREATE TABLE a (id uuid NOT NULL);
+//     CREATE TABLE b (id uuid NOT NULL, x text NOT NULL);
+//     PREPARE q(int) AS
+//       SELECT a.id, b.x || 'y' FROM a LEFT JOIN b ON a.id = b.id LIMIT $1;
+//     EXPLAIN (VERBOSE, FORMAT JSON) EXECUTE q(NULL);
+//
+// The computed expression `(b.x || 'y'::text)` lives on the Hash Join node
+// itself; its nullable child (Hash) only carries the raw column outputs
+// `b.x` / `b.id`. So the children-only walk inside `visit_plan` never sees
+// the computed expression, and the root output `((b.x || 'y'::text))`
+// stays unmarked. Expected: the second column is nullable.
+#[test]
+fn nullable_inference_left_join_computed_expression() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 34.08,
+              "Total Cost": 74.51,
+              "Plan Rows": 990,
+              "Plan Width": 48,
+              "Output": ["a.id", "((b.x || 'y'::text))"],
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Join Type": "Left",
+                  "Startup Cost": 34.08,
+                  "Total Cost": 438.36,
+                  "Plan Rows": 9898,
+                  "Plan Width": 48,
+                  "Output": ["a.id", "(b.x || 'y'::text)"],
+                  "Inner Unique": false,
+                  "Hash Cond": "(a.id = b.id)",
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "a",
+                      "Schema": "public",
+                      "Alias": "a",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 28.50,
+                      "Plan Rows": 1850,
+                      "Plan Width": 16,
+                      "Output": ["a.id"]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Parent Relationship": "Inner",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 20.70,
+                      "Total Cost": 20.70,
+                      "Plan Rows": 1070,
+                      "Plan Width": 48,
+                      "Output": ["b.x", "b.id"],
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "b",
+                          "Schema": "public",
+                          "Alias": "b",
+                          "Startup Cost": 0.00,
+                          "Total Cost": 20.70,
+                          "Plan Rows": 1070,
+                          "Plan Width": 48,
+                          "Output": ["b.x", "b.id"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    assert_eq!(nullables_from_plan(plan), vec![None, Some(true)]);
+}
+
+// Same scenario as above but with a function call instead of `||`:
+//
+//     SELECT a.id, lpad(b.x, 10) FROM a LEFT JOIN b ON a.id = b.id LIMIT $1;
+//
+// Verifies the join-node-output classification isn't peculiar to operator
+// expressions.
+#[test]
+fn nullable_inference_left_join_function_call() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 34.08,
+              "Total Cost": 74.51,
+              "Plan Rows": 990,
+              "Plan Width": 48,
+              "Output": ["a.id", "(lpad(b.x, 10, ' '::text))"],
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Join Type": "Left",
+                  "Startup Cost": 34.08,
+                  "Total Cost": 438.36,
+                  "Plan Rows": 9898,
+                  "Plan Width": 48,
+                  "Output": ["a.id", "lpad(b.x, 10, ' '::text)"],
+                  "Inner Unique": false,
+                  "Hash Cond": "(a.id = b.id)",
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "a",
+                      "Schema": "public",
+                      "Alias": "a",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 28.50,
+                      "Plan Rows": 1850,
+                      "Plan Width": 16,
+                      "Output": ["a.id"]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Parent Relationship": "Inner",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 20.70,
+                      "Total Cost": 20.70,
+                      "Plan Rows": 1070,
+                      "Plan Width": 48,
+                      "Output": ["b.x", "b.id"],
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "b",
+                          "Schema": "public",
+                          "Alias": "b",
+                          "Startup Cost": 0.00,
+                          "Total Cost": 20.70,
+                          "Plan Rows": 1070,
+                          "Plan Width": 48,
+                          "Output": ["b.x", "b.id"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    assert_eq!(nullables_from_plan(plan), vec![None, Some(true)]);
+}
+
+// Captured from PG 17 for:
+//
+//     SELECT a.id, b.x || 'y' FROM a LEFT JOIN b ON a.id = b.id
+//     ORDER BY a.id LIMIT $1;
+//
+// The planner picks Merge Join over Hash Join here. Same bug pattern: the
+// `(b.x || 'y'::text)` expression lives on the Merge Join node itself; its
+// Inner (nullable) Sort child only forwards raw `b.x` / `b.id`.
+#[test]
+fn nullable_inference_merge_join_left_computed_expression() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 203.43,
+              "Total Cost": 221.68,
+              "Plan Rows": 990,
+              "Plan Width": 48,
+              "Output": ["a.id", "((b.x || 'y'::text))"],
+              "Plans": [
+                {
+                  "Node Type": "Merge Join",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Join Type": "Left",
+                  "Startup Cost": 203.43,
+                  "Total Cost": 385.90,
+                  "Plan Rows": 9898,
+                  "Plan Width": 48,
+                  "Output": ["a.id", "(b.x || 'y'::text)"],
+                  "Inner Unique": false,
+                  "Merge Cond": "(a.id = b.id)",
+                  "Plans": [
+                    {
+                      "Node Type": "Sort",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 128.89,
+                      "Total Cost": 133.52,
+                      "Plan Rows": 1850,
+                      "Plan Width": 16,
+                      "Output": ["a.id"],
+                      "Sort Key": ["a.id"],
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "a",
+                          "Schema": "public",
+                          "Alias": "a",
+                          "Startup Cost": 0.00,
+                          "Total Cost": 28.50,
+                          "Plan Rows": 1850,
+                          "Plan Width": 16,
+                          "Output": ["a.id"]
+                        }
+                      ]
+                    },
+                    {
+                      "Node Type": "Sort",
+                      "Parent Relationship": "Inner",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Startup Cost": 74.54,
+                      "Total Cost": 77.21,
+                      "Plan Rows": 1070,
+                      "Plan Width": 48,
+                      "Output": ["b.x", "b.id"],
+                      "Sort Key": ["b.id"],
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "b",
+                          "Schema": "public",
+                          "Alias": "b",
+                          "Startup Cost": 0.00,
+                          "Total Cost": 20.70,
+                          "Plan Rows": 1070,
+                          "Plan Width": 48,
+                          "Output": ["b.x", "b.id"]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    assert_eq!(nullables_from_plan(plan), vec![None, Some(true)]);
 }
