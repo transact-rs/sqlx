@@ -197,11 +197,11 @@ impl<DB: Database> PoolInner<DB> {
             // Saturating: never underflow even if a concurrent `release` hasn't yet published
             // its increment. An underflow would wrap `num_idle` to `usize::MAX` and wedge the
             // maintenance task in a non-yielding spin (see `release` for the full invariant).
-            let _ = self.num_idle.fetch_update(
-                Ordering::AcqRel,
-                Ordering::Acquire,
-                |n| Some(n.saturating_sub(1)),
-            );
+            let _ = self
+                .num_idle
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                    Some(n.saturating_sub(1))
+                });
             Ok(Floating::from_idle(idle, (*self).clone(), permit))
         } else {
             Err(permit)
