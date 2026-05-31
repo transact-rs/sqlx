@@ -67,8 +67,8 @@ impl AnyArguments {
                 AnyValueKind::Null(AnyTypeInfoKind::SmallInt) => out.add(Option::<i16>::None),
                 AnyValueKind::Null(AnyTypeInfoKind::Integer) => out.add(Option::<i32>::None),
                 AnyValueKind::Null(AnyTypeInfoKind::BigInt) => out.add(Option::<i64>::None),
-                AnyValueKind::Null(AnyTypeInfoKind::Real) => out.add(Option::<f64>::None),
-                AnyValueKind::Null(AnyTypeInfoKind::Double) => out.add(Option::<f32>::None),
+                AnyValueKind::Null(AnyTypeInfoKind::Real) => out.add(Option::<f32>::None),
+                AnyValueKind::Null(AnyTypeInfoKind::Double) => out.add(Option::<f64>::None),
                 AnyValueKind::Null(AnyTypeInfoKind::Text) => out.add(Option::<String>::None),
                 AnyValueKind::Null(AnyTypeInfoKind::Blob) => out.add(Option::<Vec<u8>>::None),
                 AnyValueKind::Bool(b) => out.add(b),
@@ -83,5 +83,48 @@ impl AnyArguments {
             }?
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_into_maps_null_real_to_f32_and_null_double_to_f64() {
+        let mut args = AnyArguments::default();
+        args.values.0.push(AnyValueKind::Null(AnyTypeInfoKind::Real));
+        args.values.0.push(AnyValueKind::Null(AnyTypeInfoKind::Double));
+
+        let out: AnyArguments = args.convert_into().unwrap();
+
+        assert_eq!(out.values.0.len(), 2);
+        assert!(matches!(
+            out.values.0[0],
+            AnyValueKind::Null(AnyTypeInfoKind::Real)
+        ));
+        assert!(matches!(
+            out.values.0[1],
+            AnyValueKind::Null(AnyTypeInfoKind::Double)
+        ));
+    }
+
+    #[test]
+    fn convert_into_preserves_non_float_null_types() {
+        let mut args = AnyArguments::default();
+        args.values.0.push(AnyValueKind::Null(AnyTypeInfoKind::Integer));
+        args.values.0.push(AnyValueKind::Null(AnyTypeInfoKind::BigInt));
+
+        let out: AnyArguments = args.convert_into().unwrap();
+
+        assert_eq!(out.values.0.len(), 2);
+        assert!(matches!(
+            out.values.0[0],
+            AnyValueKind::Null(AnyTypeInfoKind::Integer)
+        ));
+        assert!(matches!(
+            out.values.0[1],
+            AnyValueKind::Null(AnyTypeInfoKind::BigInt)
+        ));
     }
 }
