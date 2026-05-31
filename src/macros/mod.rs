@@ -93,6 +93,28 @@
 /// [configuration guide]: crate::_config::macros::Config
 /// [reference `sqlx.toml`]: crate::_config::_reference
 ///
+/// ## Nullability of Bind Parameters
+/// The `query!` family of macros checks the *types* of bind parameters against the
+/// database's inferred parameter types, but they do **not** check whether a bound
+/// value's nullability is compatible with the target column's `NOT NULL` constraint.
+///
+/// Databases generally report all bind parameters as nullable, and the macro has no
+/// way to associate a parameter with a specific column constraint at compile time.
+/// As a result, passing a `None`/`NULL` value for a non-nullable column compiles
+/// successfully and only fails at runtime with a database constraint violation:
+///
+/// ```rust,ignore
+/// // `name` is declared `NOT NULL`, but this still compiles;
+/// // it only fails at runtime when executed:
+/// let name: Option<String> = None;
+/// sqlx::query!("insert into accounts (name) values (?)", name)
+///     .execute(&mut conn)
+///     .await?;
+/// ```
+///
+/// Null-checking is only performed on the *output* columns of a query, not on the
+/// *input* bind parameters.
+///
 /// ## Query Arguments
 /// Like `println!()` and the other formatting macros, you can add bind parameters to your SQL
 /// and this macro will typecheck passed arguments and error on missing ones:
