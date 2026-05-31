@@ -156,7 +156,33 @@ fn load_env(
     }))
 }
 
-/// Returns `true` if `val` is `"true"`,
+/// Returns `true` if `val` is `"true"` (case-insensitive) or `"1"`.
 fn is_truthy_bool(val: &str) -> bool {
     val.eq_ignore_ascii_case("true") || val == "1"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_truthy_bool;
+
+    #[test]
+    fn truthy_values_return_true() {
+        assert!(is_truthy_bool("true"));
+        assert!(is_truthy_bool("1"));
+    }
+
+    #[test]
+    fn truthy_is_case_insensitive() {
+        assert!(is_truthy_bool("TRUE"));
+        assert!(is_truthy_bool("True"));
+        assert!(is_truthy_bool("tRuE"));
+    }
+
+    #[test]
+    fn falsy_values_return_false() {
+        assert!(!is_truthy_bool("false"));
+        assert!(!is_truthy_bool("0"));
+        assert!(!is_truthy_bool(""));
+        assert!(!is_truthy_bool("yes"));
+    }
 }
