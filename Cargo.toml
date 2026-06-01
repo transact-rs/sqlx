@@ -29,6 +29,11 @@ members = [
     "tests/mysql/wasm-components/pool-crud-test",
     "tests/mysql/wasm-components/prepared-query-test",
     "tests/mysql/wasm-components/tls-connect-test",
+    "tests/postgres/wasm-components/postgres-connect-test",
+    "tests/postgres/wasm-components/postgres-execute-query-test",
+    "tests/postgres/wasm-components/postgres-pool-crud-test",
+    "tests/postgres/wasm-components/postgres-prepared-query-test",
+    "tests/postgres/wasm-components/postgres-tls-connect-test",
 ]
 
 [workspace.package]
@@ -248,13 +253,13 @@ rand_xoshiro = "0.6.0"
 hex = "0.4.3"
 tempfile = "3.10.1"
 criterion = { version = "0.5.1", features = ["async_tokio"] }
-libsqlite3-sys = { version = "0.30.1" }
+libsqlite3-sys = { version = ">=0.30.0, <0.36.0" }
 
 # If this is an unconditional dev-dependency then Cargo will *always* try to build `libsqlite3-sys`,
 # even when SQLite isn't the intended test target, and fail if the build environment is not set up for compiling C code.
 [target.'cfg(sqlite_test_sqlcipher)'.dev-dependencies]
 # Enable testing with SQLCipher if specifically requested.
-libsqlite3-sys = { version = "0.30.1", features = ["bundled-sqlcipher"] }
+libsqlite3-sys = { version = ">=0.30.0, <0.36.0", features = ["bundled-sqlcipher"] }
 
 # Common lint settings for the workspace
 [workspace.lints.clippy]
@@ -427,6 +432,10 @@ required-features = ["mysql"]
 name = "postgres"
 path = "tests/postgres/postgres.rs"
 required-features = ["postgres"]
+
+[[test]]
+name = "postgres_wasi_integration_test"
+path = "tests/postgres/wasi_integration_test.rs"
 
 [[test]]
 name = "postgres-types"

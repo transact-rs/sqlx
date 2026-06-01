@@ -58,7 +58,6 @@ bitflags = { version = "2", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
 dotenvy = { workspace = true }
 hex = "0.4.3"
-home = "0.5.5"
 itoa = "1.0.1"
 log = "0.4.18"
 memchr = { version = "2.4.1", default-features = false }

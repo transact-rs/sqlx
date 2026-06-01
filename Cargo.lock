@@ -2753,6 +2753,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "postgres-connect-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tokio",
+ "wasip3 0.5.0+wasi-0.3.0-rc-2026-03-15",
+]
+
+[[package]]
+name = "postgres-execute-query-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tokio",
+ "wasip3 0.5.0+wasi-0.3.0-rc-2026-03-15",
+]
+
+[[package]]
+name = "postgres-pool-crud-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tokio",
+ "wasip3 0.5.0+wasi-0.3.0-rc-2026-03-15",
+]
+
+[[package]]
+name = "postgres-prepared-query-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tokio",
+ "wasip3 0.5.0+wasi-0.3.0-rc-2026-03-15",
+]
+
+[[package]]
+name = "postgres-tls-connect-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sqlx",
+ "tokio",
+ "wasip3 0.5.0+wasi-0.3.0-rc-2026-03-15",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4014,7 +4064,6 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
- "home",
  "ipnet",
  "ipnetwork",
  "itoa",
