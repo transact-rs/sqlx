@@ -7,6 +7,7 @@ use crate::PgConnection;
 use smallvec::SmallVec;
 use sqlx_core::query_builder::QueryBuilder;
 use sqlx_core::sql_str::AssertSqlSafe;
+use std::collections::BTreeSet;
 
 impl PgConnection {
     /// Check whether EXPLAIN statements are supported by the current connection
@@ -180,16 +181,6 @@ impl JoinType {
         }
     }
 
-    /// The `Parent Relationship` of this join's preserved-side child, or
-    /// `None` for `Full` (both sides nullable).
-    fn preserved_side(self) -> Option<ParentRelation> {
-        match self {
-            Self::Left => Some(ParentRelation::Outer), // SQL left operand
-            Self::Right => Some(ParentRelation::Inner), // preserved after build/probe swap
-            Self::Full => None,
-        }
-    }
-
     /// Whether a child with the given `Parent Relationship` is on this
     /// join's nullable side.
     fn child_is_nullable(self, child_rel: Option<ParentRelation>) -> bool {
@@ -216,28 +207,23 @@ impl ParentRelation {
             _ => None,
         }
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Outer => "Outer",
-            Self::Inner => "Inner",
-        }
-    }
 }
 
 /// Walk the EXPLAIN plan tree marking each root output that may be NULL due
 /// to an outer join above it.
 ///
-/// At every node we ask: "which of this node's outputs are preserved (i.e.
-/// definitely NOT made nullable here)?" Anything else is potentially NULL
-/// and gets marked in the root vector. The preserved set depends on context:
+///   * In a nullable subtree (ancestor outer join already nulled this
+///     branch), every output is treated as potentially NULL.
+///   * At an outer-join node (`Left` / `Right` / `Full`), the join's own
+///     `Output` is scanned for qualified column refs (`alias.col`) drawn
+///     from the nullable-side subtree's leaves; any output that mentions
+///     one is potentially NULL. Outputs that reference neither side
+///     (subplan refs like `(SubPlan N)`, parameter refs, constants) stay
+///     unmarked — their nullability is genuinely unknown to this pass.
 ///
-///   * In a nullable subtree (ancestor outer join already nulled this branch),
-///     or at a `Full` join: nothing is preserved — mark everything.
-///   * At a `Left` join: pass-throughs from the `Outer` child are preserved.
-///   * At a `Right` join (the planner's build/probe-swapped form of a SQL
-///     `LEFT JOIN`): pass-throughs from the `Inner` child are preserved.
-///   * Elsewhere: this node introduces no nullability — skip marking.
+/// False positives — marking a column nullable when a downstream filter
+/// eliminates the NULLs — only leave a column wrapped in `Option<T>`. False
+/// negatives would cause runtime `unexpected null` decode panics.
 fn visit_plan(
     plan: &Plan,
     in_nullable: bool,
@@ -246,23 +232,29 @@ fn visit_plan(
 ) {
     let join = plan.join_type.as_deref().and_then(JoinType::parse);
 
-    let preserved: Option<&[String]> = if in_nullable {
-        Some(&[])
-    } else {
-        join.map(|j| match j.preserved_side() {
-            Some(rel) => child_outputs(plan, rel),
-            None => &[], // Full join: every output is nullable
-        })
-    };
-
-    if let Some(preserved) = preserved {
-        let is_preserved = |o: &String| preserved.iter().any(|p| outputs_match(p, o));
-        for output in plan.output.iter().flatten().filter(|o| !is_preserved(o)) {
+    if in_nullable {
+        // Ancestor outer join already null-extended this whole subtree.
+        for output in plan.output.iter().flatten() {
             if let Some(i) = outputs.iter().position(|o| outputs_match(o, output)) {
-                // N.B. may produce false positives (e.g. a downstream WHERE
-                // that eliminates NULLs is not modeled here), but those
-                // don't cause runtime errors — they just leave a column
-                // marked nullable when the application could rely on it.
+                nullables[i] = Some(true);
+            }
+        }
+    } else if let Some(j) = join {
+        let mut nullable_cols: BTreeSet<&str> = BTreeSet::new();
+        for child in plan.plans.iter().flatten() {
+            let child_rel = child
+                .parent_relation
+                .as_deref()
+                .and_then(ParentRelation::parse);
+            if j.child_is_nullable(child_rel) {
+                collect_qualified_col_refs(child, &mut nullable_cols);
+            }
+        }
+        for output in plan.output.iter().flatten() {
+            if !qualified_col_refs(output).any(|c| nullable_cols.contains(c)) {
+                continue;
+            }
+            if let Some(i) = outputs.iter().position(|o| outputs_match(o, output)) {
                 nullables[i] = Some(true);
             }
         }
@@ -278,13 +270,112 @@ fn visit_plan(
     }
 }
 
-fn child_outputs(plan: &Plan, parent_relation: ParentRelation) -> &[String] {
-    plan.plans
-        .iter()
-        .flatten()
-        .find(|c| c.parent_relation.as_deref() == Some(parent_relation.label()))
-        .and_then(|c| c.output.as_deref())
-        .unwrap_or(&[])
+/// Collect `<ident>.<ident>` tokens from a plan's `Output` and from the
+/// `Output`s of its main-join descendants.
+///
+/// Only `Outer` / `Inner` children are descended into. `SubPlan` / `InitPlan`
+/// children are computed independently of the surrounding outer join, so the
+/// columns they expose are not what makes the join's own outputs nullable.
+fn collect_qualified_col_refs<'a>(plan: &'a Plan, into: &mut BTreeSet<&'a str>) {
+    for output in plan.output.iter().flatten() {
+        for col in qualified_col_refs(output) {
+            into.insert(col);
+        }
+    }
+    for child in plan.plans.iter().flatten() {
+        if child
+            .parent_relation
+            .as_deref()
+            .and_then(ParentRelation::parse)
+            .is_some()
+        {
+            collect_qualified_col_refs(child, into);
+        }
+    }
+}
+
+/// Iterate over `<ident>.<ident>` tokens in `s`, where each `ident` is
+/// either:
+///
+///   * an unquoted identifier — a Unicode-letter-or-underscore start
+///     followed by Unicode-letters, underscores, digits, or `$`, or
+///   * a double-quoted identifier `"…"`, with `""` as the inner escape
+///     for a literal double-quote.
+///
+/// Both shapes per PG manual §4.1.1 "Identifiers and Key Words":
+/// <https://www.postgresql.org/docs/current/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS>
+///
+/// The leading and trailing quote bytes are part of the returned slice so
+/// a leaf `Output` of `"my col".x` and a join `Output` of `"my col".x`
+/// match each other as the same token.
+///
+/// Unicode-escape identifiers (`U&"…"`) are not recognized as a distinct
+/// shape: the `U&` prefix is skipped over and the quoted body is tokenized
+/// like an ordinary `"…"` ident. That's symmetric across all `Output`
+/// occurrences of the same expression, so matching still works.
+fn qualified_col_refs(s: &str) -> impl Iterator<Item = &str> + '_ {
+    let mut pos = 0;
+    std::iter::from_fn(move || {
+        while pos < s.len() {
+            let first_start = pos;
+            let first_end = scan_ident(s, pos);
+            if first_end == pos {
+                // No identifier here — advance one char and retry.
+                pos += s[pos..].chars().next().map_or(1, char::len_utf8);
+                continue;
+            }
+            if s.as_bytes().get(first_end) != Some(&b'.') {
+                pos = first_end;
+                continue;
+            }
+            let dot = first_end;
+            let second_start = dot + 1;
+            let second_end = scan_ident(s, second_start);
+            // Resume after the dot so chained `schema.table.col` yields
+            // both `schema.table` and `table.col`.
+            pos = second_start;
+            if second_end == second_start {
+                continue;
+            }
+            return Some(&s[first_start..second_end]);
+        }
+        None
+    })
+}
+
+/// Scan one identifier starting at byte offset `start`. Returns the byte
+/// offset just past it, or `start` if no identifier is present.
+fn scan_ident(s: &str, start: usize) -> usize {
+    let bytes = s.as_bytes();
+    if bytes.get(start) == Some(&b'"') {
+        let mut i = start + 1;
+        while i < s.len() {
+            if bytes[i] != b'"' {
+                i += 1;
+                continue;
+            }
+            if bytes.get(i + 1) == Some(&b'"') {
+                i += 2; // `""` escape inside a quoted identifier
+            } else {
+                return i + 1; // closing quote
+            }
+        }
+        return start; // unterminated — decline
+    }
+    let mut iter = s[start..].char_indices();
+    match iter.next() {
+        Some((_, c)) if c.is_alphabetic() || c == '_' => {}
+        _ => return start,
+    }
+    let mut end = start + s[start..].chars().next().unwrap().len_utf8();
+    for (off, c) in iter {
+        if c.is_alphanumeric() || c == '_' || c == '$' {
+            end = start + off + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    end
 }
 
 /// Compare two `Output` entries from an EXPLAIN plan, tolerating differences
@@ -660,6 +751,48 @@ fn outputs_match_cases() {
     assert!(outputs_match("((b.x || 'y'::text))", "(b.x || 'y'::text)"));
     assert!(!outputs_match("a.id", "b.id"));
     assert!(!outputs_match("(a + b)", "(a - b)"));
+}
+
+#[test]
+fn qualified_col_refs_cases() {
+    let collect = |s| qualified_col_refs(s).collect::<Vec<_>>();
+
+    // Bare qualified column.
+    assert_eq!(collect("a.id"), vec!["a.id"]);
+    // Wrapped in parens / part of an expression.
+    assert_eq!(collect("(b.x || 'y'::text)"), vec!["b.x"]);
+    // Multiple refs.
+    assert_eq!(collect("(a.id = b.id)"), vec!["a.id", "b.id"]);
+    // Casts and unqualified identifiers don't match.
+    assert!(collect("'y'::text").is_empty());
+    assert!(collect("count(*)").is_empty());
+    // Subplan / initplan refs — Postgres deparses these without qualifying
+    // the identifier, so the SubPlan-as-output case stays unmarked.
+    assert!(collect("(SubPlan 1)").is_empty());
+    assert!(collect("(InitPlan 1).col1").is_empty());
+    // Function calls.
+    assert_eq!(collect("lpad(b.x, 10, ' '::text)"), vec!["b.x"]);
+    // Parameter refs.
+    assert!(collect("$1").is_empty());
+    assert!(collect("$1 + $2").is_empty());
+    // Identifier starting with underscore.
+    assert_eq!(collect("_t.col"), vec!["_t.col"]);
+    // Dollar sign allowed in continuation positions (not as a start).
+    assert_eq!(collect("t.my$col"), vec!["t.my$col"]);
+    assert!(collect("$1.x").is_empty());
+    // Schema-qualified `schema.table.col` yields both `schema.table` and
+    // `table.col` so the latter still matches a leaf scan's bare `table.col`.
+    assert_eq!(collect("public.b.name"), vec!["public.b", "b.name"]);
+    // Non-ASCII letters and digits in unquoted identifiers.
+    assert_eq!(collect("café.id"), vec!["café.id"]);
+    assert_eq!(collect("(t.数据 = u.x)"), vec!["t.数据", "u.x"]);
+    // Quoted identifier with a space, with `""` as the inner escape.
+    assert_eq!(collect(r#""my col".x"#), vec![r#""my col".x"#]);
+    assert_eq!(collect(r#"t."a""b""#), vec![r#"t."a""b""#]);
+    // Bare closing-quote in the middle is just opaque body, not a token end.
+    assert_eq!(collect(r#""we""ird".x"#), vec![r#""we""ird".x"#]);
+    // Unterminated quoted identifier is declined.
+    assert!(collect(r#""unterminated"#).is_empty());
 }
 
 // https://github.com/launchbadge/sqlx/issues/3202
@@ -1288,4 +1421,161 @@ fn nullable_inference_merge_join_left_computed_expression() {
         ]
     "#;
     assert_eq!(nullables_from_plan(plan), vec![None, Some(true)]);
+}
+
+// https://github.com/transact-rs/sqlx/pull/4285#issuecomment-4587339482
+//
+// When a join's `Output` contains references to sibling subplans (Postgres
+// deparses them as `(SubPlan N)` / `(InitPlan N)`), those references must
+// not be marked nullable by the join above: subplans are computed
+// independently of the join's NULL extension, so their nullability is
+// genuinely unknown to this pass.
+//
+// Verbatim EXPLAIN (VERBOSE, FORMAT JSON) output captured from PG 17 for:
+//
+//     CREATE TABLE a (id uuid NOT NULL);
+//     CREATE TABLE b (id uuid NOT NULL, name text NOT NULL);
+//     CREATE TABLE c (a_id uuid NOT NULL, val int NOT NULL);
+//     INSERT INTO a SELECT gen_random_uuid() FROM generate_series(1, 1000);
+//     INSERT INTO b SELECT gen_random_uuid(), 'b' FROM generate_series(1, 1000);
+//     INSERT INTO c SELECT gen_random_uuid(), s FROM generate_series(1, 5000) s;
+//     ANALYZE a; ANALYZE b; ANALYZE c;
+//     SET plan_cache_mode = force_generic_plan;
+//     PREPARE q AS
+//       SELECT a.id,
+//              (SELECT count(*) FROM c WHERE c.a_id = a.id) AS cnt1,
+//              (SELECT max(val)  FROM c WHERE c.a_id = a.id) AS cnt2,
+//              b.name
+//       FROM a LEFT JOIN b ON a.id = b.id;
+//     EXPLAIN (VERBOSE, FORMAT JSON) EXECUTE q;
+#[test]
+fn nullable_inference_subplan_outputs_not_marked_nullable() {
+    let plan = r#"
+        [
+          {
+            "Plan": {
+              "Node Type": "Hash Join",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Join Type": "Right",
+              "Startup Cost": 28.50,
+              "Total Cost": 189084.25,
+              "Plan Rows": 1000,
+              "Plan Width": 30,
+              "Output": ["a.id", "(SubPlan 1)", "(SubPlan 2)", "b.name"],
+              "Inner Unique": false,
+              "Hash Cond": "(b.id = a.id)",
+              "Plans": [
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Relation Name": "b",
+                  "Schema": "public",
+                  "Alias": "b",
+                  "Startup Cost": 0.00,
+                  "Total Cost": 17.00,
+                  "Plan Rows": 1000,
+                  "Plan Width": 18,
+                  "Output": ["b.id", "b.name"]
+                },
+                {
+                  "Node Type": "Hash",
+                  "Parent Relationship": "Inner",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 16.00,
+                  "Total Cost": 16.00,
+                  "Plan Rows": 1000,
+                  "Plan Width": 16,
+                  "Output": ["a.id"],
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "a",
+                      "Schema": "public",
+                      "Alias": "a",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 16.00,
+                      "Plan Rows": 1000,
+                      "Plan Width": 16,
+                      "Output": ["a.id"]
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "Aggregate",
+                  "Strategy": "Plain",
+                  "Partial Mode": "Simple",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 1",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 94.50,
+                  "Total Cost": 94.51,
+                  "Plan Rows": 1,
+                  "Plan Width": 8,
+                  "Output": ["count(*)"],
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "c",
+                      "Schema": "public",
+                      "Alias": "c",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 94.50,
+                      "Plan Rows": 1,
+                      "Plan Width": 0,
+                      "Output": ["c.a_id", "c.val"],
+                      "Filter": "(c.a_id = a.id)"
+                    }
+                  ]
+                },
+                {
+                  "Node Type": "Aggregate",
+                  "Strategy": "Plain",
+                  "Partial Mode": "Simple",
+                  "Parent Relationship": "SubPlan",
+                  "Subplan Name": "SubPlan 2",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 94.50,
+                  "Total Cost": 94.51,
+                  "Plan Rows": 1,
+                  "Plan Width": 4,
+                  "Output": ["max(c_1.val)"],
+                  "Plans": [
+                    {
+                      "Node Type": "Seq Scan",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Relation Name": "c",
+                      "Schema": "public",
+                      "Alias": "c_1",
+                      "Startup Cost": 0.00,
+                      "Total Cost": 94.50,
+                      "Plan Rows": 1,
+                      "Plan Width": 4,
+                      "Output": ["c_1.a_id", "c_1.val"],
+                      "Filter": "(c_1.a_id = a.id)"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+    "#;
+    assert_eq!(
+        nullables_from_plan(plan),
+        vec![None, None, None, Some(true)]
+    );
 }
