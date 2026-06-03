@@ -13,7 +13,7 @@ use rustls::{
         pem::{self, PemObject},
         CertificateDer, PrivateKeyDer, ServerName, UnixTime,
     },
-    CertificateError, ClientConfig, ClientConnection, Error as TlsError, RootCertStore,
+    CertificateError, ClientConfig, ClientConnection, Error as TlsError, KeyLogFile, RootCertStore,
 };
 
 use crate::error::Error;
@@ -123,7 +123,7 @@ where
         }
     };
 
-    let config = if tls_config.accept_invalid_certs {
+    let mut config = if tls_config.accept_invalid_certs {
         if let Some(user_auth) = user_auth {
             config
                 .dangerous()
@@ -179,6 +179,9 @@ where
                 .with_no_client_auth()
         }
     };
+    if tls_config.enable_keylog {
+        config.key_log = Arc::new(KeyLogFile::new());
+    }
 
     let host = ServerName::try_from(tls_config.hostname.to_owned()).map_err(Error::tls)?;
 
