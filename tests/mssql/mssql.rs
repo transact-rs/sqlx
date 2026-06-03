@@ -2,7 +2,10 @@ use futures_util::TryStreamExt;
 use sqlx::mssql::MssqlRow;
 use sqlx::mssql::{Mssql, MssqlPoolOptions};
 use sqlx::mssql::{MssqlAdvisoryLock, MssqlIsolationLevel};
-use sqlx::{Column, Connection, Executor, MssqlConnection, Row, SqlSafeStr, Statement, TypeInfo};
+use sqlx::{
+    AssertSqlSafe, Column, Connection, Either, Executor, MssqlConnection, Row, SqlSafeStr,
+    Statement, TypeInfo,
+};
 use sqlx_test::new;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
@@ -114,6 +117,52 @@ CREATE TABLE #users (id INTEGER PRIMARY KEY);
         .await?;
 
     assert_eq!(sum, 110);
+
+    Ok(())
+}
+
+// Regression test: parameterized INSERT/UPDATE/DELETE must report the real
+// affected-row count from SQL Server's DONE token, not 0. The execute path goes
+// through tiberius `execute()` (ExecuteResult) rather than the row-counting
+// fetch path.
+#[sqlx_macros::test]
+async fn it_reports_rows_affected_for_dml() -> anyhow::Result<()> {
+    let mut conn = new::<Mssql>().await?;
+
+    conn.execute("CREATE TABLE #widgets (id INTEGER PRIMARY KEY, label NVARCHAR(50) NULL);")
+        .await?;
+
+    for index in 1..=5_i32 {
+        let done = sqlx::query("INSERT INTO #widgets (id) VALUES (@p1)")
+            .bind(index)
+            .execute(&mut conn)
+            .await?;
+        assert_eq!(done.rows_affected(), 1);
+    }
+
+    // UPDATE that hits exactly one row.
+    let done = sqlx::query("UPDATE #widgets SET label = @p1 WHERE id = @p2")
+        .bind("hit")
+        .bind(3_i32)
+        .execute(&mut conn)
+        .await?;
+    assert_eq!(done.rows_affected(), 1);
+
+    // UPDATE that matches no rows -> 0. This proves the count is real, not just
+    // "always non-zero".
+    let done = sqlx::query("UPDATE #widgets SET label = @p1 WHERE id = @p2")
+        .bind("miss")
+        .bind(999_i32)
+        .execute(&mut conn)
+        .await?;
+    assert_eq!(done.rows_affected(), 0);
+
+    // Multi-row DELETE reports the number of rows removed.
+    let done = sqlx::query("DELETE FROM #widgets WHERE id >= @p1")
+        .bind(3_i32)
+        .execute(&mut conn)
+        .await?;
+    assert_eq!(done.rows_affected(), 3);
 
     Ok(())
 }
@@ -467,37 +516,26 @@ async fn test_pool_callbacks() -> anyhow::Result<()> {
 async fn it_can_query_multiple_result_sets() -> anyhow::Result<()> {
     let mut conn = new::<Mssql>().await?;
 
-    // A batch that produces two result sets
-    let results = conn
-        .run("SELECT 1 AS a; SELECT 2 AS b, 3 AS c;", None)
+    // A batch that produces two result sets. `fetch_many` streams the rows from
+    // every result set in order, interleaved with `Either::Left` query-result
+    // markers.
+    let results: Vec<Either<_, _>> = (&mut conn)
+        .fetch_many("SELECT 1 AS a; SELECT 2 AS b, 3 AS c;")
+        .try_collect()
         .await?;
 
-    // First result set: one row with column "a"
-    let mut rows_first = Vec::new();
-    let mut rows_second = Vec::new();
-    let mut result_count = 0;
+    let rows: Vec<_> = results
+        .iter()
+        .filter_map(|item| item.as_ref().right())
+        .collect();
 
-    for item in &results {
-        match item {
-            either::Either::Left(_) => {
-                result_count += 1;
-            }
-            either::Either::Right(row) => {
-                if result_count == 0 {
-                    rows_first.push(row);
-                } else {
-                    rows_second.push(row);
-                }
-            }
-        }
-    }
+    // First result set: one row with column "a".
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].try_get::<i32, _>("a")?, 1);
 
-    assert_eq!(rows_first.len(), 1);
-    assert_eq!(rows_first[0].try_get::<i32, _>("a")?, 1);
-
-    assert_eq!(rows_second.len(), 1);
-    assert_eq!(rows_second[0].try_get::<i32, _>("b")?, 2);
-    assert_eq!(rows_second[0].try_get::<i32, _>("c")?, 3);
+    // Second result set: one row with columns "b" and "c".
+    assert_eq!(rows[1].try_get::<i32, _>("b")?, 2);
+    assert_eq!(rows[1].try_get::<i32, _>("c")?, 3);
 
     Ok(())
 }
@@ -551,7 +589,7 @@ async fn it_can_bind_many_parameters() -> anyhow::Result<()> {
     let param_refs: Vec<String> = (1..=100).map(|i| format!("@p{i}")).collect();
     let sql = format!("SELECT {}", param_refs.join(" + "));
 
-    let mut query = sqlx::query_scalar::<_, i32>(&sql);
+    let mut query = sqlx::query_scalar::<_, i32>(AssertSqlSafe(sql));
     for _ in 0..100 {
         query = query.bind(1_i32);
     }
