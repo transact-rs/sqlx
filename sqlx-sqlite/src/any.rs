@@ -95,7 +95,7 @@ impl AnyConnectionBackend for SqliteConnection {
                 .try_flatten_stream()
                 .map(
                     move |res: sqlx_core::Result<Either<SqliteQueryResult, SqliteRow>>| match res? {
-                        Either::Left(result) => Ok(Either::Left(map_result(result))),
+                        Either::Left(result) => Ok(Either::Left(result.into())),
                         Either::Right(row) => Ok(Either::Right(AnyRow::try_from(&row)?)),
                     },
                 ),
@@ -234,9 +234,16 @@ fn map_arguments(args: AnyArguments) -> SqliteArguments {
     }
 }
 
-fn map_result(res: SqliteQueryResult) -> AnyQueryResult {
-    AnyQueryResult {
-        rows_affected: res.rows_affected(),
-        last_insert_id: None,
+impl From<SqliteQueryResult> for AnyQueryResult {
+    fn from(done: SqliteQueryResult) -> Self {
+        // logic as per: https://www.sqlite.org/c3ref/last_insert_rowid.html
+        let last_insert_id = match done.last_insert_rowid() {
+            0 => None,
+            n => Some(n),
+        };
+        AnyQueryResult {
+            rows_affected: done.rows_affected(),
+            last_insert_id,
+        }
     }
 }
