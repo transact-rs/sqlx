@@ -64,14 +64,7 @@ impl PgConnectOptions {
             .or_else(|| var("PGHOST").ok())
             .unwrap_or_else(|| default_host(port));
 
-        let username = if let Ok(username) = var("PGUSER") {
-            username
-        } else if let Ok(username) = whoami::username() {
-            username
-        } else {
-            // keep the same fallback as previous version
-            "unknown".to_string()
-        };
+        let username = var("PGUSER").ok().unwrap_or_else(default_username);
 
         let database = var("PGDATABASE").ok();
 
@@ -580,6 +573,16 @@ impl PgConnectOptions {
     pub fn get_options(&self) -> Option<&str> {
         self.options.as_deref()
     }
+}
+
+fn default_username() -> String {
+    #[cfg(feature = "whoami")]
+    if let Ok(username) = whoami::username() {
+        return username;
+    }
+
+    // keep the same fallback as previous version
+    "unknown".to_string()
 }
 
 fn default_host(port: u16) -> String {
