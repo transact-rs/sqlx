@@ -363,7 +363,7 @@ fn test_pginterval_infinity() {
     assert!(PgInterval::INFINITY.is_positive_infinity());
     assert!(!PgInterval::NEG_INFINITY.is_positive_infinity());
     assert!(!PgInterval::INFINITY.is_negative_infinity());
-    assert!(PgInterval::NEG_INFINITY.is_negative_infinity());   
+    assert!(PgInterval::NEG_INFINITY.is_negative_infinity());
     assert!(!PgInterval::default().is_infinite());
 
     // verify values match what PostgreSQL expects
