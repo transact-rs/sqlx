@@ -37,6 +37,10 @@ impl PgInterval {
     pub fn is_positive_infinity(&self) -> bool {
         *self == Self::INFINITY
     }
+
+    pub fn is_negative_infinity(&self) -> bool {
+        *self == Self::NEG_INFINITY
+    }
 }
 
 impl Type<Postgres> for PgInterval {
@@ -358,9 +362,11 @@ fn test_pginterval_infinity() {
     assert!(PgInterval::NEG_INFINITY.is_infinite());
     assert!(PgInterval::INFINITY.is_positive_infinity());
     assert!(!PgInterval::NEG_INFINITY.is_positive_infinity());
+    assert!(!PgInterval::INFINITY.is_negative_infinity());
+    assert!(PgInterval::NEG_INFINITY.is_negative_infinity());   
     assert!(!PgInterval::default().is_infinite());
 
-    // verify sentinel values match what PostgreSQL expects
+    // verify values match what PostgreSQL expects
     assert_eq!(PgInterval::INFINITY.microseconds, i64::MAX);
     assert_eq!(PgInterval::INFINITY.days, i32::MAX);
     assert_eq!(PgInterval::INFINITY.months, i32::MAX);
