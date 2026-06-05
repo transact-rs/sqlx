@@ -58,6 +58,9 @@ default = ["postgres", "sqlite", "mysql", "native-tls", "completions", "sqlx-tom
 # TLS options
 rustls = ["sqlx/tls-rustls"]
 native-tls = ["sqlx/tls-native-tls"]
+tls-rustls-aws-lc-rs-platform-verifier = ["sqlx/tls-rustls-aws-lc-rs-platform-verifier"]
+tls-rustls-ring-platform-verifier = ["sqlx/tls-rustls-aws-lc-rs-platform-verifier"]
+
 
 # databases
 mysql = ["sqlx/mysql"]
