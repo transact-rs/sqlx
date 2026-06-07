@@ -1,7 +1,9 @@
 use crate::any::driver;
 use crate::any::{Any, AnyConnection};
 use crate::error::Error;
+use crate::executor::Executor;
 use crate::migrate::{AppliedMigration, Migrate, MigrateDatabase, MigrateError, Migration};
+use crate::sql_str::AssertSqlSafe;
 use futures_core::future::BoxFuture;
 use std::time::Duration;
 
@@ -51,7 +53,18 @@ impl Migrate for AnyConnection {
         &'e mut self,
         table_name: &'e str,
     ) -> BoxFuture<'e, Result<(), MigrateError>> {
-        Box::pin(async {
+        Box::pin(async move {
+            let table_exists =
+                // language=SQL
+                self.execute(AssertSqlSafe(format!(
+                    r#"SELECT 1 FROM {table_name};"#
+                )))
+                .await;
+
+            if table_exists.is_ok() {
+                return Ok(());
+            }
+
             self.get_migrate()?
                 .ensure_migrations_table(table_name)
                 .await
