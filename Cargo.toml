@@ -25,6 +25,7 @@ members = [
     "examples/sqlite/todos",
     "examples/sqlite/extension",
     "examples/sqlite/serialize",
+    "examples/sqlite/pool-configuration",
 ]
 
 [workspace.package]
