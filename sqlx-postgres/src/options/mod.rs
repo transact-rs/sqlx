@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::env::var;
 use std::fmt::{self, Display, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
+use sqlx_core::net::tls::TlsConnector;
 pub use ssl_mode::PgSslMode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
@@ -21,10 +23,7 @@ pub struct PgConnectOptions {
     pub(crate) username: String,
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
-    pub(crate) ssl_mode: PgSslMode,
-    pub(crate) ssl_root_cert: Option<CertificateInput>,
-    pub(crate) ssl_client_cert: Option<CertificateInput>,
-    pub(crate) ssl_client_key: Option<CertificateInput>,
+    pub(crate) ssl_options: SslOptions,
     pub(crate) statement_cache_capacity: usize,
     pub(crate) application_name: Option<String>,
     pub(crate) log_settings: LogSettings,
@@ -36,6 +35,15 @@ impl Default for PgConnectOptions {
     fn default() -> Self {
         Self::new_without_pgpass().apply_pgpass()
     }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SslOptions {
+    pub(crate) ssl_mode: PgSslMode,
+    pub(crate) ssl_root_cert: Option<CertificateInput>,
+    pub(crate) ssl_client_cert: Option<CertificateInput>,
+    pub(crate) ssl_client_key: Option<CertificateInput>,
+    pub(crate) cached_connector: Arc<OnceLock<TlsConnector>>,
 }
 
 impl PgConnectOptions {
@@ -82,16 +90,19 @@ impl PgConnectOptions {
             username,
             password: var("PGPASSWORD").ok(),
             database,
-            ssl_root_cert: var("PGSSLROOTCERT").ok().map(CertificateInput::from),
-            ssl_client_cert: var("PGSSLCERT").ok().map(CertificateInput::from),
-            // As of writing, the implementation of `From<String>` only looks for
-            // `-----BEGIN CERTIFICATE-----` and so will not attempt to parse
-            // a PEM-encoded private key.
-            ssl_client_key: var("PGSSLKEY").ok().map(CertificateInput::from),
-            ssl_mode: var("PGSSLMODE")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or_default(),
+            ssl_options: SslOptions {
+                ssl_root_cert: var("PGSSLROOTCERT").ok().map(CertificateInput::from),
+                ssl_client_cert: var("PGSSLCERT").ok().map(CertificateInput::from),
+                // As of writing, the implementation of `From<String>` only looks for
+                // `-----BEGIN CERTIFICATE-----` and so will not attempt to parse
+                // a PEM-encoded private key.
+                ssl_client_key: var("PGSSLKEY").ok().map(CertificateInput::from),
+                ssl_mode: var("PGSSLMODE")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_default(),
+                cached_connector: Arc::new(OnceLock::new()),
+            },
             statement_cache_capacity: 100,
             application_name: var("PGAPPNAME").ok(),
             extra_float_digits: Some("2".into()),
@@ -205,6 +216,11 @@ impl PgConnectOptions {
         self
     }
 
+    fn ssl_options_mut(&mut self) -> &mut SslOptions {
+        Arc::make_mut(&mut self.ssl_options.cached_connector).take();
+        &mut self.ssl_options
+    }
+
     /// Sets whether or with what priority a secure SSL TCP/IP connection will be negotiated
     /// with the server.
     ///
@@ -221,7 +237,7 @@ impl PgConnectOptions {
     ///     .ssl_mode(PgSslMode::Require);
     /// ```
     pub fn ssl_mode(mut self, mode: PgSslMode) -> Self {
-        self.ssl_mode = mode;
+        self.ssl_options_mut().ssl_mode = mode;
         self
     }
 
@@ -239,7 +255,8 @@ impl PgConnectOptions {
     ///     .ssl_root_cert("./ca-certificate.crt");
     /// ```
     pub fn ssl_root_cert(mut self, cert: impl AsRef<Path>) -> Self {
-        self.ssl_root_cert = Some(CertificateInput::File(cert.as_ref().to_path_buf()));
+        self.ssl_options_mut().ssl_root_cert =
+            Some(CertificateInput::File(cert.as_ref().to_path_buf()));
         self
     }
 
@@ -255,7 +272,8 @@ impl PgConnectOptions {
     ///     .ssl_client_cert("./client.crt");
     /// ```
     pub fn ssl_client_cert(mut self, cert: impl AsRef<Path>) -> Self {
-        self.ssl_client_cert = Some(CertificateInput::File(cert.as_ref().to_path_buf()));
+        self.ssl_options_mut().ssl_client_cert =
+            Some(CertificateInput::File(cert.as_ref().to_path_buf()));
         self
     }
 
@@ -274,14 +292,15 @@ impl PgConnectOptions {
     /// -----BEGIN CERTIFICATE-----
     /// <Certificate data here.>
     /// -----END CERTIFICATE-----";
-    ///    
+    ///
     /// let options = PgConnectOptions::new()
     ///     // Providing a CA certificate with less than VerifyCa is pointless
     ///     .ssl_mode(PgSslMode::VerifyCa)
     ///     .ssl_client_cert_from_pem(CERT);
     /// ```
     pub fn ssl_client_cert_from_pem(mut self, cert: impl AsRef<[u8]>) -> Self {
-        self.ssl_client_cert = Some(CertificateInput::Inline(cert.as_ref().to_vec()));
+        self.ssl_options_mut().ssl_client_cert =
+            Some(CertificateInput::Inline(cert.as_ref().to_vec()));
         self
     }
 
@@ -297,7 +316,8 @@ impl PgConnectOptions {
     ///     .ssl_client_key("./client.key");
     /// ```
     pub fn ssl_client_key(mut self, key: impl AsRef<Path>) -> Self {
-        self.ssl_client_key = Some(CertificateInput::File(key.as_ref().to_path_buf()));
+        self.ssl_options_mut().ssl_client_key =
+            Some(CertificateInput::File(key.as_ref().to_path_buf()));
         self
     }
 
@@ -323,7 +343,8 @@ impl PgConnectOptions {
     ///     .ssl_client_key_from_pem(KEY);
     /// ```
     pub fn ssl_client_key_from_pem(mut self, key: impl AsRef<[u8]>) -> Self {
-        self.ssl_client_key = Some(CertificateInput::Inline(key.as_ref().to_vec()));
+        self.ssl_options_mut().ssl_client_key =
+            Some(CertificateInput::Inline(key.as_ref().to_vec()));
         self
     }
 
@@ -339,7 +360,7 @@ impl PgConnectOptions {
     ///     .ssl_root_cert_from_pem(vec![]);
     /// ```
     pub fn ssl_root_cert_from_pem(mut self, pem_certificate: Vec<u8>) -> Self {
-        self.ssl_root_cert = Some(CertificateInput::Inline(pem_certificate));
+        self.ssl_options_mut().ssl_root_cert = Some(CertificateInput::Inline(pem_certificate));
         self
     }
 
@@ -550,7 +571,7 @@ impl PgConnectOptions {
     /// assert!(matches!(options.get_ssl_mode(), PgSslMode::Prefer));
     /// ```
     pub fn get_ssl_mode(&self) -> PgSslMode {
-        self.ssl_mode
+        self.ssl_options.ssl_mode
     }
 
     /// Get the application name.
