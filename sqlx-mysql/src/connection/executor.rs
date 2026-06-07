@@ -5,7 +5,7 @@ use crate::executor::{Execute, Executor};
 use crate::ext::ustr::UStr;
 use crate::io::MySqlBufExt;
 use crate::logger::QueryLogger;
-use crate::protocol::response::Status;
+use crate::protocol::response::{LocalInfilePacket, Status};
 use crate::protocol::statement::{
     BinaryRow, Execute as StatementExecute, Prepare, PrepareOk, StmtClose,
 };
@@ -22,7 +22,9 @@ use futures_core::stream::BoxStream;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
 use sqlx_core::column::{ColumnOrigin, TableColumn};
+use sqlx_core::fs::open_file;
 use sqlx_core::sql_str::SqlStr;
+use std::path::PathBuf;
 use std::{pin::pin, sync::Arc};
 
 impl MySqlConnection {
@@ -208,6 +210,19 @@ impl MySqlConnection {
                     self.inner.stream.waiting.pop_front();
                     return Ok(());
                 }
+
+                if packet[0] == 0xfb {
+                    // LocalInfileRequest
+                    // https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_com_query_response_local_infile_request.html
+                    let packet = packet.decode::<LocalInfilePacket>()?;
+                    let path = PathBuf::from(String::from_utf8_lossy(&packet.filename).into_owned());
+                    let file = open_file(&path).await.map_err(|_| err_protocol!("cannot open file {} for local infile request", path.display()))?;
+
+                    self.inner.stream.send_stream(file).await?;
+
+                    continue;
+                }
+
 
                 // otherwise, this first packet is the start of the result-set metadata,
                 *self.inner.stream.waiting.front_mut().unwrap() = Waiting::Row;
