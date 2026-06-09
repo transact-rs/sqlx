@@ -557,8 +557,13 @@ fn spawn_maintenance_tasks<DB: Database>(pool: &Arc<PoolInner<DB>>) {
                     // Go over all idle connections, check for idleness and lifetime,
                     // and if we have fewer than min_connections after reaping a connection,
                     // open a new one immediately. Note that other connections may be popped from
-                    // the queue in the meantime - that's fine, there is no harm in checking more
-                    for _ in 0..pool.num_idle() {
+                    // the queue in the meantime - that's fine, there is no harm in checking more.
+                    //
+                    // Cap the iteration count at `max_connections` so that even a corrupt
+                    // `num_idle` (e.g. an underflow to `usize::MAX`) can never make this
+                    // synchronous, non-yielding loop spin unboundedly and starve the runtime.
+                    let checks = cmp::min(pool.num_idle(), pool.options.max_connections as usize);
+                    for _ in 0..checks {
                         if let Some(conn) = pool.try_acquire() {
                             if is_beyond_idle_timeout(&conn, &pool.options)
                                 || is_beyond_max_lifetime(&conn, &pool.options)
