@@ -1437,3 +1437,35 @@ async fn issue_3982() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn issue_4300() -> anyhow::Result<()> {
+    use sqlx::migrate::Migrator;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::Path;
+
+    let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+
+    let migrator = Migrator::new(Path::new("tests/sqlite/migrations_issue_4300")).await?;
+    migrator.run(&pool).await?;
+
+    sqlx::query("CREATE TABLE my_table ( qqq TEXT )")
+        .execute(&pool)
+        .await?;
+
+    sqlx::query("CREATE TABLE other_table ( www TEXT )")
+        .execute(&pool)
+        .await?;
+
+    sqlx::query("INSERT INTO my_table (qqq) VALUES ('temporary')")
+        .execute(&pool)
+        .await?;
+
+    let result = sqlx::query("BEGIN TRANSACTION; COMMIT;")
+        .execute(&pool)
+        .await?;
+
+    assert_eq!(result.rows_affected(), 0);
+
+    Ok(())
+}
