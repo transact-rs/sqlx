@@ -5,6 +5,7 @@ use crate::database::Database;
 use crate::error::Error;
 use crate::pool::{deadline_as_timeout, CloseEvent, Pool, PoolOptions};
 use crossbeam_queue::ArrayQueue;
+use futures_core::future::BoxFuture;
 
 use crate::sync::{AsyncSemaphore, AsyncSemaphoreReleaser};
 
@@ -347,7 +348,14 @@ impl<DB: Database> PoolInner<DB> {
 
             // result here is `Result<Result<C, Error>, TimeoutError>`
             // if this block does not return, sleep for the backoff timeout and try again
-            match crate::rt::timeout(timeout, connect_options.connect()).await {
+            let connect_fut: BoxFuture<'_, Result<DB::Connection, Error>> =
+                if let Some(connector) = &self.options.connector {
+                    connector(&connect_options)
+                } else {
+                    Box::pin(connect_options.connect())
+                };
+
+            match crate::rt::timeout(timeout, connect_fut).await {
                 // successfully established connection
                 Ok(Ok(mut raw)) => {
                     // See comment on `PoolOptions::after_connect`
