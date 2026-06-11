@@ -72,6 +72,43 @@ async fn pool_should_be_returned_failed_transactions() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn pool_should_report_acquired_connections() -> anyhow::Result<()> {
+    sqlx::any::install_default_drivers();
+
+    let pool = AnyPoolOptions::new()
+        .max_connections(2)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    assert_eq!(pool.size(), 1);
+    assert_eq!(pool.num_idle(), 1);
+    assert_eq!(pool.num_acquired(), 0);
+
+    let mut conn1 = pool.acquire().await?;
+
+    assert_eq!(pool.size(), 1);
+    assert_eq!(pool.num_idle(), 0);
+    assert_eq!(pool.num_acquired(), 1);
+
+    let mut conn2 = pool.acquire().await?;
+
+    assert_eq!(pool.size(), 2);
+    assert_eq!(pool.num_idle(), 0);
+    assert_eq!(pool.num_acquired(), 2);
+
+    conn2.return_to_pool().await;
+    conn1.return_to_pool().await;
+
+    assert_eq!(pool.size(), 2);
+    assert_eq!(pool.num_idle(), 2);
+    assert_eq!(pool.num_acquired(), 0);
+
+    pool.close().await;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn test_pool_callbacks() -> anyhow::Result<()> {
     sqlx::any::install_default_drivers();
 
