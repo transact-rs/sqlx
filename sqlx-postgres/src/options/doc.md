@@ -48,6 +48,7 @@ Instead, the name is linked to the method to set the value.
 | Parameter                                                    | Default                       |
 |--------------------------------------------------------------|-------------------------------|
 | [`statement-cache-capacity`][Self::statement_cache_capacity] | `100`                         |
+| [`sqlx-advisory-locking`][Self::advisory_locking]            | `true`                        |
 
 # Example URLs
 ```text

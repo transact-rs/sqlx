@@ -30,6 +30,7 @@ pub struct PgConnectOptions {
     pub(crate) log_settings: LogSettings,
     pub(crate) extra_float_digits: Option<Cow<'static, str>>,
     pub(crate) options: Option<String>,
+    pub(crate) advisory_locking: bool,
 }
 
 impl Default for PgConnectOptions {
@@ -97,6 +98,7 @@ impl PgConnectOptions {
             extra_float_digits: Some("2".into()),
             log_settings: Default::default(),
             options: var("PGOPTIONS").ok(),
+            advisory_locking: true,
         }
     }
 
@@ -452,6 +454,19 @@ impl PgConnectOptions {
         self
     }
 
+    /// Sets whether `#[sqlx::test]` should use advisory locking during test database setup.
+    ///
+    /// Defaults to `true`. Set to `false` for databases that speak the PostgreSQL wire
+    /// protocol but do not implement `pg_advisory_xact_lock`, such as CockroachDB.
+    ///
+    /// When disabled, advisory locking is also skipped for the migrator during test setup.
+    ///
+    /// Can be set in the connection URL: `postgres://localhost/mydb?sqlx-advisory-locking=false`
+    pub fn advisory_locking(mut self, advisory_locking: bool) -> Self {
+        self.advisory_locking = advisory_locking;
+        self
+    }
+
     /// We try using a socket if hostname starts with `/` or if socket parameter
     /// is specified.
     pub(crate) fn fetch_socket(&self) -> Option<String> {
@@ -579,6 +594,11 @@ impl PgConnectOptions {
     /// ```
     pub fn get_options(&self) -> Option<&str> {
         self.options.as_deref()
+    }
+
+    /// Get whether advisory locking is enabled for test database setup.
+    pub fn get_advisory_locking(&self) -> bool {
+        self.advisory_locking
     }
 }
 

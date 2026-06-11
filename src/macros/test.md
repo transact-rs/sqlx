@@ -226,4 +226,28 @@ Multiple `fixtures` attributes can be used to combine different operating modes.
 <sup>3</sup>Ordering for test fixtures is entirely up to the application, and each test may choose which fixtures to
 apply and which to omit. However, since each fixture is applied separately (sent as a single command string, so wrapped
 in an implicit `BEGIN` and `COMMIT`), you will want to make sure to order the fixtures such that foreign key
-requirements are always satisfied, or else you might get errors. 
+requirements are always satisfied, or else you might get errors.
+
+### Disabling Advisory Locking
+
+By default, `#[sqlx::test]` acquires a PostgreSQL advisory lock (`pg_advisory_xact_lock`) before creating the test
+database schema and also locks during migrations. This prevents a race condition when multiple tests run concurrently.
+
+Some databases speak the PostgreSQL wire protocol but do not implement advisory locks.
+For example, CockroachDB does not support `pg_advisory_xact_lock`
+(see [cockroachdb/cockroach#13546](https://github.com/cockroachdb/cockroach/issues/13546)).
+
+You can disable advisory locking by adding `sqlx-advisory-locking=false` to your `DATABASE_URL`:
+
+```text
+DATABASE_URL="postgres://localhost/mydb?sqlx-advisory-locking=false"
+```
+
+This affects all `#[sqlx::test]` tests: both the test database schema setup and migrations
+will skip advisory locks. No per-test annotation is needed.
+
+See also [`PgConnectOptions::advisory_locking()`](crate::postgres::PgConnectOptions::advisory_locking)
+and [`Migrator::set_locking()`](crate::migrate::Migrator::set_locking).
+
+**Note:** Disabling locking means concurrent test processes may race during schema setup. The DDL statements
+use `IF NOT EXISTS` so this is generally safe, but you should be aware of the trade-off.
