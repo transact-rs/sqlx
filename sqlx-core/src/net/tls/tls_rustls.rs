@@ -123,7 +123,7 @@ where
         }
     };
 
-    let config = if tls_config.accept_invalid_certs {
+    let mut config = if tls_config.accept_invalid_certs {
         if let Some(user_auth) = user_auth {
             config
                 .dangerous()
@@ -179,6 +179,15 @@ where
                 .with_no_client_auth()
         }
     };
+
+    if let Some(alpn_protocols) = tls_config.alpn_protocols {
+        let alpn_protocols: Vec<Vec<u8>> = alpn_protocols
+            .into_iter()
+            .map(|s| s.as_bytes().to_vec())
+            .collect();
+
+        config.alpn_protocols = alpn_protocols;
+    }
 
     let host = ServerName::try_from(tls_config.hostname.to_owned()).map_err(Error::tls)?;
 

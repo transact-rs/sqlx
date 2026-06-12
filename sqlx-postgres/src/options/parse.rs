@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::{PgConnectOptions, PgSslMode};
+use crate::{PgConnectOptions, PgSslMode, PgSslNegotiation};
 use sqlx_core::percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use sqlx_core::Url;
 use std::net::IpAddr;
@@ -51,6 +51,10 @@ impl PgConnectOptions {
             match &*key {
                 "sslmode" | "ssl-mode" => {
                     options = options.ssl_mode(value.parse().map_err(Error::config)?);
+                }
+
+                "sslnegotiation" | "ssl-negotiation" => {
+                    options = options.ssl_negotiation(value.parse().map_err(Error::config)?);
                 }
 
                 "sslrootcert" | "ssl-root-cert" | "ssl-ca" => {
@@ -145,6 +149,13 @@ impl PgConnectOptions {
             PgSslMode::VerifyFull => "verify-full",
         };
         url.query_pairs_mut().append_pair("sslmode", ssl_mode);
+
+        let ssl_negotiation = match self.ssl_negotiation {
+            PgSslNegotiation::Postgres => "postgres",
+            PgSslNegotiation::Direct => "direct",
+        };
+        url.query_pairs_mut()
+            .append_pair("sslnegotiation", ssl_negotiation);
 
         if let Some(ssl_root_cert) = &self.ssl_root_cert {
             url.query_pairs_mut()
@@ -267,6 +278,22 @@ fn it_parses_password_with_non_ascii_chars_correctly() {
 }
 
 #[test]
+fn it_parses_sslmode_correctly_from_parameter() {
+    let url = "postgres://?sslmode=verify-full";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert!(matches!(opts.ssl_mode, PgSslMode::VerifyFull));
+}
+
+#[test]
+fn it_parses_sslnegotiation_correctly_from_parameter() {
+    let url = "postgres://?sslnegotiation=direct";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert!(matches!(opts.ssl_negotiation, PgSslNegotiation::Direct));
+}
+
+#[test]
 fn it_parses_socket_correctly_percent_encoded() {
     let url = "postgres://%2Fvar%2Flib%2Fpostgres/database";
     let opts = PgConnectOptions::from_str(url).unwrap();
@@ -310,7 +337,7 @@ fn it_returns_the_parsed_url_when_socket() {
 
     let mut expected_url = Url::parse(url).unwrap();
     // PgConnectOptions defaults
-    let query_string = "sslmode=prefer&statement-cache-capacity=100";
+    let query_string = "sslmode=prefer&sslnegotiation=postgres&statement-cache-capacity=100";
     let port = 5432;
     expected_url.set_query(Some(query_string));
     let _ = expected_url.set_port(Some(port));
@@ -325,7 +352,7 @@ fn it_returns_the_parsed_url_when_host() {
 
     let mut expected_url = Url::parse(url).unwrap();
     // PgConnectOptions defaults
-    let query_string = "sslmode=prefer&statement-cache-capacity=100";
+    let query_string = "sslmode=prefer&sslnegotiation=postgres&statement-cache-capacity=100";
     expected_url.set_query(Some(query_string));
 
     assert_eq!(expected_url, opts.build_url());
