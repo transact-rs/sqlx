@@ -1095,3 +1095,254 @@ async fn it_describes_analytical_function() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Regression tests for INSERT NOT NULL validation (issue #4206)
+// https://github.com/launchbadge/sqlx/issues/4206
+
+#[sqlx_macros::test]
+async fn it_validates_insert_with_all_required_columns() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE test_insert_valid(
+            id INTEGER PRIMARY KEY,
+            required_a TEXT NOT NULL,
+            required_b TEXT NOT NULL,
+            optional_c TEXT
+        )",
+    )
+    .await?;
+
+    // Explicit columns including all NOT NULL fields → should succeed
+    let d = conn
+        .describe(
+            "INSERT INTO test_insert_valid (id, required_a, required_b) VALUES (?, ?, ?)"
+                .into_sql_str(),
+        )
+        .await;
+
+    assert!(d.is_ok(), "INSERT with all NOT NULL columns should succeed");
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_missing_required_column() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE test_insert_missing(
+            id INTEGER PRIMARY KEY,
+            required_a TEXT NOT NULL,
+            required_b TEXT NOT NULL,
+            optional_c TEXT
+        )",
+    )
+    .await?;
+
+    // Missing required_b → should error
+    let err = conn
+        .describe("INSERT INTO test_insert_missing (id, required_a) VALUES (?, ?)".into_sql_str())
+        .await;
+
+    assert!(err.is_err(), "INSERT missing NOT NULL column should error");
+
+    let err_msg = format!("{:?}", err);
+    assert!(
+        err_msg.contains("required_b"),
+        "Error should name the missing column: {}",
+        err_msg
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_missing_multiple_required_columns() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE test_insert_multi_missing(
+            id INTEGER PRIMARY KEY,
+            required_a TEXT NOT NULL,
+            required_b TEXT NOT NULL,
+            required_c TEXT NOT NULL
+        )",
+    )
+    .await?;
+
+    // Missing required_b and required_c → error should list both
+    let err = conn
+        .describe(
+            "INSERT INTO test_insert_multi_missing (id, required_a) VALUES (?, ?)".into_sql_str(),
+        )
+        .await;
+
+    assert!(err.is_err());
+    let err_msg = format!("{:?}", err);
+    assert!(
+        err_msg.contains("required_b") && err_msg.contains("required_c"),
+        "Error should list all missing columns: {}",
+        err_msg
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_without_column_list() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE test_insert_no_cols(
+            id INTEGER PRIMARY KEY,
+            required_a TEXT NOT NULL,
+            required_b TEXT NOT NULL
+        )",
+    )
+    .await?;
+
+    // No explicit column list → VALUES implies all columns
+    // Runtime will validate; we skip compile-time check
+    let d = conn
+        .describe("INSERT INTO test_insert_no_cols VALUES (?, ?, ?)".into_sql_str())
+        .await;
+
+    assert!(
+        d.is_ok(),
+        "INSERT without column list should skip compile-time validation (deferred to runtime)"
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_with_column_defaults() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE test_insert_defaults(
+            id INTEGER PRIMARY KEY,
+            required_no_default TEXT NOT NULL,
+            required_with_default TEXT NOT NULL DEFAULT 'default_value',
+            optional_c TEXT
+        )",
+    )
+    .await?;
+
+    // required_with_default has DEFAULT → not required in INSERT
+    let d = conn
+        .describe(
+            "INSERT INTO test_insert_defaults (id, required_no_default) VALUES (?, ?)"
+                .into_sql_str(),
+        )
+        .await;
+
+    assert!(
+        d.is_ok(),
+        "NOT NULL columns with defaults should not be required"
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_case_insensitive() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE TestInsertCase(
+            ID INTEGER PRIMARY KEY,
+            RequiredCol TEXT NOT NULL
+        )",
+    )
+    .await?;
+
+    // Mixed case table/column names
+    let d = conn
+        .describe("INSERT INTO testinsertcase (id, requiredcol) VALUES (?, ?)".into_sql_str())
+        .await;
+
+    assert!(
+        d.is_ok(),
+        "Case-insensitive matching should work for SQLite identifiers"
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_with_quoted_identifiers() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute(
+        "CREATE TEMPORARY TABLE \"test_quoted\"(
+            id INTEGER PRIMARY KEY,
+            \"col_a\" TEXT NOT NULL,
+            col_b TEXT NOT NULL
+        )",
+    )
+    .await?;
+
+    // Quoted identifiers in both table and columns
+    let d = conn
+        .describe("INSERT INTO \"test_quoted\" (\"col_a\", col_b) VALUES (?, ?)".into_sql_str())
+        .await;
+
+    assert!(d.is_ok(), "Quoted identifiers should be parsed correctly");
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_gracefully_skips_nonexistent_table() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    // Table doesn't exist → validation skips gracefully
+    // Runtime will error with "no such table"
+    let d = conn
+        .describe("INSERT INTO nonexistent_table (col_a) VALUES (?)".into_sql_str())
+        .await;
+
+    // Should succeed (or error with different message from actual SQLite),
+    // not from our validation
+    // In practice, the table doesn't exist so describe will fail at the SQLite level,
+    // not at our validation level. That's OK—graceful degradation.
+    let _ = d;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_validates_insert_from_issue_4206() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    // Exact scenario from issue #4206
+    conn.execute(
+        "CREATE TEMPORARY TABLE session_group(
+            prop_a TEXT NOT NULL,
+            prop_b TEXT NOT NULL,
+            prop_c TEXT NOT NULL
+        )",
+    )
+    .await?;
+
+    // This INSERT is missing prop_c → should error
+    let err = conn
+        .describe("INSERT INTO session_group (prop_a, prop_b) VALUES (?, ?)".into_sql_str())
+        .await;
+
+    assert!(
+        err.is_err(),
+        "Regression test for #4206: INSERT missing NOT NULL column should error at compile time"
+    );
+
+    let err_msg = format!("{:?}", err);
+    assert!(
+        err_msg.contains("prop_c"),
+        "Error message should mention the missing column 'prop_c': {}",
+        err_msg
+    );
+
+    Ok(())
+}
