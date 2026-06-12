@@ -668,8 +668,7 @@ test_prepared_type!(interval<PgInterval>(
     "INTERVAL 'infinity'"
         == PgInterval::INFINITY,
     "INTERVAL '-infinity'"
-        == PgInterval::NEG_INFINITY,
-    
+        == PgInterval::NEG_INFINITY, 
 ));
 
 test_prepared_type!(money<PgMoney>(Postgres, "123.45::money" == PgMoney(12345)));
