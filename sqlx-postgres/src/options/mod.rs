@@ -457,7 +457,10 @@ impl PgConnectOptions {
     pub(crate) fn fetch_socket(&self) -> Option<String> {
         match self.socket {
             Some(ref socket) => {
-                let full_path = format!("{}/.s.PGSQL.{}", socket.display(), self.port);
+                let mut full_path = format!("{}/.s.PGSQL.{}", socket.display(), self.port);
+                if full_path.starts_with("@") {
+                    full_path.replace_range(0..1, "\0")
+                }
                 Some(full_path)
             }
             None if self.host.starts_with('/') => {
