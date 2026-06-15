@@ -22,8 +22,11 @@ pub struct MacrosEnv {
 
 impl Metadata {
     pub fn env(&self) -> crate::Result<Arc<MacrosEnv>> {
-        self.env
-            .get_or_try_init(|builder| load_env(&self.manifest_dir, &self.config, builder))
+        let workspace_root = self.workspace_root();
+
+        self.env.get_or_try_init(|builder| {
+            load_env(&self.manifest_dir, &workspace_root, &self.config, builder)
+        })
     }
 
     pub fn workspace_root(&self) -> PathBuf {
@@ -91,6 +94,7 @@ pub fn try_for_crate() -> crate::Result<Arc<Metadata>> {
 
 fn load_env(
     manifest_dir: &Path,
+    workspace_root: &Path,
     config: &Config,
     builder: &mut MtimeCacheBuilder,
 ) -> crate::Result<Arc<MacrosEnv>> {
@@ -108,7 +112,22 @@ fn load_env(
         offline: None,
     };
 
-    for dir in manifest_dir.ancestors() {
+    // https://github.com/launchbadge/sqlx/issues/4276
+    let dirs = if manifest_dir.starts_with(workspace_root) {
+        // Often just `[manifest_dir, workspace_dir]` but project structures can absolutely
+        // be more complicated
+        manifest_dir
+            .ancestors()
+            .take_while(|dir| dir.starts_with(workspace_root))
+            .collect::<Vec<_>>()
+    } else {
+        // Thinking of edge cases, there's the possibility that the package directory
+        // isn't actually a child of the workspace directory. There isn't really any other sane
+        // thing to do here; we shouldn't traverse into unrelated paths.
+        [manifest_dir, workspace_root].to_vec()
+    };
+
+    for dir in dirs {
         let path = dir.join(".env");
 
         let dotenv = match dotenvy::from_path_iter(&path) {
