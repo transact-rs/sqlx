@@ -21,6 +21,7 @@ pub struct PgConnectOptions {
     pub(crate) username: String,
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
+    pub(crate) gssapi_target_principal: Option<String>,
     pub(crate) ssl_mode: PgSslMode,
     pub(crate) ssl_root_cert: Option<CertificateInput>,
     pub(crate) ssl_client_cert: Option<CertificateInput>,
@@ -82,6 +83,7 @@ impl PgConnectOptions {
             username,
             password: var("PGPASSWORD").ok(),
             database,
+            gssapi_target_principal: var("PGPRINCIPAL").ok(),
             ssl_root_cert: var("PGSSLROOTCERT").ok().map(CertificateInput::from),
             ssl_client_cert: var("PGSSLCERT").ok().map(CertificateInput::from),
             // As of writing, the implementation of `From<String>` only looks for
@@ -343,6 +345,12 @@ impl PgConnectOptions {
         self
     }
 
+    /// Sets the targeted principal in case of attempted Kerberos negotiation
+    /// If left out and Kerberos is challenged, uses 'postgres/<hostname>'
+    pub fn gssapi_target_principal(mut self, target_principal: &str) -> Self {
+        self.gssapi_target_principal = Some(target_principal.to_owned());
+        self
+    }
     /// Sets the capacity of the connection's statement cache in a number of stored
     /// distinct statements. Caching is handled using LRU, meaning when the
     /// amount of queries hits the defined limit, the oldest statement will get

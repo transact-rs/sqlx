@@ -22,15 +22,27 @@ chrono = ["dep:chrono", "sqlx-core/chrono"]
 ipnet = ["dep:ipnet", "sqlx-core/ipnet"]
 ipnetwork = ["dep:ipnetwork", "sqlx-core/ipnetwork"]
 mac_address = ["dep:mac_address", "sqlx-core/mac_address"]
-rust_decimal = ["dep:rust_decimal", "rust_decimal/maths", "sqlx-core/rust_decimal"]
+rust_decimal = [
+    "dep:rust_decimal",
+    "rust_decimal/maths",
+    "sqlx-core/rust_decimal",
+]
 time = ["dep:time", "sqlx-core/time"]
 uuid = ["dep:uuid", "sqlx-core/uuid"]
 
 [dependencies]
 # Futures crates
-futures-channel = { version = "0.3.32", default-features = false, features = ["sink", "alloc", "std"] }
+futures-channel = { version = "0.3.32", default-features = false, features = [
+    "sink",
+    "alloc",
+    "std",
+] }
 futures-core = { version = "0.3.32", default-features = false }
-futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
+futures-util = { version = "0.3.32", default-features = false, features = [
+    "alloc",
+    "sink",
+    "io",
+] }
 
 # Cryptographic Primitives
 crc = { workspace = true, optional = true }
@@ -71,6 +83,7 @@ thiserror.workspace = true
 
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 serde_json = { version = "1.0.142", optional = true, features = ["raw_value"] }
+cross-krb5 = { version = "0.4.2" }
 
 [dependencies.sqlx-core]
 workspace = true
