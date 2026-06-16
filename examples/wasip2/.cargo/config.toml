@@ -1,0 +1,8 @@
+# `tokio::net` support on `wasm32-wasip2` is currently gated behind Tokio's
+# `tokio_unstable` cfg. Setting it here means `cargo build --target
+# wasm32-wasip2` works in these examples without passing `RUSTFLAGS` by hand.
+#
+# This config is discovered for both the `postgres` and `mysql` example crates
+# because Cargo walks up the directory tree from the build directory.
+[target.wasm32-wasip2]
+rustflags = ["--cfg", "tokio_unstable"]

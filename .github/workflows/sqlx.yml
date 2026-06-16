@@ -732,3 +732,81 @@ jobs:
         env:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"
+
+  wasip2:
+    name: WASI (wasm32-wasip2)
+    runs-on: ubuntu-24.04
+    needs: check
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: sqlx
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_DATABASE: sqlx
+          MYSQL_ROOT_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -uroot -ppassword --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # https://blog.rust-lang.org/2025/03/02/Rustup-1.28.0.html
+      - name: Setup Rust
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add wasm32-wasip2
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+
+      # Build and run the Postgres example as a WASI component, then assert the
+      # query results (not just the exit code) to catch wrong-value regressions.
+      - name: Postgres example
+        working-directory: examples/wasip2/postgres
+        run: |
+          cargo build --target wasm32-wasip2 --release
+          wasmtime run -S inherit-network \
+            --env DATABASE_URL="$DATABASE_URL" \
+            target/wasm32-wasip2/release/sqlx-wasip2-postgres.wasm | tee target/output.txt
+          grep -qF 'alice: 5' target/output.txt
+          grep -qF 'carol: 4' target/output.txt
+          grep -qF 'bob: 3' target/output.txt
+          grep -qF 'total votes: 12' target/output.txt
+          grep -q 'connected via pool to:' target/output.txt
+        env:
+          DATABASE_URL: postgres://postgres:password@127.0.0.1:5432/sqlx
+
+      # Build and run the MySQL example as a WASI component, then assert the
+      # query results (not just the exit code) to catch wrong-value regressions.
+      - name: MySQL example
+        working-directory: examples/wasip2/mysql
+        run: |
+          cargo build --target wasm32-wasip2 --release
+          wasmtime run -S inherit-network \
+            --env DATABASE_URL="$DATABASE_URL" \
+            target/wasm32-wasip2/release/sqlx-wasip2-mysql.wasm | tee target/output.txt
+          grep -qF 'alice: 5' target/output.txt
+          grep -qF 'carol: 4' target/output.txt
+          grep -qF 'bob: 3' target/output.txt
+          grep -qF 'total votes: 12' target/output.txt
+          grep -q 'connected via pool to:' target/output.txt
+        env:
+          DATABASE_URL: mysql://root:password@127.0.0.1:3306/sqlx

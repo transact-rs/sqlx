@@ -1,0 +1,23 @@
+# Standalone example: SQLx + Postgres connection pool on `wasm32-wasip2`.
+#
+# Detached from the main workspace (note the empty `[workspace]` table) so it
+# can pin the exact feature set used for WASI without being unified with the
+# rest of the workspace's features.
+[package]
+name = "sqlx-example-wasip2-postgres"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "sqlx-wasip2-postgres"
+path = "src/main.rs"
+
+[dependencies]
+sqlx = { path = "../../..", default-features = false, features = ["postgres", "runtime-tokio"] }
+
+# A current-thread Tokio runtime to drive the pool. On wasm32-wasip2 Tokio's
+# `net` driver works under `--cfg tokio_unstable`
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros"] }

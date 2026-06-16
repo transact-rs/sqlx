@@ -43,7 +43,7 @@
     <span> | </span>
     <a href="https://github.com/launchbadge/sqlx/wiki/Ecosystem">
       Ecosystem
-    </a>    
+    </a>
     <span> | </span>
     <a href="https://discord.gg/uuruzJ7">
       Discord
@@ -224,6 +224,59 @@ be removed in the future.
 -   Offline mode is now always enabled. See [sqlx-cli/README.md][readme-offline].
 
 [readme-offline]: sqlx-cli/README.md#enable-building-in-offline-mode-with-query
+
+#### WebAssembly (`wasm32-wasip2`)
+
+SQLx runs inside a [WebAssembly Component] on the `wasm32-wasip2` target, with
+the **Postgres** and **MySQL/MariaDB** drivers connecting over the host's network
+via [`wasi:sockets`]. This works in any WASIP2 runtime, such as
+[Wasmtime].
+
+It uses the standard **`runtime-tokio`** feature with async I/O. Connection pooling (`sqlx::Pool`), `LISTEN`/`NOTIFY`
+(`PgListener`), connection timeouts, and TLS (with the `tls-rustls-*` backends)
+all work.
+
+```toml
+[dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio"] }
+# wasm32-wasip2 does not have threads.. Drive futures with a current-thread runtime.
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros"] }
+```
+
+Two requirements specific to this target:
+
+1.  **`--cfg tokio_unstable`**: Tokio's `net` support on `wasm32` is currently
+    behind this cfg. Set it for the target in `.cargo/config.toml` so a plain
+    `cargo build --target wasm32-wasip2` works:
+
+    ```toml
+    # .cargo/config.toml
+    [target.wasm32-wasip2]
+    rustflags = ["--cfg", "tokio_unstable"]
+    ```
+
+2.  **Current-thread runtime**: there are no threads, so use
+    `#[tokio::main(flavor = "current_thread")]` (or
+    `Builder::new_current_thread()`); the multi-threaded runtime isn't available.
+
+Remaining notes on this target:
+
+-   TLS works with the `tls-rustls-*` backends (verified with `tls-rustls-ring`,
+    which negotiates TLS 1.3). `tls-native-tls` is **not** available (it links a
+    system TLS library).
+-   MySQL 8's default `caching_sha2_password` over a non-TLS connection requires
+    the `mysql-rsa` feature.
+-   Connecting by **hostname** triggers WASI name resolution, which Wasmtime
+    gates behind `--allow-ip-name-lookup` (separate from `-S inherit-network`).
+    Connecting by IP literal needs only `-S inherit-network`.
+
+Runnable examples for both backends, including the `wasmtime` invocation
+(`wasmtime run -S inherit-network ...`), live under
+[`examples/wasip2`](examples/wasip2).
+
+[WebAssembly Component]: https://component-model.bytecodealliance.org/
+[`wasi:sockets`]: https://github.com/WebAssembly/wasi-sockets
+[Wasmtime]: https://wasmtime.dev/
 
 ## SQLx is not an ORM!
 
