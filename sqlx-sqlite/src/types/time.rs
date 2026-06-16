@@ -193,6 +193,15 @@ fn decode_datetime_from_text(value: &str) -> Option<PrimitiveDateTime> {
 }
 
 mod formats {
+    // `time` 0.3.48 deprecated the field-based `modifier::{Year, Month, Hour}`
+    // components and the raw-byte `BorrowedFormatItem::Literal` in favor of new
+    // `#[non_exhaustive]` components (`Year*`, `Month*`, `Hour24`, `StringLiteral`).
+    // Those replacements aren't `const`-constructible the way the format items
+    // below require, and the deprecated API still works, so suppress the lint
+    // here until the format builders are migrated.
+    // Tracking: https://github.com/transact-rs/sqlx/issues/4310
+    #![allow(deprecated)]
+
     use time::format_description::BorrowedFormatItem::{Component, Literal, Optional};
     use time::format_description::{modifier, BorrowedFormatItem, Component::*};
 
