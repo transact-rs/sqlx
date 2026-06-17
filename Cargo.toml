@@ -160,7 +160,7 @@ mac_address = ["sqlx-core/mac_address", "sqlx-macros?/mac_address", "sqlx-postgr
 rust_decimal = ["sqlx-core/rust_decimal", "sqlx-macros?/rust_decimal", "sqlx-mysql?/rust_decimal", "sqlx-postgres?/rust_decimal"]
 time = ["sqlx-core/time", "sqlx-macros?/time", "sqlx-mysql?/time", "sqlx-postgres?/time", "sqlx-sqlite?/time"]
 uuid = ["sqlx-core/uuid", "sqlx-macros?/uuid", "sqlx-mysql?/uuid", "sqlx-postgres?/uuid", "sqlx-sqlite?/uuid"]
-regexp = ["sqlx-sqlite?/regexp"]
+regexp = ["sqlx-sqlite?/regexp", "sqlx-macros?/regexp"]
 bstr = ["sqlx-core/bstr"]
 
 [workspace.dependencies]

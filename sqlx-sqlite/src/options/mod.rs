@@ -193,6 +193,11 @@ impl SqliteConnectOptions {
         // Soft limit on the number of rows that `ANALYZE` touches per index.
         pragmas.insert("analysis_limit".into(), None);
 
+        #[cfg(feature = "regexp")]
+        let register_regexp_function = std::env::var("SQLX_SQLITE_REGISTER_REGEXP")
+            .ok()
+            .is_some_and(|val| val.eq_ignore_ascii_case("true") || val == "1");
+
         Self {
             filename: Cow::Borrowed(Path::new(":memory:")),
             in_memory: false,
@@ -214,7 +219,7 @@ impl SqliteConnectOptions {
             row_channel_size: 50,
             optimize_on_close: OptimizeOnClose::Disabled,
             #[cfg(feature = "regexp")]
-            register_regexp_function: false,
+            register_regexp_function,
         }
     }
 

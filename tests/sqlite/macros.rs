@@ -358,4 +358,20 @@ async fn test_column_override_exact_nullable() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Requires SQLX_SQLITE_REGISTER_REGEXP environment variable to compile and succeed.
+#[cfg(feature = "regexp")]
+#[sqlx_macros::test]
+async fn test_regexp_function_is_registered_via_env() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    let record =
+        sqlx::query!(r#"select id as "id?: MyInt" from tweet where text regexp 'is pretty cool'"#)
+            .fetch_one(&mut conn)
+            .await?;
+
+    assert_eq!(record.id, Some(MyInt(1)));
+
+    Ok(())
+}
+
 // we don't emit bind parameter typechecks for SQLite so testing the overrides is redundant
