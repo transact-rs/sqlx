@@ -665,6 +665,12 @@ test_prepared_type!(interval<PgInterval>(
             days: 0,
             microseconds: (3 * 3_600 + 10 * 60 + 20) * 1_000_000 + 116100
         },
+));
+
+// Not supported before Postgres 17
+#[cfg(any(postgres = "17", postgres = "18"))]
+test_prepared_type!(interval_infinity<PgInterval>(
+    Postgres,
     "INTERVAL 'infinity'"
         == PgInterval::INFINITY,
     "INTERVAL '-infinity'"
