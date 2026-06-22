@@ -1,6 +1,5 @@
 use futures_util::TryStreamExt;
-use rand::{Rng, SeedableRng};
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::{rngs::Xoshiro256PlusPlus, RngExt, SeedableRng};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteOperation, SqlitePoolOptions};
 use sqlx::SqlSafeStr;
 use sqlx::{
@@ -664,8 +663,8 @@ async fn issue_1467() -> anyhow::Result<()> {
         if i % 1_000 == 0 {
             println!("{i}");
         }
-        let key = rng.gen_range(0..1_000);
-        let value = rng.gen_range(0..1_000);
+        let key = rng.random_range(0..1_000);
+        let value = rng.random_range(0..1_000);
         let mut tx = conn.begin().await?;
 
         let exists = sqlx::query("SELECT 1 FROM kv WHERE k = ?")
@@ -1435,6 +1434,38 @@ async fn issue_3982() -> anyhow::Result<()> {
     .await?;
 
     assert_eq!(name, None,);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn issue_4300() -> anyhow::Result<()> {
+    use sqlx::migrate::Migrator;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::Path;
+
+    let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+
+    let migrator = Migrator::new(Path::new("tests/sqlite/migrations_issue_4300")).await?;
+    migrator.run(&pool).await?;
+
+    sqlx::query("CREATE TABLE my_table ( qqq TEXT )")
+        .execute(&pool)
+        .await?;
+
+    sqlx::query("CREATE TABLE other_table ( www TEXT )")
+        .execute(&pool)
+        .await?;
+
+    sqlx::query("INSERT INTO my_table (qqq) VALUES ('temporary')")
+        .execute(&pool)
+        .await?;
+
+    let result = sqlx::query("BEGIN TRANSACTION; COMMIT;")
+        .execute(&pool)
+        .await?;
+
+    assert_eq!(result.rows_affected(), 0);
 
     Ok(())
 }

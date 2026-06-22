@@ -155,12 +155,14 @@ async fn it_can_query_by_string_args() -> sqlx::Result<()> {
     let ref tuple = ("Hello, world!".to_string(),);
 
     #[cfg(feature = "postgres")]
-    const SQL: &str =
-        "SELECT 'Hello, world!' as string where 'Hello, world!' in ($1, $2, $3, $4, $5, $6, $7)";
+    const SQL: &str = "SELECT 'Hello, world!' \
+        FROM (SELECT 1) AS t \
+        WHERE 'Hello, world!' IN ($1, $2, $3, $4, $5, $6, $7)";
 
     #[cfg(not(feature = "postgres"))]
-    const SQL: &str =
-        "SELECT 'Hello, world!' as string where 'Hello, world!' in (?, ?, ?, ?, ?, ?, ?)";
+    const SQL: &str = "SELECT 'Hello, world!' \
+        FROM (SELECT 1) AS t \
+        WHERE 'Hello, world!' IN (?, ?, ?, ?, ?, ?, ?)";
 
     {
         let query = sqlx::query(SQL)

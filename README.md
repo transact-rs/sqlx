@@ -172,10 +172,13 @@ be removed in the future.
 -   `tls-native-tls`: Use the `native-tls` TLS backend (OpenSSL on *nix, SChannel on Windows, Secure Transport on macOS).
 
 -   `tls-rustls`: Use the `rustls` TLS backend (cross-platform backend, only supports TLS 1.2 and 1.3).
+-   `tls-rustls-aws-lc-rs`: Use the `rustls` TLS backend with `aws-lc-rs`.
 
 -   `postgres`: Add support for the Postgres database server.
 
 -   `mysql`: Add support for the MySQL/MariaDB database server.
+-   Note: RSA auth without TLS requires `mysql-rsa` (not enabled by `mysql`).
+-   `mysql-rsa`: Enable RSA password encryption for `caching_sha2_password`/`sha256_password` when TLS is off. Only enable it if you must connect without TLS to servers that require RSA auth. Prefer using TLS.
 
 -   `mssql`: Add support for the MSSQL database server.
 
@@ -331,7 +334,7 @@ use futures_util::TryStreamExt;
 use sqlx::Row;
 
 let mut rows = sqlx::query("SELECT * FROM users WHERE email = ?")
-    .bind(email)
+    .bind("user@example.com")
     .fetch(&mut conn);
 
 while let Some(row) = rows.try_next().await? {
@@ -355,8 +358,8 @@ let mut stream = sqlx::query("SELECT * FROM users")
 struct User { name: String, id: i64 }
 
 let mut stream = sqlx::query_as::<_, User>("SELECT * FROM users WHERE email = ? OR name = ?")
-    .bind(user_email)
-    .bind(user_name)
+    .bind("user@example.com")
+    .bind("example_username")
     .fetch(&mut conn);
 ```
 
@@ -400,13 +403,13 @@ Differences from `query()`:
     queries against; the database does not have to contain any data but must be the same
     kind (MySQL, Postgres, etc.) and have the same schema as the database you will be connecting to at runtime.
 
-    For convenience, you can use [a `.env` file][dotenv]<sup>1</sup> to set DATABASE_URL so that you don't have to pass it every time:
+    For convenience, you can use [a `.env` file][dotenvy]<sup>1</sup> to set DATABASE_URL so that you don't have to pass it every time:
 
     ```
     DATABASE_URL=mysql://localhost/my_database
     ```
 
-[dotenv]: https://github.com/dotenv-rs/dotenv#examples
+[dotenvy]: https://github.com/allan2/dotenvy?tab=readme-ov-file#what-is-an-environment-file
 
 The biggest downside to `query!()` is that the output type cannot be named (due to Rust not
 officially supporting anonymous records). To address that, there is a `query_as!()` macro that is

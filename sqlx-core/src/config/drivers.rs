@@ -102,7 +102,19 @@ pub struct SqliteConfig {
     /// [common.drivers.sqlite]
     /// unsafe-load-extensions = ["uuid", "vsv"]
     /// ```
-    pub unsafe_load_extensions: Vec<String>,
+    pub unsafe_load_extensions: Vec<SqliteExtension>,
+}
+
+/// Extension for the SQLite database driver.
+#[derive(Debug, PartialEq)]
+#[cfg_attr(
+    feature = "sqlx-toml",
+    derive(serde::Deserialize),
+    serde(untagged, deny_unknown_fields)
+)]
+pub enum SqliteExtension {
+    Path(String),
+    PathWithEntrypoint { path: String, entrypoint: String },
 }
 
 /// Configuration for external database drivers.

@@ -5,7 +5,7 @@ edition = "2021"
 workspace = "../../../"
 
 [dependencies]
-anyhow = "1.0"
-sqlx = { path = "../../../", features = [ "mysql", "runtime-tokio", "tls-native-tls" ] }
-clap = { version = "4", features = ["derive"] }
-tokio = { version = "1.20.0", features = ["rt", "macros"]}
+anyhow = "1.0.58"
+sqlx = { path = "../../../", features = [ "mysql", "mysql-rsa", "runtime-tokio", "tls-native-tls" ] }
+clap = { version = "4.4.7", features = ["derive"] }
+tokio = { version = "1.25.0", features = ["rt", "macros"]}

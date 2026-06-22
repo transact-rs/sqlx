@@ -76,7 +76,7 @@ impl<'de> ProtocolDecode<'de, &'de [MySqlColumn]> for BinaryRow {
                 | ColumnType::Decimal
                 | ColumnType::Json
                 | ColumnType::NewDecimal => {
-                    let size = buf.get_uint_lenenc();
+                    let size = buf.get_uint_lenenc()?;
                     usize::try_from(size)
                         .map_err(|_| err_protocol!("BLOB length out of range: {size}"))?
                 }

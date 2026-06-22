@@ -194,7 +194,7 @@ impl<S: Socket> MySqlStream<S> {
     }
 
     async fn skip_result_metadata(&mut self, mut packet: Packet<Bytes>) -> Result<(), Error> {
-        let num_columns: u64 = packet.get_uint_lenenc(); // column count
+        let num_columns: u64 = packet.get_uint_lenenc()?; // column count
 
         for _ in 0..num_columns {
             let _ = self.recv_packet().await?;

@@ -14,6 +14,12 @@ These certificates should be valid until the year 2035.
 RusTLS requires TLS certificates to be x509v3. 
 OpenSSL 3.2 and up create v3 certificates by default.
 
+### MySQL 5.7 (RSA)
+
+The default test certificates in this directory use Ed25519, which MySQL 5.7
+cannot load. We keep a separate RSA CA/client/server set under
+`tests/certs/rsa` and use it only for the MySQL 5.7 client-SSL targets.
+
 ## (Re)generating
 
 When generating certificates, OpenSSL prompts for a number of fields:

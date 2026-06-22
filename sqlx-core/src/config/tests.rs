@@ -18,7 +18,16 @@ fn assert_common_config(config: &config::common::Config) {
 }
 
 fn assert_drivers_config(config: &config::drivers::Config) {
-    assert_eq!(config.sqlite.unsafe_load_extensions, ["uuid", "vsv"]);
+    assert_eq!(
+        config.sqlite.unsafe_load_extensions,
+        vec![
+            config::drivers::SqliteExtension::Path("uuid".to_string()),
+            config::drivers::SqliteExtension::PathWithEntrypoint {
+                path: "vsv_renamed".to_string(),
+                entrypoint: "sqlite3_vsv_init".to_string()
+            }
+        ]
+    );
 
     #[derive(Debug, Eq, PartialEq, serde::Deserialize)]
     #[serde(rename_all = "kebab-case")]

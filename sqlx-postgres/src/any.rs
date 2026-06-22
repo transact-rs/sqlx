@@ -83,7 +83,7 @@ impl AnyConnectionBackend for PgConnection {
         query: SqlStr,
         persistent: bool,
         arguments: Option<AnyArguments>,
-    ) -> BoxStream<sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
+    ) -> BoxStream<'_, sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
         let persistent = persistent && arguments.is_some();
         let arguments = match arguments.map(AnyArguments::convert_into).transpose() {
             Ok(arguments) => arguments,
@@ -109,7 +109,7 @@ impl AnyConnectionBackend for PgConnection {
         query: SqlStr,
         persistent: bool,
         arguments: Option<AnyArguments>,
-    ) -> BoxFuture<sqlx_core::Result<Option<AnyRow>>> {
+    ) -> BoxFuture<'_, sqlx_core::Result<Option<AnyRow>>> {
         let persistent = persistent && arguments.is_some();
         let arguments = arguments
             .map(AnyArguments::convert_into)

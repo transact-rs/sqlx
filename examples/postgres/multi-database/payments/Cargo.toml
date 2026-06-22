@@ -9,7 +9,7 @@ sqlx = { workspace = true, features = ["postgres", "time", "uuid", "rust_decimal
 
 rust_decimal = "1.36.0"
 
-time = "0.3.37"
+time = "0.3.47"
 uuid = "1.12.1"
 
 [dependencies.accounts]

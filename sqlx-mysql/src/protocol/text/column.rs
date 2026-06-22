@@ -147,7 +147,7 @@ impl ProtocolDecode<'_, Capabilities> for ColumnDefinition {
         let table = buf.get_bytes_lenenc()?;
         let alias = buf.get_bytes_lenenc()?;
         let name = buf.get_bytes_lenenc()?;
-        let _next_len = buf.get_uint_lenenc(); // always 0x0c
+        let _next_len = buf.get_uint_lenenc()?; // always 0x0c
         let collation = buf.get_u16_le();
         let max_size = buf.get_u32_le();
         let type_id = buf.get_u8();

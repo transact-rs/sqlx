@@ -100,7 +100,7 @@ impl TryFrom<std::time::Duration> for PgInterval {
     /// This returns an error if there is a loss of precision using nanoseconds or if there is a
     /// microsecond overflow.
     fn try_from(value: std::time::Duration) -> Result<Self, BoxDynError> {
-        if value.as_nanos() % 1000 != 0 {
+        if !value.as_nanos().is_multiple_of(1000) {
             return Err("PostgreSQL `INTERVAL` does not support nanoseconds precision".into());
         }
 
