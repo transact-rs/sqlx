@@ -373,9 +373,9 @@ fn opcode_to_type(op: &str) -> DataType {
 fn root_block_columns(
     conn: &mut ConnectionState,
 ) -> Result<HashMap<(i64, i64), IntMap<ColumnType>>, Error> {
-    let table_block_columns: Vec<(i64, i64, i64, String, bool)> = execute::iter(
+    let table_block_columns: Vec<(i64, i64, i64, String, bool, i64)> = execute::iter(
         conn,
-        "SELECT s.dbnum, s.rootpage, col.cid as colnum, col.type, col.\"notnull\"
+        "SELECT s.dbnum, s.rootpage, col.cid as colnum, col.type, col.\"notnull\", col.pk
          FROM (
              select 1 dbnum, tss.* from temp.sqlite_schema tss
              UNION ALL select 0 dbnum, mss.* from main.sqlite_schema mss
@@ -383,7 +383,7 @@ fn root_block_columns(
          JOIN pragma_table_info(s.name) AS col
          WHERE s.type = 'table'
          UNION ALL
-         SELECT s.dbnum, s.rootpage, idx.seqno as colnum, col.type, col.\"notnull\"
+         SELECT s.dbnum, s.rootpage, idx.seqno as colnum, col.type, col.\"notnull\", col.pk
          FROM (
              select 1 dbnum, tss.* from temp.sqlite_schema tss
              UNION ALL select 0 dbnum, mss.* from main.sqlite_schema mss
@@ -400,13 +400,13 @@ fn root_block_columns(
     .collect::<Result<Vec<_>, Error>>()?;
 
     let mut row_info: HashMap<(i64, i64), IntMap<ColumnType>> = HashMap::new();
-    for (dbnum, block, colnum, datatype, notnull) in table_block_columns {
+    for (dbnum, block, colnum, datatype, notnull, pk) in table_block_columns {
         let row_info = row_info.entry((dbnum, block)).or_default();
         row_info.insert(
             colnum,
             ColumnType::Single {
                 datatype: datatype.parse().unwrap_or(DataType::Null),
-                nullable: Some(!notnull),
+                nullable: Some(!(notnull || (pk > 0 && datatype.to_lowercase() == "integer"))),
             },
         );
     }
@@ -1640,7 +1640,7 @@ fn test_root_block_columns_has_types() {
         assert_eq!(
             Some(&ColumnType::Single {
                 datatype: DataType::Integer,
-                nullable: Some(true) //sqlite primary key columns are nullable unless declared not null
+                nullable: Some(false)
             }),
             root_block_cols[&table_db_block].get(&0)
         );
@@ -1665,7 +1665,7 @@ fn test_root_block_columns_has_types() {
         assert_eq!(
             Some(&ColumnType::Single {
                 datatype: DataType::Integer,
-                nullable: Some(true) //sqlite primary key columns are nullable unless declared not null
+                nullable: Some(false)
             }),
             root_block_cols[&table_db_block].get(&0)
         );
@@ -1683,7 +1683,7 @@ fn test_root_block_columns_has_types() {
         assert_eq!(
             Some(&ColumnType::Single {
                 datatype: DataType::Integer,
-                nullable: Some(true) //sqlite primary key columns are nullable unless declared not null
+                nullable: Some(false)
             }),
             root_block_cols[&table_db_block].get(&0)
         );

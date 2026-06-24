@@ -271,7 +271,7 @@ impl StatementHandle {
                         .to_bytes()
                         .eq_ignore_ascii_case("integer".as_bytes())
                 {
-                    None
+                    Some(false)
                 } else {
                     Some(not_null == 0)
                 },
