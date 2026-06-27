@@ -35,3 +35,12 @@ CREATE TABLE products (
     price NUMERIC,
     CONSTRAINT price_greater_than_zero CHECK (price > 0)
 );
+--
+CREATE TABLE projects (
+    project_id INTEGER PRIMARY KEY
+);
+CREATE TABLE foo (
+    package_id INTEGER PRIMARY KEY NOT NULL CHECK(package_id >= 0),
+    project_id INTEGER NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id)
+);
