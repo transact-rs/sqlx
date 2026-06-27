@@ -192,7 +192,6 @@ fn decode_datetime_from_text(value: &str) -> Option<PrimitiveDateTime> {
     None
 }
 
-#[allow(deprecated)]
 mod formats {
     use time::format_description::BorrowedFormatItem::{Component, Literal, Optional};
     use time::format_description::{modifier, BorrowedFormatItem, Component::*};
