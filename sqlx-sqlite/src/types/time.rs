@@ -271,12 +271,12 @@ mod formats {
             Literal(b":"),
             MINUTE,
             Optional(&Literal(b":")),
-            SECOND,
+            Optional(&SECOND),
             Optional(&Literal(b".")),
-            SUBSECOND,
-            OFFSET_HOUR,
+            Optional(&SUBSECOND),
+            Optional(&OFFSET_HOUR),
             Optional(&Literal(b":")),
-            OFFSET_MINUTE,
+            Optional(&OFFSET_MINUTE),
         ]
     };
 
@@ -292,9 +292,9 @@ mod formats {
             Literal(b":"),
             MINUTE,
             Optional(&Literal(b":")),
-            SECOND,
+            Optional(&SECOND),
             Optional(&Literal(b".")),
-            SUBSECOND,
+            Optional(&SUBSECOND),
             Optional(&Literal(b"Z")),
         ]
     };
@@ -311,9 +311,9 @@ mod formats {
             Literal(b":"),
             MINUTE,
             Optional(&Literal(b":")),
-            SECOND,
+            Optional(&SECOND),
             Optional(&Literal(b".")),
-            SUBSECOND,
+            Optional(&SUBSECOND),
             Optional(&Literal(b"Z")),
         ]
     };
