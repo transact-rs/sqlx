@@ -206,14 +206,17 @@ mod formats {
         modifier::MonthNumerical::default().with_padding(modifier::Padding::Zero),
     ));
 
-    const DAY: BorrowedFormatItem<'_> =
-        Component(Day(modifier::Day::default().with_padding(modifier::Padding::Zero)));
+    const DAY: BorrowedFormatItem<'_> = Component(Day(
+        modifier::Day::default().with_padding(modifier::Padding::Zero)
+    ));
 
-    const HOUR: BorrowedFormatItem<'_> =
-        Component(Hour24(modifier::Hour24::default().with_padding(modifier::Padding::Zero)));
+    const HOUR: BorrowedFormatItem<'_> = Component(Hour24(
+        modifier::Hour24::default().with_padding(modifier::Padding::Zero),
+    ));
 
-    const MINUTE: BorrowedFormatItem<'_> =
-        Component(Minute(modifier::Minute::default().with_padding(modifier::Padding::Zero)));
+    const MINUTE: BorrowedFormatItem<'_> = Component(Minute(
+        modifier::Minute::default().with_padding(modifier::Padding::Zero),
+    ));
 
     const SECOND: BorrowedFormatItem<'_> = Component(Second(
         modifier::Second::default().with_padding(modifier::Padding::Zero),

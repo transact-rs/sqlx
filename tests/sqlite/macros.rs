@@ -365,11 +365,10 @@ async fn test_column_override_exact_nullable() -> anyhow::Result<()> {
 async fn test_returning_primary_key_is_not_nullable() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;
 
-    let row = sqlx::query!(
-        r#"INSERT INTO accounts_no_not_null ( name ) VALUES ( 'test' ) RETURNING id"#
-    )
-    .fetch_one(&mut conn)
-    .await?;
+    let row =
+        sqlx::query!(r#"INSERT INTO accounts_no_not_null ( name ) VALUES ( 'test' ) RETURNING id"#)
+            .fetch_one(&mut conn)
+            .await?;
 
     let _: i64 = row.id;
 
@@ -384,11 +383,10 @@ async fn test_returning_with_foreign_key_is_not_nullable() -> anyhow::Result<()>
         .execute(&mut conn)
         .await?;
 
-    let _id: i64 = sqlx::query_scalar!(
-        r#"INSERT INTO foo ( project_id ) VALUES ( 1 ) RETURNING package_id"#
-    )
-    .fetch_one(&mut conn)
-    .await?;
+    let _id: i64 =
+        sqlx::query_scalar!(r#"INSERT INTO foo ( project_id ) VALUES ( 1 ) RETURNING package_id"#)
+            .fetch_one(&mut conn)
+            .await?;
 
     Ok(())
 }
