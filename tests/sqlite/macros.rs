@@ -358,17 +358,37 @@ async fn test_column_override_exact_nullable() -> anyhow::Result<()> {
     Ok(())
 }
 
-// we don't emit bind parameter typechecks for SQLite so testing the overrides is redundant
+// Regression test: INTEGER PRIMARY KEY (a rowid alias) must not be nullable.
+// Before the fix, `query!` would infer `id` as `Option<i64>` and the
+// assignment `let _: i64 = row.id` would fail to compile.
 #[sqlx_macros::test]
 async fn test_returning_primary_key_is_not_nullable() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;
 
-    let id: i64 =
-        sqlx::query_scalar!(r#"INSERT INTO accounts ( name ) VALUES ( 'test' ) RETURNING id"#)
-            .fetch_one(&mut conn)
-            .await?;
+    let row = sqlx::query!(
+        r#"INSERT INTO accounts_no_not_null ( name ) VALUES ( 'test' ) RETURNING id"#
+    )
+    .fetch_one(&mut conn)
+    .await?;
 
-    assert!(id > 0);
+    let _: i64 = row.id;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn test_returning_with_foreign_key_is_not_nullable() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    sqlx::query("INSERT INTO projects ( project_id ) VALUES ( 1 )")
+        .execute(&mut conn)
+        .await?;
+
+    let _id: i64 = sqlx::query_scalar!(
+        r#"INSERT INTO foo ( project_id ) VALUES ( 1 ) RETURNING package_id"#
+    )
+    .fetch_one(&mut conn)
+    .await?;
 
     Ok(())
 }

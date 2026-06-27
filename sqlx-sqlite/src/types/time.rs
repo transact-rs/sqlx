@@ -197,53 +197,41 @@ mod formats {
     use time::format_description::{modifier, BorrowedFormatItem, Component::*};
 
     const YEAR: BorrowedFormatItem<'_> = Component(CalendarYearFullStandardRange(
-        modifier::CalendarYearFullStandardRange::default().with_padding(modifier::Padding::Zero),
+        modifier::CalendarYearFullStandardRange::default()
+            .with_padding(modifier::Padding::Zero)
+            .with_sign_is_mandatory(false),
     ));
 
     const MONTH: BorrowedFormatItem<'_> = Component(MonthNumerical(
         modifier::MonthNumerical::default().with_padding(modifier::Padding::Zero),
     ));
 
-    const DAY: BorrowedFormatItem<'_> = Component(Day({
-        let mut value = modifier::Day::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
+    const DAY: BorrowedFormatItem<'_> =
+        Component(Day(modifier::Day::default().with_padding(modifier::Padding::Zero)));
 
-    const HOUR: BorrowedFormatItem<'_> = Component(Hour24(
-        modifier::Hour24::default().with_padding(modifier::Padding::Zero),
+    const HOUR: BorrowedFormatItem<'_> =
+        Component(Hour24(modifier::Hour24::default().with_padding(modifier::Padding::Zero)));
+
+    const MINUTE: BorrowedFormatItem<'_> =
+        Component(Minute(modifier::Minute::default().with_padding(modifier::Padding::Zero)));
+
+    const SECOND: BorrowedFormatItem<'_> = Component(Second(
+        modifier::Second::default().with_padding(modifier::Padding::Zero),
     ));
 
-    const MINUTE: BorrowedFormatItem<'_> = Component(Minute({
-        let mut value = modifier::Minute::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
+    const SUBSECOND: BorrowedFormatItem<'_> = Component(Subsecond(
+        modifier::Subsecond::default().with_digits(modifier::SubsecondDigits::OneOrMore),
+    ));
 
-    const SECOND: BorrowedFormatItem<'_> = Component(Second({
-        let mut value = modifier::Second::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
+    const OFFSET_HOUR: BorrowedFormatItem<'_> = Component(OffsetHour(
+        modifier::OffsetHour::default()
+            .with_sign_is_mandatory(true)
+            .with_padding(modifier::Padding::Zero),
+    ));
 
-    const SUBSECOND: BorrowedFormatItem<'_> = Component(Subsecond({
-        let mut value = modifier::Subsecond::default();
-        value.digits = modifier::SubsecondDigits::OneOrMore;
-        value
-    }));
-
-    const OFFSET_HOUR: BorrowedFormatItem<'_> = Component(OffsetHour({
-        let mut value = modifier::OffsetHour::default();
-        value.sign_is_mandatory = true;
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
-
-    const OFFSET_MINUTE: BorrowedFormatItem<'_> = Component(OffsetMinute({
-        let mut value = modifier::OffsetMinute::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
+    const OFFSET_MINUTE: BorrowedFormatItem<'_> = Component(OffsetMinute(
+        modifier::OffsetMinute::default().with_padding(modifier::Padding::Zero),
+    ));
 
     pub(super) const OFFSET_DATE_TIME: &[BorrowedFormatItem<'_>] = {
         &[
@@ -258,12 +246,12 @@ mod formats {
             StringLiteral(":"),
             MINUTE,
             Optional(&StringLiteral(":")),
-            Optional(&SECOND),
+            SECOND,
             Optional(&StringLiteral(".")),
-            Optional(&SUBSECOND),
-            Optional(&OFFSET_HOUR),
+            SUBSECOND,
+            OFFSET_HOUR,
             Optional(&StringLiteral(":")),
-            Optional(&OFFSET_MINUTE),
+            OFFSET_MINUTE,
         ]
     };
 
@@ -279,9 +267,9 @@ mod formats {
             StringLiteral(":"),
             MINUTE,
             Optional(&StringLiteral(":")),
-            Optional(&SECOND),
+            SECOND,
             Optional(&StringLiteral(".")),
-            Optional(&SUBSECOND),
+            SUBSECOND,
             Optional(&StringLiteral("Z")),
         ]
     };
@@ -298,9 +286,9 @@ mod formats {
             StringLiteral(":"),
             MINUTE,
             Optional(&StringLiteral(":")),
-            Optional(&SECOND),
+            SECOND,
             Optional(&StringLiteral(".")),
-            Optional(&SUBSECOND),
+            SUBSECOND,
             Optional(&StringLiteral("Z")),
         ]
     };

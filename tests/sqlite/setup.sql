@@ -23,6 +23,10 @@ CREATE TABLE accounts (
     name TEXT NOT NULL,
     is_active BOOLEAN
 );
+CREATE TABLE accounts_no_not_null (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
 INSERT INTO accounts(id, name, is_active)
 VALUES (1, 'Herp Derpinson', 1);
 CREATE VIEW accounts_view as
@@ -34,4 +38,14 @@ CREATE TABLE products (
     name TEXT,
     price NUMERIC,
     CONSTRAINT price_greater_than_zero CHECK (price > 0)
+);
+
+CREATE TABLE projects (
+    project_id INTEGER PRIMARY KEY
+);
+
+CREATE TABLE foo (
+    package_id INTEGER PRIMARY KEY NOT NULL CHECK(package_id >= 0),
+    project_id INTEGER NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id)
 );
