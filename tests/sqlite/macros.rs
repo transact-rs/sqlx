@@ -358,6 +358,8 @@ async fn test_column_override_exact_nullable() -> anyhow::Result<()> {
     Ok(())
 }
 
+// we don't emit bind parameter typechecks for SQLite so testing the overrides is redundant
+
 // Regression test: INTEGER PRIMARY KEY (a rowid alias) must not be nullable.
 // Before the fix, `query!` would infer `id` as `Option<i64>` and the
 // assignment `let _: i64 = row.id` would fail to compile.
