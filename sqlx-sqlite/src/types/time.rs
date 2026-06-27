@@ -196,11 +196,13 @@ mod formats {
     use time::format_description::BorrowedFormatItem::{Component, Optional, StringLiteral};
     use time::format_description::{modifier, BorrowedFormatItem, Component::*};
 
-    const YEAR: BorrowedFormatItem<'_> =
-        Component(CalendarYearFullStandardRange(modifier::CalendarYearFullStandardRange::default().with_padding(modifier::Padding::Zero)));
+    const YEAR: BorrowedFormatItem<'_> = Component(CalendarYearFullStandardRange(
+        modifier::CalendarYearFullStandardRange::default().with_padding(modifier::Padding::Zero),
+    ));
 
-    const MONTH: BorrowedFormatItem<'_> =
-        Component(MonthNumerical(modifier::MonthNumerical::default().with_padding(modifier::Padding::Zero)));
+    const MONTH: BorrowedFormatItem<'_> = Component(MonthNumerical(
+        modifier::MonthNumerical::default().with_padding(modifier::Padding::Zero),
+    ));
 
     const DAY: BorrowedFormatItem<'_> = Component(Day({
         let mut value = modifier::Day::default();
@@ -208,8 +210,9 @@ mod formats {
         value
     }));
 
-    const HOUR: BorrowedFormatItem<'_> =
-        Component(Hour24(modifier::Hour24::default().with_padding(modifier::Padding::Zero)));
+    const HOUR: BorrowedFormatItem<'_> = Component(Hour24(
+        modifier::Hour24::default().with_padding(modifier::Padding::Zero),
+    ));
 
     const MINUTE: BorrowedFormatItem<'_> = Component(Minute({
         let mut value = modifier::Minute::default();
