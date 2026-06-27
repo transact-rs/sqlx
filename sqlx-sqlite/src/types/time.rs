@@ -1,14 +1,14 @@
 use crate::arguments::SqliteArgumentsBuffer;
 use crate::value::ValueRef;
 use crate::{
+    Sqlite, SqliteTypeInfo, SqliteValueRef,
     decode::Decode,
     encode::{Encode, IsNull},
     error::BoxDynError,
     type_info::DataType,
     types::Type,
-    Sqlite, SqliteTypeInfo, SqliteValueRef,
 };
-use time::format_description::{well_known::Rfc3339, BorrowedFormatItem};
+use time::format_description::{BorrowedFormatItem, well_known::Rfc3339};
 use time::macros::format_description as fd;
 use time::{Date, OffsetDateTime, PrimitiveDateTime, Time};
 
@@ -192,68 +192,90 @@ fn decode_datetime_from_text(value: &str) -> Option<PrimitiveDateTime> {
     None
 }
 
+#[allow(deprecated)]
 mod formats {
-    use time::format_description::BorrowedFormatItem::{Component, Optional, StringLiteral};
-    use time::format_description::{modifier, BorrowedFormatItem, Component::*};
+    use time::format_description::BorrowedFormatItem::{Component, Literal, Optional};
+    use time::format_description::{BorrowedFormatItem, Component::*, modifier};
 
-    const YEAR: BorrowedFormatItem<'_> = Component(CalendarYearFullStandardRange(
-        modifier::CalendarYearFullStandardRange::default()
-            .with_padding(modifier::Padding::Zero)
-            .with_sign_is_mandatory(false),
-    ));
+    const YEAR: BorrowedFormatItem<'_> = Component(Year({
+        let mut value = modifier::Year::default();
+        value.padding = modifier::Padding::Zero;
+        value.repr = modifier::YearRepr::Full;
+        value.iso_week_based = false;
+        value.sign_is_mandatory = false;
+        value
+    }));
 
-    const MONTH: BorrowedFormatItem<'_> = Component(MonthNumerical(
-        modifier::MonthNumerical::default().with_padding(modifier::Padding::Zero),
-    ));
+    const MONTH: BorrowedFormatItem<'_> = Component(Month({
+        let mut value = modifier::Month::default();
+        value.padding = modifier::Padding::Zero;
+        value.repr = modifier::MonthRepr::Numerical;
+        value.case_sensitive = true;
+        value
+    }));
 
-    const DAY: BorrowedFormatItem<'_> = Component(Day(
-        modifier::Day::default().with_padding(modifier::Padding::Zero)
-    ));
+    const DAY: BorrowedFormatItem<'_> = Component(Day({
+        let mut value = modifier::Day::default();
+        value.padding = modifier::Padding::Zero;
+        value
+    }));
 
-    const HOUR: BorrowedFormatItem<'_> = Component(Hour24(
-        modifier::Hour24::default().with_padding(modifier::Padding::Zero),
-    ));
+    const HOUR: BorrowedFormatItem<'_> = Component(Hour({
+        let mut value = modifier::Hour::default();
+        value.padding = modifier::Padding::Zero;
+        value.is_12_hour_clock = false;
+        value
+    }));
 
-    const MINUTE: BorrowedFormatItem<'_> = Component(Minute(
-        modifier::Minute::default().with_padding(modifier::Padding::Zero),
-    ));
+    const MINUTE: BorrowedFormatItem<'_> = Component(Minute({
+        let mut value = modifier::Minute::default();
+        value.padding = modifier::Padding::Zero;
+        value
+    }));
 
-    const SECOND: BorrowedFormatItem<'_> = Component(Second(
-        modifier::Second::default().with_padding(modifier::Padding::Zero),
-    ));
+    const SECOND: BorrowedFormatItem<'_> = Component(Second({
+        let mut value = modifier::Second::default();
+        value.padding = modifier::Padding::Zero;
+        value
+    }));
 
-    const SUBSECOND: BorrowedFormatItem<'_> = Component(Subsecond(
-        modifier::Subsecond::default().with_digits(modifier::SubsecondDigits::OneOrMore),
-    ));
+    const SUBSECOND: BorrowedFormatItem<'_> = Component(Subsecond({
+        let mut value = modifier::Subsecond::default();
+        value.digits = modifier::SubsecondDigits::OneOrMore;
+        value
+    }));
 
-    const OFFSET_HOUR: BorrowedFormatItem<'_> = Component(OffsetHour(
-        modifier::OffsetHour::default()
-            .with_sign_is_mandatory(true)
-            .with_padding(modifier::Padding::Zero),
-    ));
+    const OFFSET_HOUR: BorrowedFormatItem<'_> = Component(OffsetHour({
+        let mut value = modifier::OffsetHour::default();
+        value.sign_is_mandatory = true;
+        value.padding = modifier::Padding::Zero;
+        value
+    }));
 
-    const OFFSET_MINUTE: BorrowedFormatItem<'_> = Component(OffsetMinute(
-        modifier::OffsetMinute::default().with_padding(modifier::Padding::Zero),
-    ));
+    const OFFSET_MINUTE: BorrowedFormatItem<'_> = Component(OffsetMinute({
+        let mut value = modifier::OffsetMinute::default();
+        value.padding = modifier::Padding::Zero;
+        value
+    }));
 
     pub(super) const OFFSET_DATE_TIME: &[BorrowedFormatItem<'_>] = {
         &[
             YEAR,
-            StringLiteral("-"),
+            Literal(b"-"),
             MONTH,
-            StringLiteral("-"),
+            Literal(b"-"),
             DAY,
-            Optional(&StringLiteral(" ")),
-            Optional(&StringLiteral("T")),
+            Optional(&Literal(b" ")),
+            Optional(&Literal(b"T")),
             HOUR,
-            StringLiteral(":"),
+            Literal(b":"),
             MINUTE,
-            Optional(&StringLiteral(":")),
+            Optional(&Literal(b":")),
             SECOND,
-            Optional(&StringLiteral(".")),
+            Optional(&Literal(b".")),
             SUBSECOND,
             OFFSET_HOUR,
-            Optional(&StringLiteral(":")),
+            Optional(&Literal(b":")),
             OFFSET_MINUTE,
         ]
     };
@@ -261,38 +283,38 @@ mod formats {
     pub(super) const PRIMITIVE_DATE_TIME_SPACE_SEPARATED: &[BorrowedFormatItem<'_>] = {
         &[
             YEAR,
-            StringLiteral("-"),
+            Literal(b"-"),
             MONTH,
-            StringLiteral("-"),
+            Literal(b"-"),
             DAY,
-            StringLiteral(" "),
+            Literal(b" "),
             HOUR,
-            StringLiteral(":"),
+            Literal(b":"),
             MINUTE,
-            Optional(&StringLiteral(":")),
+            Optional(&Literal(b":")),
             SECOND,
-            Optional(&StringLiteral(".")),
+            Optional(&Literal(b".")),
             SUBSECOND,
-            Optional(&StringLiteral("Z")),
+            Optional(&Literal(b"Z")),
         ]
     };
 
     pub(super) const PRIMITIVE_DATE_TIME_T_SEPARATED: &[BorrowedFormatItem<'_>] = {
         &[
             YEAR,
-            StringLiteral("-"),
+            Literal(b"-"),
             MONTH,
-            StringLiteral("-"),
+            Literal(b"-"),
             DAY,
-            StringLiteral("T"),
+            Literal(b"T"),
             HOUR,
-            StringLiteral(":"),
+            Literal(b":"),
             MINUTE,
-            Optional(&StringLiteral(":")),
+            Optional(&Literal(b":")),
             SECOND,
-            Optional(&StringLiteral(".")),
+            Optional(&Literal(b".")),
             SUBSECOND,
-            Optional(&StringLiteral("Z")),
+            Optional(&Literal(b"Z")),
         ]
     };
 }
