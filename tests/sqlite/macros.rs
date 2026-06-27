@@ -359,3 +359,14 @@ async fn test_column_override_exact_nullable() -> anyhow::Result<()> {
 }
 
 // we don't emit bind parameter typechecks for SQLite so testing the overrides is redundant
+
+#[sqlx_macros::test]
+async fn test_returning_primary_key_is_not_nullable() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+    let id: i64 =
+        sqlx::query_scalar!(r#"INSERT INTO accounts ( name ) VALUES ( 'test' ) RETURNING id"#)
+            .fetch_one(&mut conn)
+            .await?;
+    assert!(id > 0);
+    Ok(())
+}
