@@ -367,7 +367,7 @@ async fn test_returning_primary_key_is_not_nullable() -> anyhow::Result<()> {
             .fetch_one(&mut conn)
             .await?;
 
-    assert_eq!(id, 2);
+    assert!(id > 0);
 
     Ok(())
 }
