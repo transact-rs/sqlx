@@ -379,8 +379,8 @@ async fn test_returning_with_foreign_key_is_not_nullable() -> anyhow::Result<()>
         .await?;
     let _id: i64 =
         sqlx::query_scalar!(r#"INSERT INTO foo ( project_id ) VALUES ( 1 ) RETURNING package_id"#)
-        .fetch_one(&mut conn)
-        .await?;
+            .fetch_one(&mut conn)
+            .await?;
 
     Ok(())
 }
