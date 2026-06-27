@@ -212,9 +212,9 @@ impl StatementHandle {
 
     /// Use sqlite3_column_metadata to determine if a specific column is nullable.
     ///
-    /// Returns None in the case of INTEGER PRIMARY KEYs
+    /// Returns Some(false) in the case of INTEGER PRIMARY KEYs
     /// This is because this column is an alias to rowid if the table does not use a compound
-    /// primary key. In this case the row is not nullable, and the output of
+    /// primary key. In this case the column is not nullable, and the output of
     /// sqlite3_column_metadata may be incorrect.
     pub(crate) fn column_nullable(&self, index: usize) -> Result<Option<bool>, Error> {
         unsafe {
