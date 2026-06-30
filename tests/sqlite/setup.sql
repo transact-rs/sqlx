@@ -39,7 +39,7 @@ CREATE TABLE products (
 CREATE TABLE projects (
     project_id INTEGER PRIMARY KEY
 );
-CREATE TABLE foo (
+CREATE TABLE packages (
     package_id INTEGER PRIMARY KEY NOT NULL CHECK(package_id >= 0),
     project_id INTEGER NOT NULL,
     FOREIGN KEY(project_id) REFERENCES projects(project_id)
