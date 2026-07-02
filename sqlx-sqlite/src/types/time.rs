@@ -145,7 +145,12 @@ fn decode_offset_datetime_from_text(value: &str) -> Option<OffsetDateTime> {
         return Some(dt);
     }
 
-    if let Ok(dt) = OffsetDateTime::parse(value, formats::OFFSET_DATE_TIME) {
+    if let Ok(dt) = OffsetDateTime::parse(
+        value,
+        &fd!(
+            "[year]-[month]-[day][optional [ ]][optional [T]][hour]:[minute][optional [:[second]]][optional [.[subsecond]]][optional [[offset_hour]]][optional [:[offset_minute]]]"
+        ),
+    ) {
         return Some(dt);
     }
 
@@ -181,8 +186,12 @@ fn decode_datetime_from_text(value: &str) -> Option<PrimitiveDateTime> {
     }
 
     let formats = [
-        BorrowedFormatItem::Compound(formats::PRIMITIVE_DATE_TIME_SPACE_SEPARATED),
-        BorrowedFormatItem::Compound(formats::PRIMITIVE_DATE_TIME_T_SEPARATED),
+        BorrowedFormatItem::Compound(fd!(
+            "[year]-[month]-[day] [hour]:[minute][optional [:[second]]][optional [.[subsecond]]][optional [Z]]"
+        )),
+        BorrowedFormatItem::Compound(fd!(
+            "[year]-[month]-[day]T[hour]:[minute][optional [:[second]]][optional [.[subsecond]]][optional [Z]]"
+        )),
     ];
 
     if let Ok(dt) = PrimitiveDateTime::parse(value, &BorrowedFormatItem::First(&formats)) {
@@ -190,131 +199,4 @@ fn decode_datetime_from_text(value: &str) -> Option<PrimitiveDateTime> {
     }
 
     None
-}
-
-#[allow(deprecated)]
-mod formats {
-    use time::format_description::BorrowedFormatItem::{Component, Literal, Optional};
-    use time::format_description::{modifier, BorrowedFormatItem, Component::*};
-
-    const YEAR: BorrowedFormatItem<'_> = Component(Year({
-        let mut value = modifier::Year::default();
-        value.padding = modifier::Padding::Zero;
-        value.repr = modifier::YearRepr::Full;
-        value.iso_week_based = false;
-        value.sign_is_mandatory = false;
-        value
-    }));
-
-    const MONTH: BorrowedFormatItem<'_> = Component(Month({
-        let mut value = modifier::Month::default();
-        value.padding = modifier::Padding::Zero;
-        value.repr = modifier::MonthRepr::Numerical;
-        value.case_sensitive = true;
-        value
-    }));
-
-    const DAY: BorrowedFormatItem<'_> = Component(Day({
-        let mut value = modifier::Day::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
-
-    const HOUR: BorrowedFormatItem<'_> = Component(Hour({
-        let mut value = modifier::Hour::default();
-        value.padding = modifier::Padding::Zero;
-        value.is_12_hour_clock = false;
-        value
-    }));
-
-    const MINUTE: BorrowedFormatItem<'_> = Component(Minute({
-        let mut value = modifier::Minute::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
-
-    const SECOND: BorrowedFormatItem<'_> = Component(Second({
-        let mut value = modifier::Second::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
-
-    const SUBSECOND: BorrowedFormatItem<'_> = Component(Subsecond({
-        let mut value = modifier::Subsecond::default();
-        value.digits = modifier::SubsecondDigits::OneOrMore;
-        value
-    }));
-
-    const OFFSET_HOUR: BorrowedFormatItem<'_> = Component(OffsetHour({
-        let mut value = modifier::OffsetHour::default();
-        value.sign_is_mandatory = true;
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
-
-    const OFFSET_MINUTE: BorrowedFormatItem<'_> = Component(OffsetMinute({
-        let mut value = modifier::OffsetMinute::default();
-        value.padding = modifier::Padding::Zero;
-        value
-    }));
-
-    pub(super) const OFFSET_DATE_TIME: &[BorrowedFormatItem<'_>] = {
-        &[
-            YEAR,
-            Literal(b"-"),
-            MONTH,
-            Literal(b"-"),
-            DAY,
-            Optional(&Literal(b" ")),
-            Optional(&Literal(b"T")),
-            HOUR,
-            Literal(b":"),
-            MINUTE,
-            Optional(&Literal(b":")),
-            Optional(&SECOND),
-            Optional(&Literal(b".")),
-            Optional(&SUBSECOND),
-            Optional(&OFFSET_HOUR),
-            Optional(&Literal(b":")),
-            Optional(&OFFSET_MINUTE),
-        ]
-    };
-
-    pub(super) const PRIMITIVE_DATE_TIME_SPACE_SEPARATED: &[BorrowedFormatItem<'_>] = {
-        &[
-            YEAR,
-            Literal(b"-"),
-            MONTH,
-            Literal(b"-"),
-            DAY,
-            Literal(b" "),
-            HOUR,
-            Literal(b":"),
-            MINUTE,
-            Optional(&Literal(b":")),
-            Optional(&SECOND),
-            Optional(&Literal(b".")),
-            Optional(&SUBSECOND),
-            Optional(&Literal(b"Z")),
-        ]
-    };
-
-    pub(super) const PRIMITIVE_DATE_TIME_T_SEPARATED: &[BorrowedFormatItem<'_>] = {
-        &[
-            YEAR,
-            Literal(b"-"),
-            MONTH,
-            Literal(b"-"),
-            DAY,
-            Literal(b"T"),
-            HOUR,
-            Literal(b":"),
-            MINUTE,
-            Optional(&Literal(b":")),
-            Optional(&SECOND),
-            Optional(&Literal(b".")),
-            Optional(&SUBSECOND),
-            Optional(&Literal(b"Z")),
-        ]
-    };
 }
