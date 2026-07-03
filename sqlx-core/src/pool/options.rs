@@ -6,6 +6,7 @@ use crate::pool::Pool;
 use futures_core::future::BoxFuture;
 use log::LevelFilter;
 use std::fmt::{self, Debug, Formatter};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -85,6 +86,16 @@ pub struct PoolOptions<DB: Database> {
     pub(crate) fair: bool,
 
     pub(crate) parent_pool: Option<Pool<DB>>,
+
+    pub(crate) connector: Option<
+        Arc<
+            dyn Fn(
+                    &<DB::Connection as Connection>::Options,
+                ) -> BoxFuture<'static, Result<DB::Connection, Error>>
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 // Manually implement `Clone` to avoid a trait bound issue.
@@ -107,6 +118,7 @@ impl<DB: Database> Clone for PoolOptions<DB> {
             idle_timeout: self.idle_timeout,
             fair: self.fair,
             parent_pool: self.parent_pool.clone(),
+            connector: self.connector.clone(),
         }
     }
 }
@@ -162,6 +174,7 @@ impl<DB: Database> PoolOptions<DB> {
             max_lifetime: Some(Duration::from_secs(30 * 60)),
             fair: true,
             parent_pool: None,
+            connector: None,
         }
     }
 
@@ -510,6 +523,45 @@ impl<DB: Database> PoolOptions<DB> {
     #[doc(hidden)]
     pub fn parent(mut self, pool: Pool<DB>) -> Self {
         self.parent_pool = Some(pool);
+        self
+    }
+
+    /// Set a custom connector that the pool calls to create new connections.
+    ///
+    /// This overrides the default behavior of calling [`ConnectOptions::connect()`].
+    /// Use this to connect over custom transports (vsock, QUIC, turmoil, SSH tunnels, etc.).
+    ///
+    /// The closure receives a clone of the current [`ConnectOptions`][Connection::Options]
+    /// and must return a future resolving to a new connection.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use sqlx::postgres::{PgConnectOptions, PgConnection, PgPoolOptions};
+    ///
+    /// # async fn example() -> Result<(), sqlx::Error> {
+    /// let pool = PgPoolOptions::new()
+    ///     .max_connections(5)
+    ///     .connector(|options| async move {
+    ///         let stream = tokio::net::TcpStream::connect("127.0.0.1:5432").await?;
+    ///         PgConnection::connect_raw_tokio(stream, &options).await
+    ///     })
+    ///     .connect_with(
+    ///         PgConnectOptions::new().username("postgres").database("mydb"),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn connector<F, Fut>(mut self, connector: F) -> Self
+    where
+        F: Fn(<DB::Connection as Connection>::Options) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<DB::Connection, Error>> + Send + 'static,
+        DB::Connection: Sized,
+    {
+        self.connector = Some(Arc::new(move |options| {
+            Box::pin(connector(options.clone()))
+        }));
         self
     }
 
