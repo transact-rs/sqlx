@@ -14,6 +14,7 @@ mod data_row;
 mod describe;
 mod execute;
 mod flush;
+mod gssapi;
 mod notification;
 mod parameter_description;
 mod parameter_status;
@@ -30,7 +31,7 @@ mod startup;
 mod sync;
 mod terminate;
 
-pub use authentication::{Authentication, AuthenticationSasl};
+pub use authentication::{Authentication, AuthenticationGss, AuthenticationSasl};
 pub use backend_key_data::BackendKeyData;
 pub use bind::Bind;
 pub use close::Close;
@@ -41,6 +42,7 @@ pub use describe::Describe;
 pub use execute::Execute;
 #[allow(unused_imports)]
 pub use flush::Flush;
+pub use gssapi::GssResponse;
 pub use notification::Notification;
 pub use parameter_description::ParameterDescription;
 pub use parameter_status::ParameterStatus;
