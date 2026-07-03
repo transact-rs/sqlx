@@ -17,6 +17,32 @@ pub struct PgInterval {
     pub microseconds: i64,
 }
 
+impl PgInterval {
+    pub const INFINITY: Self = Self {
+        months: i32::MAX,
+        days: i32::MAX,
+        microseconds: i64::MAX,
+    };
+
+    pub const NEG_INFINITY: Self = Self {
+        months: i32::MIN,
+        days: i32::MIN,
+        microseconds: i64::MIN,
+    };
+
+    pub fn is_infinite(&self) -> bool {
+        *self == Self::INFINITY || *self == Self::NEG_INFINITY
+    }
+
+    pub fn is_positive_infinity(&self) -> bool {
+        *self == Self::INFINITY
+    }
+
+    pub fn is_negative_infinity(&self) -> bool {
+        *self == Self::NEG_INFINITY
+    }
+}
+
 impl Type<Postgres> for PgInterval {
     fn type_info() -> PgTypeInfo {
         PgTypeInfo::INTERVAL
@@ -328,6 +354,25 @@ fn test_pginterval_std() {
 
     // Case when microsecond overflow occurs
     assert!(PgInterval::try_from(std::time::Duration::from_secs(20_000_000_000_000)).is_err());
+}
+
+#[test]
+fn test_pginterval_infinity() {
+    assert!(PgInterval::INFINITY.is_infinite());
+    assert!(PgInterval::NEG_INFINITY.is_infinite());
+    assert!(PgInterval::INFINITY.is_positive_infinity());
+    assert!(!PgInterval::NEG_INFINITY.is_positive_infinity());
+    assert!(!PgInterval::INFINITY.is_negative_infinity());
+    assert!(PgInterval::NEG_INFINITY.is_negative_infinity());
+    assert!(!PgInterval::default().is_infinite());
+
+    // verify values match what PostgreSQL expects
+    assert_eq!(PgInterval::INFINITY.microseconds, i64::MAX);
+    assert_eq!(PgInterval::INFINITY.days, i32::MAX);
+    assert_eq!(PgInterval::INFINITY.months, i32::MAX);
+    assert_eq!(PgInterval::NEG_INFINITY.microseconds, i64::MIN);
+    assert_eq!(PgInterval::NEG_INFINITY.days, i32::MIN);
+    assert_eq!(PgInterval::NEG_INFINITY.months, i32::MIN);
 }
 
 #[test]

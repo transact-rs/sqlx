@@ -667,6 +667,16 @@ test_prepared_type!(interval<PgInterval>(
         },
 ));
 
+// Not supported before Postgres 17
+#[cfg(any(postgres = "17", postgres = "18"))]
+test_prepared_type!(interval_infinity<PgInterval>(
+    Postgres,
+    "INTERVAL 'infinity'"
+        == PgInterval::INFINITY,
+    "INTERVAL '-infinity'"
+        == PgInterval::NEG_INFINITY,
+));
+
 test_prepared_type!(money<PgMoney>(Postgres, "123.45::money" == PgMoney(12345)));
 
 test_prepared_type!(money_vec<Vec<PgMoney>>(Postgres,
