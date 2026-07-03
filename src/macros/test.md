@@ -205,6 +205,8 @@ async fn basic_test(pool: PgPool) -> sqlx::Result<()> {
 # }
 ```
 
+Note that if you have a large number of tests and migrations, embedding the migrations next to each `#[sqlx::test]` can significantly slow down compilation times. In that case consider storing the migrations into a shared variable in your crate and then reference that variable using `migrator = <path>` in each test.
+
 ### Automatic Fixture Application (requires `migrate` feature)
 
 Since tests are isolated from each other but may require data to already exist in the database to keep from growing
