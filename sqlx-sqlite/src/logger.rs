@@ -59,6 +59,43 @@ fn dot_escape_string(value: impl AsRef<str>) -> String {
         .to_string()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::intmap::IntMap;
+    use std::collections::HashSet;
+
+    #[derive(Debug)]
+    struct TestState;
+
+    impl DebugDiff for TestState {
+        fn diff(&self, _prev: &Self) -> String {
+            String::new()
+        }
+    }
+
+    #[test]
+    fn max_branch_id_includes_branch_origins() {
+        let program: &[&str] = &["Init"];
+        let mut logger: QueryPlanLogger<'_, i64, TestState, &str> = QueryPlanLogger {
+            sql: "SELECT 1",
+            unknown_operations: HashSet::new(),
+            branch_origins: IntMap::new(),
+            branch_results: IntMap::new(),
+            branch_operations: IntMap::new(),
+            program,
+        };
+
+        logger
+            .branch_origins
+            .insert(7, BranchParent { id: 0, idx: 0 });
+
+        let rendered = logger.to_string();
+
+        assert!(rendered.contains('7'));
+    }
+}
+
 impl<R: Debug, S: Debug + DebugDiff, P: Debug> core::fmt::Display for QueryPlanLogger<'_, R, S, P> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         //writes query plan history in dot format
@@ -224,7 +261,7 @@ impl<R: Debug, S: Debug + DebugDiff, P: Debug> core::fmt::Display for QueryPlanL
         let max_branch_id: i64 = [
             self.branch_operations.last_index().unwrap_or(0),
             self.branch_results.last_index().unwrap_or(0),
-            self.branch_results.last_index().unwrap_or(0),
+            self.branch_origins.last_index().unwrap_or(0),
         ]
         .into_iter()
         .max()
