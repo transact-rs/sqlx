@@ -19,7 +19,7 @@ Bug fixes should include a regression test which fails before the fix and passes
 
 New features *should* include unit or integration tests in the appropriate folders. Database specific tests should go in `tests/<database>`.
 
-Note that unsolicited pull requests implementing large or complex changes may not be reviwed right away.
+Note that unsolicited pull requests implementing large or complex changes may not be reviewed right away.
 Maintainer time and energy is limited and massive unsolicited pull requests require an outsized effort to review.
 
 To make the best use of your time and ours, search for and participate in existing discussion on the issue tracker before opening a pull request.

@@ -32,30 +32,42 @@ impl Metadata {
     pub fn workspace_root(&self) -> PathBuf {
         let mut root = self.workspace_root.lock().unwrap();
         if root.is_none() {
-            use serde::Deserialize;
-            use std::process::Command;
+            *root = Some(resolve_workspace_root(
+                crate::env("SQLX_WORKSPACE_DIR").ok().map(PathBuf::from),
+                || {
+                    use serde::Deserialize;
+                    use std::process::Command;
 
-            let cargo = crate::env("CARGO").unwrap();
+                    let cargo = crate::env("CARGO").unwrap();
 
-            let output = Command::new(cargo)
-                .args(["metadata", "--format-version=1", "--no-deps"])
-                .current_dir(&self.manifest_dir)
-                .env_remove("__CARGO_FIX_PLZ")
-                .output()
-                .expect("Could not fetch metadata");
+                    let output = Command::new(cargo)
+                        .args(["metadata", "--format-version=1", "--no-deps"])
+                        .current_dir(&self.manifest_dir)
+                        .env_remove("__CARGO_FIX_PLZ")
+                        .output()
+                        .expect("Could not fetch metadata");
 
-            #[derive(Deserialize)]
-            struct CargoMetadata {
-                workspace_root: PathBuf,
-            }
+                    #[derive(Deserialize)]
+                    struct CargoMetadata {
+                        workspace_root: PathBuf,
+                    }
 
-            let metadata: CargoMetadata =
-                serde_json::from_slice(&output.stdout).expect("Invalid `cargo metadata` output");
+                    let metadata: CargoMetadata = serde_json::from_slice(&output.stdout)
+                        .expect("Invalid `cargo metadata` output");
 
-            *root = Some(metadata.workspace_root);
+                    metadata.workspace_root
+                },
+            ));
         }
         root.clone().unwrap()
     }
+}
+
+fn resolve_workspace_root(
+    override_dir: Option<PathBuf>,
+    cargo_fallback: impl FnOnce() -> PathBuf,
+) -> PathBuf {
+    override_dir.unwrap_or_else(cargo_fallback)
 }
 
 pub fn try_for_crate() -> crate::Result<Arc<Metadata>> {
@@ -92,7 +104,7 @@ pub fn try_for_crate() -> crate::Result<Arc<Metadata>> {
     })
 }
 
-fn load_env(
+fn load_from_dotenv(
     manifest_dir: &Path,
     workspace_root: &Path,
     config: &Config,
@@ -162,20 +174,84 @@ fn load_env(
         }
     }
 
+    Ok(Arc::new(from_dotenv))
+}
+
+fn load_env(
+    manifest_dir: &Path,
+    config: &Config,
+    builder: &mut MtimeCacheBuilder,
+) -> crate::Result<Arc<MacrosEnv>> {
+    let database_url_env = crate::env_opt(config.common.database_url_var())?;
+    let offline_dir_env = crate::env_opt("SQLX_OFFLINE_DIR")?.map(PathBuf::from);
+    let offline_env = crate::env_opt("SQLX_OFFLINE")?.map(|val| is_truthy_bool(&val));
+
+    // Don't load .env files if all environment variables are set: we may be in
+    // a non-Cargo build system like buck2.
+    let dotenv = if database_url_env.is_none() || offline_dir_env.is_none() || offline_env.is_none()
+    {
+        Some(load_from_dotenv(manifest_dir, config, builder)?)
+    } else {
+        None
+    };
+
     Ok(Arc::new(MacrosEnv {
-        // Make set variables take precedent
-        database_url: crate::env_opt(config.common.database_url_var())?
-            .or(from_dotenv.database_url),
-        offline_dir: crate::env_opt("SQLX_OFFLINE_DIR")?
-            .map(PathBuf::from)
-            .or(from_dotenv.offline_dir),
-        offline: crate::env_opt("SQLX_OFFLINE")?
-            .map(|val| is_truthy_bool(&val))
-            .or(from_dotenv.offline),
+        // Make set variables take precedence
+        database_url: database_url_env.or_else(|| dotenv.as_ref()?.database_url.clone()),
+        offline_dir: offline_dir_env.or_else(|| dotenv.as_ref()?.offline_dir.clone()),
+        offline: offline_env.or_else(|| dotenv.as_ref()?.offline),
     }))
 }
 
 /// Returns `true` if `val` is `"true"`,
 fn is_truthy_bool(val: &str) -> bool {
     val.eq_ignore_ascii_case("true") || val == "1"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_from_dotenv_reads_env_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".env"),
+            "DATABASE_URL=postgres://test\nSQLX_OFFLINE_DIR=/some/dir\nSQLX_OFFLINE=true\n",
+        )
+        .unwrap();
+
+        let cache: MtimeCache<Arc<MacrosEnv>> = MtimeCache::new();
+        let env = cache
+            .get_or_try_init(|builder| load_from_dotenv(dir.path(), &Config::default(), builder))
+            .unwrap();
+
+        assert_eq!(env.database_url.as_deref(), Some("postgres://test"));
+        assert_eq!(env.offline_dir, Some(PathBuf::from("/some/dir")));
+        assert_eq!(env.offline, Some(true));
+    }
+
+    #[test]
+    fn load_from_dotenv_empty_when_no_env_file() {
+        // The ancestor walk finds nothing as long as no ancestor of the OS temp dir has a .env.
+        let dir = tempfile::tempdir().unwrap();
+
+        let cache: MtimeCache<Arc<MacrosEnv>> = MtimeCache::new();
+        let env = cache
+            .get_or_try_init(|builder| load_from_dotenv(dir.path(), &Config::default(), builder))
+            .unwrap();
+
+        assert!(env.database_url.is_none());
+        assert!(env.offline_dir.is_none());
+        assert!(env.offline.is_none());
+    }
+
+    #[test]
+    fn resolve_workspace_root_prefers_override() {
+        let dir = PathBuf::from("/fake/workspace");
+        let result = resolve_workspace_root(Some(dir.clone()), || {
+            panic!("cargo fallback must not be called when override is set")
+        });
+        assert_eq!(result, dir);
+    }
 }
