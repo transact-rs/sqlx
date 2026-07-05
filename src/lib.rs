@@ -153,6 +153,12 @@ pub mod decode {
 
 pub use self::decode::Decode;
 
+/// Networking traits for custom transport implementations.
+pub mod net {
+    pub use sqlx_core::io::ReadBuf;
+    pub use sqlx_core::net::Socket;
+}
+
 /// Types and traits for the `query` family of functions and macros.
 pub mod query {
     pub use sqlx_core::query::{Map, Query};
