@@ -341,6 +341,11 @@ path = "tests/sqlite/error.rs"
 required-features = ["sqlite"]
 
 [[test]]
+name = "sqlite-rw-pool"
+path = "tests/sqlite/rw_pool.rs"
+required-features = ["sqlite"]
+
+[[test]]
 name = "sqlite-sqlcipher"
 path = "tests/sqlite/sqlcipher.rs"
 required-features = ["sqlite"]
