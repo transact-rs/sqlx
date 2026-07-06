@@ -5,6 +5,7 @@ mod parse;
 mod ssl_mode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
+use sqlx_core::config;
 pub use ssl_mode::MySqlSslMode;
 
 /// Options and flags which can be used to configure a MySQL connection.
@@ -413,6 +414,17 @@ impl MySqlConnectOptions {
     pub fn set_names(mut self, flag_val: bool) -> Self {
         self.set_names = flag_val;
         self
+    }
+
+    pub(crate) fn apply_driver_config(
+        mut self,
+        config: &config::drivers::MySqlConfig,
+    ) -> crate::Result<Self> {
+        self = self
+            .pipes_as_concat(config.pipes_as_concat)
+            .no_engine_substitution(config.no_engine_substitution);
+
+        Ok(self)
     }
 }
 

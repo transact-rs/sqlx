@@ -40,14 +40,38 @@ pub struct Config {
 }
 
 /// Configuration for the MySQL database driver.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[cfg_attr(
     feature = "sqlx-toml",
     derive(serde::Deserialize),
     serde(default, rename_all = "kebab-case", deny_unknown_fields)
 )]
 pub struct MySqlConfig {
-    // No fields implemented yet. This key is only used to validate parsing.
+    /// Whether to enable the `PIPES_AS_CONCAT` connection setting
+    ///
+    /// Defaults to `true`.
+    ///
+    /// Some MySql databases such as PlanetScale error out with this connection setting
+    /// so it needs to be set `false` in such cases.
+    pub pipes_as_concat: bool,
+    /// Whether to enable the `NO_ENGINE_SUBSTITUTION` sql_mode setting after connection.
+    ///
+    /// Defaults to `true` (`NO_ENGINE_SUBSTITUTION` is passed, forbidding engine substitution.)
+    ///
+    /// If not set, if the available storage engine specified by a `CREATE TABLE` is not available,
+    /// a warning is given and the default storage engine is used instead.
+    ///
+    /// <https://mariadb.com/kb/en/sql-mode/>
+    pub no_engine_substitution: bool,
+}
+
+impl Default for MySqlConfig {
+    fn default() -> Self {
+        Self {
+            pipes_as_concat: true,
+            no_engine_substitution: true,
+        }
+    }
 }
 
 /// Configuration for the Postgres database driver.
