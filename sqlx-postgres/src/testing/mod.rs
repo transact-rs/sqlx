@@ -146,7 +146,51 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
         create index if not exists databases_created_at 
             on _sqlx_test.databases(created_at);
 
-        create sequence if not exists _sqlx_test.database_ids;
+        create table if not exists _sqlx_test.tests (
+            test_id int8 primary key generated always as identity,
+            -- Automatically cleans up leaked test runs as well
+            db_name text not null references _sqlx_test.databases(db_name) on delete cascade,
+            required_connections int4 not null
+                check (required_connections > 0 and required_connections <= max_connections),
+            -- Each test's `SQLX_TEST_MAX_CONNECTIONS`, ideally all the same
+            max_connections int4 not null check (max_connections > 0),
+            started_at timestamptz not null default now()
+        );
+
+        create or replace function _sqlx_test.tests_check_max_connections()
+            returns trigger as
+        $$
+            declare
+                    used_connections int4;
+                    max_required_connections int4;
+                    max_connections int4;
+            begin
+                select
+                    sum(required_connections),
+                    max(required_connections),
+                    -- Abide by the highest `SQLX_TEST_MAX_CONNECTIONS`
+                    max(max_connections)
+                into
+                    used_connections,
+                    max_required_connections,
+                    max_connections
+                from _sqlx_test.tests;
+
+                if max_required_connections > max_connections then
+                    raise
+                        'max(required_connections) exceeds min(max_connections) of any process'
+                    using constraint = 'required_connections_exceeds_max';
+                elsif max_connections > max_connections then
+                    raise 'not enough spare connections available; used: %i, total: %i',
+                        used_connections, max_connections
+                    using constraint = 'insufficient_connections_available';
+                end if;
+            end;
+        $$
+        language plpgsql;
+
+        create or replace constraint trigger check_max_connections after insert on _sqlx_test.tests
+        for each statement execute function _sqlx_test.check_max_connections();
     "#,
     )
     .await?;

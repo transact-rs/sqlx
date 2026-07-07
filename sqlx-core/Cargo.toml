@@ -21,11 +21,11 @@ json = ["serde", "serde_json"]
 
 # for conditional compilation
 _rt-async-global-executor = ["async-global-executor", "_rt-async-io", "_rt-async-task"]
-_rt-async-io = ["async-io", "async-fs"] # see note at async-fs declaration
+_rt-async-io = ["async-io", "async-fs", "async-lock"] # see note at async-fs declaration
 _rt-async-std = ["async-std", "_rt-async-io"]
 _rt-async-task = ["async-task"]
 _rt-smol = ["smol", "_rt-async-io", "_rt-async-task"]
-_rt-tokio = ["tokio", "tokio-stream"]
+_rt-tokio = ["tokio", "tokio-stream", "tokio/rt"] # `rt` feature is almost always going to be enabled anyway
 
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
@@ -72,6 +72,7 @@ uuid = { workspace = true, optional = true }
 
 # work around bug in async-fs 2.0.0, which references futures-lite dependency wrongly, see https://github.com/launchbadge/sqlx/pull/3791#issuecomment-3043363281
 async-fs = { version = "2.1", optional = true }
+async-lock = { version = "3.4.2", optional = true }
 async-io = { version = "2.4.1", optional = true }
 async-task = { version = "4.7.1", optional = true }
 
@@ -83,7 +84,6 @@ crossbeam-queue = "0.3.2"
 either = "1.6.1"
 futures-core = { version = "0.3.32", default-features = false }
 futures-io = "0.3.32"
-futures-intrusive = "0.5.0"
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
 log = { version = "0.4.18", default-features = false }
 memchr = { version = "2.5.0", default-features = false }
@@ -103,10 +103,9 @@ indexmap = "2.0"
 event-listener = "5.2.0"
 hashbrown = "0.16.0"
 
-thiserror.workspace = true
+futures-intrusive = "0.5.0"
 
-[dev-dependencies]
-tokio = { version = "1.25.0", features = ["rt"] }
+thiserror.workspace = true
 
 [dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
