@@ -30,7 +30,7 @@ pub trait Column: 'static + Send + Sync + Debug {
     /// Returns [`ColumnOrigin::Unknown`] if the database driver does not have that information,
     /// or has not overridden this method.
     // This method returns an owned value instead of a reference,
-    // to give the implementor more flexibility.
+    // to give the implementer more flexibility.
     fn origin(&self) -> ColumnOrigin {
         ColumnOrigin::Unknown
     }
