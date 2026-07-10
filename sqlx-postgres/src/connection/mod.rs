@@ -234,6 +234,10 @@ impl Connection for PgConnection {
         self.inner.stream.shrink_buffers();
     }
 
+    fn buffer_stats(&self) -> Option<sqlx_core::net::BufferStats> {
+        Some(self.inner.stream.buffer_stats())
+    }
+
     #[doc(hidden)]
     fn flush(&mut self) -> impl Future<Output = Result<(), Error>> + Send + '_ {
         self.wait_until_ready()

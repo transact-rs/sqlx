@@ -139,6 +139,10 @@ impl Connection for AnyConnection {
         self.backend.shrink_buffers()
     }
 
+    fn buffer_stats(&self) -> Option<crate::net::BufferStats> {
+        self.backend.buffer_stats()
+    }
+
     #[doc(hidden)]
     fn flush(&mut self) -> impl Future<Output = Result<(), Error>> + Send + '_ {
         self.backend.flush()
