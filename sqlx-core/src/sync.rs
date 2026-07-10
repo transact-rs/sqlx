@@ -225,7 +225,7 @@ impl<T> AsyncOnceCell<T> {
             } else if #[cfg(feature = "_rt-async-io")] {
                 Self { inner: async_lock::OnceCell::new() }
             } else {
-                crate::rt::missing_rt(());
+                Self { phantom: std::marker::PhantomData }
             }
         }
     }
@@ -237,7 +237,7 @@ impl<T> AsyncOnceCell<T> {
             } else if #[cfg(feature = "_rt-async-io")] {
                 Self { inner: async_lock::OnceCell::new() }
             } else {
-                crate::rt::missing_rt(());
+                Self { phantom: std::marker::PhantomData }
             }
         }
     }
@@ -252,6 +252,16 @@ impl<T> AsyncOnceCell<T> {
                 self.inner.get_or_try_init(f).await
             } else {
                 crate::rt::missing_rt(f)
+            }
+        }
+    }
+
+    pub fn get(&self) -> Option<&T> {
+        cfg_if! {
+            if #[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))] {
+                self.inner.get()
+            } else {
+                crate::rt::missing_rt(())
             }
         }
     }

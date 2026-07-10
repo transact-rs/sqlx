@@ -17,9 +17,7 @@ use crate::{PgConnectOptions, PgConnection, Postgres};
 
 pub(crate) use sqlx_core::testing::*;
 
-// Using a blocking `OnceLock` here because the critical sections are short.
-static MASTER_POOL: OnceLock<Pool<Postgres>> = OnceLock::new();
-// Automatically delete any databases created before the start of the test binary.
+static MASTER_POOL: TestMasterPool<Postgres> = TestMasterPool::new();
 
 impl TestSupport for Postgres {
     fn test_context(
@@ -29,11 +27,7 @@ impl TestSupport for Postgres {
     }
 
     async fn cleanup_test(db_name: &str) -> Result<(), Error> {
-        let mut conn = MASTER_POOL
-            .get()
-            .expect("cleanup_test() invoked outside `#[sqlx::test]`")
-            .acquire()
-            .await?;
+        let mut conn = MASTER_POOL.acquire().await?;
 
         do_cleanup(&mut conn, db_name).await
     }
@@ -94,36 +88,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
 
     let master_opts = PgConnectOptions::from_str(&url).expect("failed to parse DATABASE_URL");
 
-    let pool = PoolOptions::new()
-        // Postgres' normal connection limit is 100 plus 3 superuser connections
-        // We don't want to use the whole cap and there may be fuzziness here due to
-        // concurrently running tests anyway.
-        .max_connections(20)
-        // Immediately close master connections. Tokio's I/O streams don't like hopping runtimes.
-        .after_release(|_conn, _| Box::pin(async move { Ok(false) }))
-        .connect_lazy_with(master_opts);
-
-    let master_pool = match once_lock_try_insert_polyfill(&MASTER_POOL, pool) {
-        Ok(inserted) => inserted,
-        Err((existing, pool)) => {
-            // Sanity checks.
-            assert_eq!(
-                existing.connect_options().host,
-                pool.connect_options().host,
-                "DATABASE_URL changed at runtime, host differs"
-            );
-
-            assert_eq!(
-                existing.connect_options().database,
-                pool.connect_options().database,
-                "DATABASE_URL changed at runtime, database differs"
-            );
-
-            existing
-        }
-    };
-
-    let mut conn = master_pool.acquire().await?;
+    let mut conn = MASTER_POOL.connect(&master_opts).await?;
 
     // language=PostgreSQL
     conn.execute(
@@ -189,8 +154,13 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
         $$
         language plpgsql;
 
-        create or replace constraint trigger check_max_connections after insert on _sqlx_test.tests
-        for each statement execute function _sqlx_test.check_max_connections();
+        -- `create or replace constraint trigger` not supported
+        drop trigger if exists check_max_connections on _sqlx_test.tests;
+
+        create constraint trigger check_max_connections
+            after insert on _sqlx_test.tests
+            for each row
+            execute function _sqlx_test.tests_check_max_connections();
     "#,
     )
     .await?;
@@ -205,7 +175,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
     )
     .bind(&db_name)
     .bind(args.test_path)
-    .execute(&mut *conn)
+    .execute(&mut **conn)
     .await?;
 
     let create_command = format!("create database {db_name:?}");
@@ -214,18 +184,10 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
 
     Ok(TestContext {
         pool_opts: PoolOptions::new()
-            // Don't allow a single test to take all the connections.
-            // Most tests shouldn't require more than 5 connections concurrently,
-            // or else they're likely doing too much in one test.
-            .max_connections(5)
+            .max_connections(args.max_connections)
             // Close connections ASAP if left in the idle queue.
-            .idle_timeout(Some(Duration::from_secs(1)))
-            .parent(master_pool.clone()),
-        connect_opts: master_pool
-            .connect_options()
-            .deref()
-            .clone()
-            .database(&db_name),
+            .idle_timeout(Some(Duration::from_secs(1))),
+        connect_opts: master_opts.database(&db_name),
         db_name,
     })
 }
