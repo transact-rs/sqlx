@@ -80,6 +80,7 @@ pub struct MySqlConnectOptions {
     pub(crate) no_engine_substitution: bool,
     pub(crate) timezone: Option<String>,
     pub(crate) set_names: bool,
+    pub(crate) found_rows: bool,
 }
 
 impl Default for MySqlConnectOptions {
@@ -111,6 +112,7 @@ impl MySqlConnectOptions {
             no_engine_substitution: true,
             timezone: Some(String::from("+00:00")),
             set_names: true,
+            found_rows: true,
         }
     }
 
@@ -412,6 +414,15 @@ impl MySqlConnectOptions {
     /// [`.charset`]: Self::charset()
     pub fn set_names(mut self, flag_val: bool) -> Self {
         self.set_names = flag_val;
+        self
+    }
+
+    /// Sets the flag that enables or disables CLIENT_FOUND_ROWS,
+    /// to return the number of found (matched) rows, and not the number of changed rows.
+    ///
+    /// The default value is set to true.
+    pub fn found_rows(mut self, flag_val: bool) -> Self {
+        self.found_rows = flag_val;
         self
     }
 }
