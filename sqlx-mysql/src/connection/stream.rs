@@ -35,7 +35,6 @@ impl<S: Socket> MySqlStream<S> {
         let mut capabilities = Capabilities::PROTOCOL_41
             | Capabilities::IGNORE_SPACE
             | Capabilities::DEPRECATE_EOF
-            | Capabilities::FOUND_ROWS
             | Capabilities::TRANSACTIONS
             | Capabilities::SECURE_CONNECTION
             | Capabilities::PLUGIN_AUTH_LENENC_DATA
@@ -47,6 +46,10 @@ impl<S: Socket> MySqlStream<S> {
 
         if options.database.is_some() {
             capabilities |= Capabilities::CONNECT_WITH_DB;
+        }
+
+        if options.found_rows {
+            capabilities |= Capabilities::FOUND_ROWS;
         }
 
         Self {
