@@ -28,7 +28,9 @@ async fn prepare(
     persistent: bool,
     resolve_column_origin: bool,
 ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
-    let id = if persistent {
+    // if cache is disabled, persistent statements get an id but are never evicted
+    // which causes a memory leak
+    let id = if persistent && conn.inner.cache_statement.is_enabled() {
         let id = conn.inner.next_statement_id;
         conn.inner.next_statement_id = id.next();
         id
