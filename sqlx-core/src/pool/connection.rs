@@ -127,11 +127,15 @@ impl<DB: Database> PoolConnection<DB> {
         self.live.take().expect(EXPECT_MSG)
     }
 
+    /// Release the connection.
+    ///
+    /// If the connection is to be closed, close it and run pool maintenance.
+    ///
     /// Test the connection to make sure it is still live before returning it to the pool.
     ///
     /// This effectively runs the drop handler eagerly instead of spawning a task to do it.
     #[doc(hidden)]
-    pub fn return_to_pool(&mut self) -> impl Future<Output = ()> + Send + 'static {
+    pub fn release(&mut self) -> impl Future<Output = ()> + Send + 'static {
         // float the connection in the pool before we move into the task
         // in case the returned `Future` isn't executed, like if it's spawned into a dying runtime
         // https://github.com/launchbadge/sqlx/issues/1396
@@ -141,9 +145,20 @@ impl<DB: Database> PoolConnection<DB> {
 
         let pool = self.pool.clone();
 
+        let close_on_drop = self.close_on_drop;
+
         async move {
             let returned_to_pool = if let Some(floating) = floating {
-                floating.return_to_pool().await
+                if close_on_drop {
+                    // Don't hold the connection forever if it hangs while trying to close
+                    crate::rt::timeout(CLOSE_ON_DROP_TIMEOUT, floating.close())
+                        .await
+                        .ok();
+
+                    false
+                } else {
+                    floating.return_to_pool().await
+                }
             } else {
                 false
             };
@@ -151,27 +166,6 @@ impl<DB: Database> PoolConnection<DB> {
             if !returned_to_pool {
                 pool.min_connections_maintenance(None).await;
             }
-        }
-    }
-
-    fn take_and_close(&mut self) -> impl Future<Output = ()> + Send + 'static {
-        // float the connection in the pool before we move into the task
-        // in case the returned `Future` isn't executed, like if it's spawned into a dying runtime
-        // https://github.com/launchbadge/sqlx/issues/1396
-        // Type hints seem to be broken by `Option` combinators in IntelliJ Rust right now (6/22).
-        let floating = self.live.take().map(|live| live.float(self.pool.clone()));
-
-        let pool = self.pool.clone();
-
-        async move {
-            if let Some(floating) = floating {
-                // Don't hold the connection forever if it hangs while trying to close
-                crate::rt::timeout(CLOSE_ON_DROP_TIMEOUT, floating.close())
-                    .await
-                    .ok();
-            }
-
-            pool.min_connections_maintenance(None).await;
         }
     }
 }
@@ -198,14 +192,9 @@ impl<'c, DB: Database> crate::acquire::Acquire<'c> for &'c mut PoolConnection<DB
 /// Returns the connection to the [`Pool`][crate::pool::Pool] it was checked-out from.
 impl<DB: Database> Drop for PoolConnection<DB> {
     fn drop(&mut self) {
-        if self.close_on_drop {
-            crate::rt::spawn(self.take_and_close());
-            return;
-        }
-
         // We still need to spawn a task to maintain `min_connections`.
         if self.live.is_some() || self.pool.options.min_connections > 0 {
-            crate::rt::spawn(self.return_to_pool());
+            crate::rt::spawn(self.release());
         }
     }
 }

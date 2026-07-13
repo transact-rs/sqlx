@@ -367,7 +367,7 @@ impl Drop for PgListener {
                 // inline the drop handler from `PoolConnection` so it doesn't try to spawn another task
                 // otherwise, it may trigger a panic if this task is dropped because the runtime is going away:
                 // https://github.com/launchbadge/sqlx/issues/1389
-                conn.return_to_pool().await;
+                conn.release().await;
             };
 
             // Unregister any listeners before returning the connection to the pool.
