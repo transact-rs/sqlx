@@ -5,7 +5,7 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use crate::error::Error;
 use crate::io::MySqlBufExt;
-use crate::io::{ProtocolDecode, ProtocolEncode};
+use crate::io::{AsyncRead, ProtocolDecode, ProtocolEncode};
 use crate::net::{BufferedSocket, Socket};
 use crate::protocol::response::{EofPacket, ErrPacket, OkPacket, Status};
 use crate::protocol::{Capabilities, Packet};
@@ -43,7 +43,8 @@ impl<S: Socket> MySqlStream<S> {
             | Capabilities::MULTI_RESULTS
             | Capabilities::PLUGIN_AUTH
             | Capabilities::PS_MULTI_RESULTS
-            | Capabilities::SSL;
+            | Capabilities::SSL
+            | Capabilities::LOCAL_FILES;
 
         if options.database.is_some() {
             capabilities |= Capabilities::CONNECT_WITH_DB;
@@ -105,6 +106,41 @@ impl<S: Socket> MySqlStream<S> {
         self.sequence_id = 0;
         self.write_packet(payload)?;
         self.flush().await?;
+        Ok(())
+    }
+
+    /// Send data from a stream to the database server as MySQL packets
+    ///
+    /// This is used to send data for a LOCAL INFILE query
+    pub(crate) async fn send_stream(
+        &mut self,
+        mut source: impl AsyncRead + Unpin,
+    ) -> Result<(), Error> {
+        loop {
+            let buf = self.socket.write_buffer_mut();
+
+            // Write the CopyData format code and reserve space for the length + sequence_id
+            // This is safe even if empty, since we always need to send an empty packet at the end
+            buf.put_slice(b"\0\0\0\0");
+
+            let read = buf.read_from(&mut source).await?;
+            let read32 = i32::try_from(read)
+                .map_err(|_| err_protocol!("number of bytes read exceeds 2^31 - 1: {}", read))?;
+
+            // rewrite header (len + sequenceid)
+            let mut header = read32.to_le_bytes();
+            header[3] = self.sequence_id;
+            self.sequence_id = self.sequence_id.wrapping_add(1);
+
+            buf.get_mut()[..4].copy_from_slice(&header);
+
+            self.socket.flush().await?;
+
+            if read32 == 0 {
+                break;
+            }
+        }
+
         Ok(())
     }
 
