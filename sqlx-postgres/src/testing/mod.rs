@@ -93,6 +93,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
     let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let master_opts = PgConnectOptions::from_str(&url).expect("failed to parse DATABASE_URL");
+    let advisory_locking = master_opts.advisory_locking;
 
     let pool = PoolOptions::new()
         // Postgres' normal connection limit is 100 plus 3 superuser connections
@@ -125,31 +126,44 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
 
     let mut conn = master_pool.acquire().await?;
 
-    // language=PostgreSQL
-    conn.execute(
-        // Explicit lock avoids this latent bug: https://stackoverflow.com/a/29908840
-        // I couldn't find a bug on the mailing list for `CREATE SCHEMA` specifically,
-        // but a clearly related bug with `CREATE TABLE` has been known since 2007:
-        // https://www.postgresql.org/message-id/200710222037.l9MKbCJZ098744%40wwwmaster.postgresql.org
-        // magic constant 8318549251334697844 is just 8 ascii bytes 'sqlxtest'.
+    // Explicit lock avoids this latent bug: https://stackoverflow.com/a/29908840
+    // I couldn't find a bug on the mailing list for `CREATE SCHEMA` specifically,
+    // but a clearly related bug with `CREATE TABLE` has been known since 2007:
+    // https://www.postgresql.org/message-id/200710222037.l9MKbCJZ098744%40wwwmaster.postgresql.org
+    // magic constant 8318549251334697844 is just 8 ascii bytes 'sqlxtest'.
+    //
+    // The lock and DDL must be in a single `execute` call so they share one implicit
+    // transaction — `pg_advisory_xact_lock` is released at transaction end.
+    //
+    // Can be disabled with `?sqlx-advisory-locking=false` in DATABASE_URL for databases
+    // that do not implement advisory locks, such as CockroachDB.
+    let lock_sql = if advisory_locking {
+        "select pg_advisory_xact_lock(8318549251334697844);"
+    } else {
+        ""
+    };
+
+    let setup_sql = format!(
+        // language=PostgreSQL
         r#"
-        select pg_advisory_xact_lock(8318549251334697844);
+            {lock_sql}
 
-        create schema if not exists _sqlx_test;
+            create schema if not exists _sqlx_test;
 
-        create table if not exists _sqlx_test.databases (
-            db_name text primary key,
-            test_path text not null,
-            created_at timestamptz not null default now()
-        );
+            create table if not exists _sqlx_test.databases (
+                db_name text primary key,
+                test_path text not null,
+                created_at timestamptz not null default now()
+            );
 
-        create index if not exists databases_created_at 
-            on _sqlx_test.databases(created_at);
+            create index if not exists databases_created_at
+                on _sqlx_test.databases(created_at);
 
-        create sequence if not exists _sqlx_test.database_ids;
-    "#,
-    )
-    .await?;
+            create sequence if not exists _sqlx_test.database_ids;
+        "#
+    );
+
+    conn.execute(AssertSqlSafe(setup_sql)).await?;
 
     let db_name = Postgres::db_name(args);
     do_cleanup(&mut conn, &db_name).await?;
@@ -183,6 +197,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
             .clone()
             .database(&db_name),
         db_name,
+        locking: advisory_locking,
     })
 }
 
