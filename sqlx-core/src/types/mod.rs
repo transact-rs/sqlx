@@ -196,8 +196,15 @@ pub use bstr::{BStr, BString};
 /// ### Records
 ///
 /// User-defined composite types are supported through deriving a `struct`.
-///
 /// This is only supported for PostgreSQL.
+/// 
+/// Note Composite types are being encoded as tuples in the order as the fields of the struct are defined.
+/// Therefore the fields of the struct must be in the same order as the composite type has been defined
+/// as otherwise the encoding when binding a composite type will fail.
+/// 
+/// ```sql
+/// create type interface_type (name varchar, supplier_id int, price float);
+/// ```
 ///
 /// ```rust,ignore
 /// #[derive(sqlx::Type)]
@@ -205,6 +212,19 @@ pub use bstr::{BStr, BString};
 /// struct InterfaceType {
 ///     name: String,
 ///     supplier_id: i32,
+///     price: f64
+/// }
+/// ```
+/// 
+/// ```rust,ignore
+/// // This will fail when binding the struct to a query as parameter. 
+/// // The fields are not in the same order as the composite type
+/// // resulting in encoding the struct as: `(supplier_id, name, price)`
+/// #[derive(sqlx::Type)]
+/// #[sqlx(type_name = "interface_type")]
+/// struct WillFail {
+///     supplier_id: i32,
+///     name: String,
 ///     price: f64
 /// }
 /// ```
