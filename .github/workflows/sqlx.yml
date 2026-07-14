@@ -440,6 +440,16 @@ jobs:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           RUSTFLAGS: -D warnings --cfg postgres="17"
 
+      # Direct SSL negotiation only supported by Postgres 17+
+      - if: matrix.postgres >= 17
+        run: >
+          cargo test
+          --no-default-features
+          --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: postgres://postgres@localhost:5432/sqlx?sslnegotiation=direct&sslmode=require&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: --cfg postgres="${{ matrix.postgres }}"
+
   mysql:
     name: MySQL
     runs-on: ubuntu-24.04

@@ -4,6 +4,7 @@ use std::fmt::{self, Display, Write};
 use std::path::{Path, PathBuf};
 
 pub use ssl_mode::PgSslMode;
+pub use ssl_negotiation::PgSslNegotiation;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
 
@@ -11,6 +12,7 @@ mod connect;
 mod parse;
 mod pgpass;
 mod ssl_mode;
+mod ssl_negotiation;
 
 #[doc = include_str!("doc.md")]
 #[derive(Debug, Clone)]
@@ -22,6 +24,7 @@ pub struct PgConnectOptions {
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
     pub(crate) ssl_mode: PgSslMode,
+    pub(crate) ssl_negotiation: PgSslNegotiation,
     pub(crate) ssl_root_cert: Option<CertificateInput>,
     pub(crate) ssl_client_cert: Option<CertificateInput>,
     pub(crate) ssl_client_key: Option<CertificateInput>,
@@ -89,6 +92,10 @@ impl PgConnectOptions {
             // a PEM-encoded private key.
             ssl_client_key: var("PGSSLKEY").ok().map(CertificateInput::from),
             ssl_mode: var("PGSSLMODE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_default(),
+            ssl_negotiation: var("PGSSLNEGOTIATION")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or_default(),
@@ -211,8 +218,6 @@ impl PgConnectOptions {
     /// By default, the SSL mode is [`Prefer`](PgSslMode::Prefer), and the client will
     /// first attempt an SSL connection but fallback to a non-SSL connection on failure.
     ///
-    /// Ignored for Unix domain socket communication.
-    ///
     /// # Example
     ///
     /// ```rust
@@ -222,6 +227,24 @@ impl PgConnectOptions {
     /// ```
     pub fn ssl_mode(mut self, mode: PgSslMode) -> Self {
         self.ssl_mode = mode;
+        self
+    }
+
+    /// Sets the protocol with which the secure SSL TCP/IP connection will be negotiated with
+    /// the server.
+    ///
+    /// By default, the protocol is [`Postgres`](PgSslNegotiation::Postgres), and the client will
+    /// first check whether the server supports SSL, and fallback to a non-SSL connection if not.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::{PgSslNegotiation, PgConnectOptions};
+    /// let options = PgConnectOptions::new()
+    ///     .ssl_negotiation(PgSslNegotiation::Postgres);
+    /// ```
+    pub fn ssl_negotiation(mut self, procedure: PgSslNegotiation) -> Self {
+        self.ssl_negotiation = procedure;
         self
     }
 
@@ -551,6 +574,19 @@ impl PgConnectOptions {
     /// ```
     pub fn get_ssl_mode(&self) -> PgSslMode {
         self.ssl_mode
+    }
+
+    /// Get the SSL negotiation protocol.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::{PgConnectOptions, PgSslNegotiation};
+    /// let options = PgConnectOptions::new();
+    /// assert!(matches!(options.get_ssl_negotiation(), PgSslNegotiation::Postgres));
+    /// ```
+    pub fn get_ssl_negotiation(&self) -> PgSslNegotiation {
+        self.ssl_negotiation
     }
 
     /// Get the application name.
