@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::env::var_os;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum PGPassLineParseError {
@@ -10,46 +10,59 @@ pub enum PGPassLineParseError {
     UnexpectedEOL,
 }
 
-/// try to load a password from the various pgpass file locations
+/// Try to load a password from the various pgpass file locations.
+///
+/// Loading is attempted in the following order:
+/// 1. Path given via the `PGPASSFILE` environment variable.
+/// 2. Paths given via custom_paths.
+/// 3. Default path (`~/.pgpass` on Linux and `%APPDATA%/postgres/pgpass.conf`
+///    on Windows)
 pub fn load_password(
     host: &str,
     port: u16,
     username: &str,
     database: Option<&str>,
+    custom_paths: &[impl AsRef<Path>],
 ) -> Option<String> {
-    let custom_file = var_os("PGPASSFILE");
-    if let Some(file) = custom_file {
-        if let Some(password) =
-            load_password_from_file(PathBuf::from(file), host, port, username, database)
-        {
-            return Some(password);
-        }
-    }
+    let env_path = var_os("PGPASSFILE").map(PathBuf::from);
+    let default_path = default_path();
 
-    #[cfg(not(target_os = "windows"))]
+    let path_iter = env_path
+        .as_deref()
+        .into_iter()
+        .chain(custom_paths.iter().map(AsRef::as_ref))
+        .chain(default_path.as_deref());
+
+    path_iter
+        .filter_map(|path| load_password_from_file(path, host, port, username, database))
+        .next()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn default_path() -> Option<PathBuf> {
     // home_dir fixed in 1.85 (rust-lang/rust#132515) and un-deprecated in 1.87 (rust-lang/rust#137327)
     #[allow(deprecated)]
-    let default_file = std::env::home_dir().map(|path| path.join(".pgpass"));
-    #[cfg(target_os = "windows")]
-    let default_file = {
-        use etcetera::BaseStrategy;
+    std::env::home_dir().map(|path| path.join(".pgpass"))
+}
 
-        etcetera::base_strategy::Windows::new()
-            .ok()
-            .map(|basedirs| basedirs.data_dir().join("postgresql").join("pgpass.conf"))
-    };
-    load_password_from_file(default_file?, host, port, username, database)
+#[cfg(target_os = "windows")]
+fn default_path() -> Option<PathBuf> {
+    use etcetera::BaseStrategy;
+
+    etcetera::base_strategy::Windows::new()
+        .ok()
+        .map(|basedirs| basedirs.data_dir().join("postgresql").join("pgpass.conf"))
 }
 
 /// try to extract a password from a pgpass file
 fn load_password_from_file(
-    path: PathBuf,
+    path: &Path,
     host: &str,
     port: u16,
     username: &str,
     database: Option<&str>,
 ) -> Option<String> {
-    let file = File::open(&path)
+    let file = File::open(path)
         .map_err(|e| {
             match e.kind() {
                 std::io::ErrorKind::NotFound => {
