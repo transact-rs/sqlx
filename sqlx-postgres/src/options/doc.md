@@ -39,7 +39,8 @@ if a parameter is not passed in via URL, it is populated by reading
 | `options`          | `PGOPTIONS`          | Unset.                                                      |
 | `application_name` | `PGAPPNAME`          | Unset.                                                      |
 
-[`passfile`] handling may be bypassed using [`PgConnectOptions::new_without_pgpass()`].
+[`passfile`] handling may be bypassed using [`PgConnectOptions::default_without_env()`],
+which also bypasses all environment variables and uses hardcoded defaults.
 
 ## SQLx-Specific
 SQLx also parses some bespoke parameters. These are _not_ configurable by environment variable.
@@ -154,13 +155,21 @@ use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgSslMode};
 // URL connection string
 let conn = PgConnection::connect("postgres://localhost/mydb").await?;
 
-// Manually-constructed options
-let conn = PgConnectOptions::new()
+// Manually-constructed options with environment defaults
+let conn = PgConnectOptions::with_libpq_defaults()
     .host("secret-host")
     .port(2525)
     .username("secret-user")
     .password("secret-password")
     .ssl_mode(PgSslMode::Require)
+    .connect()
+    .await?;
+
+// Or start from hardcoded defaults without environment variables
+let conn = PgConnectOptions::default_without_env()
+    .host("secret-host")
+    .username("secret-user")
+    .password("secret-password")
     .connect()
     .await?;
 
