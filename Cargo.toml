@@ -313,7 +313,7 @@ required-features = ["sqlite"]
 [[test]]
 name = "sqlite-any"
 path = "tests/sqlite/any.rs"
-required-features = ["sqlite"]
+required-features = ["sqlite", "any"]
 
 [[test]]
 name = "sqlite-types"
@@ -415,6 +415,11 @@ name = "mysql-rustsec"
 path = "tests/mysql/rustsec.rs"
 required-features = ["mysql"]
 
+[[test]]
+name = "mysql-any"
+path = "tests/mysql/any.rs"
+required-features = ["mysql", "any"]
+
 #
 # PostgreSQL
 #
@@ -468,3 +473,8 @@ required-features = ["postgres"]
 name = "postgres-rustsec"
 path = "tests/postgres/rustsec.rs"
 required-features = ["postgres", "macros", "migrate"]
+
+[[test]]
+name = "postgres-any"
+path = "tests/postgres/any.rs"
+required-features = ["postgres", "any"]

@@ -96,7 +96,7 @@ impl AnyConnectionBackend for MySqlConnection {
                 .try_flatten_stream()
                 .map(|res| {
                     Ok(match res? {
-                        Either::Left(result) => Either::Left(map_result(result)),
+                        Either::Left(result) => Either::Left(result.into()),
                         Either::Right(row) => Either::Right(AnyRow::try_from(&row)?),
                     })
                 }),
@@ -210,11 +210,12 @@ impl<'a> TryFrom<&'a AnyConnectOptions> for MySqlConnectOptions {
     }
 }
 
-fn map_result(result: MySqlQueryResult) -> AnyQueryResult {
-    AnyQueryResult {
-        rows_affected: result.rows_affected,
-        // Don't expect this to be a problem
-        #[allow(clippy::cast_possible_wrap)]
-        last_insert_id: Some(result.last_insert_id as i64),
+/// This conversion attempts to save last_insert_id by converting to i64.
+impl From<MySqlQueryResult> for AnyQueryResult {
+    fn from(done: MySqlQueryResult) -> Self {
+        AnyQueryResult {
+            rows_affected: done.rows_affected(),
+            last_insert_id: done.last_insert_id().try_into().ok(),
+        }
     }
 }

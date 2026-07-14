@@ -97,7 +97,7 @@ impl AnyConnectionBackend for PgConnection {
                 .try_flatten_stream()
                 .map(
                     move |res: sqlx_core::Result<Either<PgQueryResult, PgRow>>| match res? {
-                        Either::Left(result) => Ok(Either::Left(map_result(result))),
+                        Either::Left(result) => Ok(Either::Left(result.into())),
                         Either::Right(row) => Ok(Either::Right(AnyRow::try_from(&row)?)),
                     },
                 ),
@@ -246,9 +246,11 @@ impl<'a> TryFrom<&'a AnyConnectOptions> for PgConnectOptions {
     }
 }
 
-fn map_result(res: PgQueryResult) -> AnyQueryResult {
-    AnyQueryResult {
-        rows_affected: res.rows_affected(),
-        last_insert_id: None,
+impl From<PgQueryResult> for AnyQueryResult {
+    fn from(done: PgQueryResult) -> Self {
+        AnyQueryResult {
+            rows_affected: done.rows_affected(),
+            last_insert_id: None,
+        }
     }
 }
