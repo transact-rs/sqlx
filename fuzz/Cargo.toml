@@ -1,0 +1,63 @@
+[workspace]
+
+[package]
+name = "sqlx-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+arbitrary = { version = "1", features = ["derive"] }
+bytes = "1"
+
+[dependencies.sqlx]
+path = ".."
+features = ["runtime-tokio", "tls-native-tls", "mysql", "postgres", "sqlite"]
+
+[dependencies.sqlx-mysql]
+path = "../sqlx-mysql"
+
+[dependencies.sqlx-postgres]
+path = "../sqlx-postgres"
+
+[dependencies.sqlx-core]
+path = "../sqlx-core"
+
+[[bin]]
+name = "fuzz_mysql_row_binary"
+path = "fuzz_targets/fuzz_mysql_row_binary.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_postgres_data_row"
+path = "fuzz_targets/fuzz_postgres_data_row.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_mysql_lenenc"
+path = "fuzz_targets/fuzz_mysql_lenenc.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_postgres_response"
+path = "fuzz_targets/fuzz_postgres_response.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_mysql_handshake"
+path = "fuzz_targets/fuzz_mysql_handshake.rs"
+test = false
+doc = false
+bench = false
