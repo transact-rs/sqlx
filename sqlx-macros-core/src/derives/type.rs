@@ -12,6 +12,10 @@ use syn::{
 
 pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
     let attrs = parse_container_attributes(&input.attrs)?;
+    if let Some(try_from) = &attrs.try_from {
+        return expand_derive_has_sql_type_try_from(input, try_from, attrs.no_pg_array);
+    }
+
     match &input.data {
         // Newtype structs:
         // struct Foo(i32);
@@ -50,6 +54,66 @@ pub fn expand_derive_type(input: &DeriveInput) -> syn::Result<TokenStream> {
         },
         Data::Union(_) => Err(syn::Error::new_spanned(input, "unions are not supported")),
     }
+}
+
+fn expand_derive_has_sql_type_try_from(
+    input: &DeriveInput,
+    try_from: &syn::Type,
+    no_pg_array: bool,
+) -> syn::Result<TokenStream> {
+    let ident = &input.ident;
+
+    let generics = &input.generics;
+    let (_, ty_generics, _) = generics.split_for_impl();
+
+    let mut generics = generics.clone();
+    let mut array_generics = generics.clone();
+
+    generics
+        .params
+        .insert(0, parse_quote!(DB: ::sqlx::Database));
+    generics
+        .make_where_clause()
+        .predicates
+        .push(parse_quote!(#try_from: ::sqlx::Type<DB>));
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
+
+    array_generics
+        .make_where_clause()
+        .predicates
+        .push(parse_quote!(#try_from: ::sqlx::postgres::PgHasArrayType));
+    let (array_impl_generics, _, array_where_clause) = array_generics.split_for_impl();
+
+    let mut tokens = quote!(
+        #[automatically_derived]
+        impl #impl_generics ::sqlx::Type<DB> for #ident #ty_generics #where_clause {
+            fn type_info() -> DB::TypeInfo {
+                <#try_from as ::sqlx::Type<DB>>::type_info()
+            }
+
+            fn compatible(ty: &DB::TypeInfo) -> ::std::primitive::bool {
+                <#try_from as ::sqlx::Type<DB>>::compatible(ty)
+            }
+        }
+    );
+
+    if cfg!(feature = "postgres") && !no_pg_array {
+        tokens.extend(quote!(
+            #[automatically_derived]
+            impl #array_impl_generics ::sqlx::postgres::PgHasArrayType for #ident #ty_generics
+            #array_where_clause {
+                fn array_type_info() -> ::sqlx::postgres::PgTypeInfo {
+                    <#try_from as ::sqlx::postgres::PgHasArrayType>::array_type_info()
+                }
+
+                fn array_compatible(ty: &::sqlx::postgres::PgTypeInfo) -> ::std::primitive::bool {
+                    <#try_from as ::sqlx::postgres::PgHasArrayType>::array_compatible(ty)
+                }
+            }
+        ));
+    }
+
+    Ok(tokens)
 }
 
 fn expand_derive_has_sql_type_transparent(
