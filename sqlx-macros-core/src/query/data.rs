@@ -1,17 +1,18 @@
-use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs;
 use std::io::Write as _;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use serde::{Serialize, Serializer};
 
 use sqlx_core::database::Database;
 use sqlx_core::describe::Describe;
+use sqlx_core::HashMap;
 
 use crate::database::DatabaseExt;
+use crate::query::cache::MtimeCache;
 
 #[derive(serde::Serialize)]
 #[serde(bound(serialize = "Describe<DB>: serde::Serialize"))]
@@ -64,7 +65,7 @@ impl<DB: Database> Serialize for SerializeDbName<DB> {
     }
 }
 
-static OFFLINE_DATA_CACHE: LazyLock<Mutex<HashMap<PathBuf, DynQueryData>>> =
+static OFFLINE_DATA_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<MtimeCache<DynQueryData>>>>> =
     LazyLock::new(Default::default);
 
 /// Offline query data
@@ -79,47 +80,33 @@ pub struct DynQueryData {
 impl DynQueryData {
     /// Loads a query given the path to its "query-<hash>.json" file. Subsequent calls for the same
     /// path are retrieved from an in-memory cache.
-    pub fn from_data_file(path: impl AsRef<Path>, query: &str) -> crate::Result<Self> {
-        let path = path.as_ref();
-
-        let mut cache = OFFLINE_DATA_CACHE
+    pub fn from_data_file(path: &Path, query: &str) -> crate::Result<Self> {
+        let cache = OFFLINE_DATA_CACHE
             .lock()
             // Just reset the cache on error
             .unwrap_or_else(|poison_err| {
                 let mut guard = poison_err.into_inner();
                 *guard = Default::default();
                 guard
-            });
-        if let Some(cached) = cache.get(path).cloned() {
-            if query != cached.query {
+            })
+            .entry_ref(path)
+            .or_insert_with(|| Arc::new(MtimeCache::new()))
+            .clone();
+
+        cache.get_or_try_init(|builder| {
+            builder.add_path(path.into());
+
+            let offline_data_contents = fs::read_to_string(path).map_err(|e| {
+                format!("failed to read saved query path {}: {}", path.display(), e)
+            })?;
+            let dyn_data: DynQueryData = serde_json::from_str(&offline_data_contents)?;
+
+            if query != dyn_data.query {
                 return Err("hash collision for saved query data".into());
             }
-            return Ok(cached);
-        }
 
-        #[cfg(procmacro2_semver_exempt)]
-        {
-            let path = path.as_ref().canonicalize()?;
-            let path = path.to_str().ok_or_else(|| {
-                format!(
-                    "query-<hash>.json path cannot be represented as a string: {:?}",
-                    path
-                )
-            })?;
-
-            proc_macro::tracked_path::path(path);
-        }
-
-        let offline_data_contents = fs::read_to_string(path)
-            .map_err(|e| format!("failed to read saved query path {}: {}", path.display(), e))?;
-        let dyn_data: DynQueryData = serde_json::from_str(&offline_data_contents)?;
-
-        if query != dyn_data.query {
-            return Err("hash collision for saved query data".into());
-        }
-
-        let _ = cache.insert(path.to_owned(), dyn_data.clone());
-        Ok(dyn_data)
+            Ok(dyn_data)
+        })
     }
 }
 
@@ -149,41 +136,71 @@ where
         }
     }
 
-    pub(super) fn save_in(&self, dir: impl AsRef<Path>) -> crate::Result<()> {
+    pub(super) fn save_in(&self, dir: &Path) -> crate::Result<()> {
         use std::io::ErrorKind;
 
-        let path = dir.as_ref().join(format!("query-{}.json", self.hash));
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    ErrorKind::NotFound | ErrorKind::PermissionDenied,
-                ) => {}
-            Err(err) => return Err(format!("failed to delete {path:?}: {err:?}").into()),
+        let path = dir.join(format!("query-{}.json", self.hash));
+
+        if let Err(err) = fs::remove_file(&path) {
+            match err.kind() {
+                ErrorKind::NotFound | ErrorKind::PermissionDenied => (),
+                ErrorKind::NotADirectory => {
+                    return Err(format!(
+                        "sqlx offline path exists, but is not a directory: {dir:?}"
+                    )
+                    .into());
+                }
+                _ => return Err(format!("failed to delete {path:?}: {err:?}").into()),
+            }
         }
-        let mut file = match std::fs::OpenOptions::new()
+
+        // Prevent tearing from concurrent invocations possibly trying to write the same file
+        // by using the existence of the file itself as a mutex.
+        //
+        // By deleting the file first and then using `.create_new(true)`,
+        // we guarantee that this only succeeds if another invocation hasn't concurrently
+        // re-created the file.
+        let mut file = match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)
         {
             Ok(file) => file,
-            // We overlapped with a concurrent invocation and the other one succeeded.
-            Err(err) if matches!(err.kind(), ErrorKind::AlreadyExists) => return Ok(()),
             Err(err) => {
-                return Err(format!("failed to exclusively create {path:?}: {err:?}").into())
+                return match err.kind() {
+                    // We overlapped with a concurrent invocation and the other one succeeded.
+                    ErrorKind::AlreadyExists => Ok(()),
+                    ErrorKind::NotFound => {
+                        Err(format!("sqlx offline path does not exist: {dir:?}").into())
+                    }
+                    ErrorKind::NotADirectory => Err(format!(
+                        "sqlx offline path exists, but is not a directory: {dir:?}"
+                    )
+                    .into()),
+                    _ => Err(format!("failed to exclusively create {path:?}: {err:?}").into()),
+                };
             }
         };
 
-        let data = serde_json::to_string_pretty(self)
-            .map_err(|err| format!("failed to serialize query data: {err:?}"))?;
-        file.write_all(data.as_bytes())
-            .map_err(|err| format!("failed to write query data to file: {err:?}"))?;
+        // From a quick survey of the files generated by `examples/postgres/axum-social-with-tests`,
+        // which are generally in the 1-2 KiB range, this seems like a safe bet to avoid
+        // lots of reallocations without using too much memory.
+        //
+        // As of writing, `serde_json::to_vec_pretty()` only allocates 128 bytes up-front.
+        let mut data = Vec::with_capacity(4096);
+
+        serde_json::to_writer_pretty(&mut data, self).expect("BUG: failed to serialize query data");
 
         // Ensure there is a newline at the end of the JSON file to avoid
         // accidental modification by IDE and make github diff tool happier.
-        file.write_all(b"\n")
-            .map_err(|err| format!("failed to append a newline to file: {err:?}"))?;
+        data.push(b'\n');
+
+        // This ideally writes the data in as few syscalls as possible.
+        file.write_all(&data)
+            .map_err(|err| format!("failed to write query data to file {path:?}: {err:?}"))?;
+
+        // We don't really need to call `.sync_data()` since it's trivial to re-run the macro
+        // in the event a power loss results in incomplete flushing of the data to disk.
 
         Ok(())
     }

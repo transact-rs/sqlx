@@ -96,9 +96,9 @@ pub trait Database: 'static + Sized + Send + Debug {
     type ValueRef<'r>: ValueRef<'r, Database = Self>;
 
     /// The concrete `Arguments` implementation for this database.
-    type Arguments<'q>: Arguments<'q, Database = Self>;
+    type Arguments: Arguments<Database = Self>;
     /// The concrete type used as a buffer for arguments while encoding.
-    type ArgumentBuffer<'q>;
+    type ArgumentBuffer;
 
     /// The concrete `Statement` implementation for this database.
     type Statement: Statement<Database = Self>;

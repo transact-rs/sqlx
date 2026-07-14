@@ -124,6 +124,17 @@ fn expand_derive_has_sql_type_transparent(
                 }
             }
         ));
+
+        if !attr.no_pg_array {
+            tts.extend(quote!(
+                #[automatically_derived]
+                impl ::sqlx::postgres::PgHasArrayType for #ident #ty_generics {
+                    fn array_type_info() -> ::sqlx::postgres::PgTypeInfo {
+                        ::sqlx::postgres::PgTypeInfo::array_of(#ty_name)
+                    }
+                }
+            ));
+        }
     }
 
     Ok(tts)

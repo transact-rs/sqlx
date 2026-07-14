@@ -1,5 +1,5 @@
 use sqlx::pool::PoolOptions;
-use sqlx::{Connection, Database, Pool};
+use sqlx::{Connection, Database, Error, Pool};
 use std::env;
 
 pub fn setup_if_needed() {
@@ -9,13 +9,15 @@ pub fn setup_if_needed() {
 
 // Make a new connection
 // Ensure [dotenvy] and [env_logger] have been setup
-pub async fn new<DB>() -> anyhow::Result<DB::Connection>
+pub async fn new<DB>() -> sqlx::Result<DB::Connection>
 where
     DB: Database,
 {
     setup_if_needed();
 
-    Ok(DB::Connection::connect(&env::var("DATABASE_URL")?).await?)
+    let db_url = env::var("DATABASE_URL").map_err(|e| Error::Configuration(Box::new(e)))?;
+
+    Ok(DB::Connection::connect(&db_url).await?)
 }
 
 // Make a new pool

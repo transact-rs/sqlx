@@ -206,7 +206,7 @@ impl PgCube {
 }
 
 fn read_vec(bytes: &mut &[u8]) -> Result<Vec<f64>, String> {
-    if bytes.len() % BYTE_WIDTH != 0 {
+    if !bytes.len().is_multiple_of(BYTE_WIDTH) {
         return Err(format!(
             "data length not divisible by {BYTE_WIDTH}: {}",
             bytes.len()

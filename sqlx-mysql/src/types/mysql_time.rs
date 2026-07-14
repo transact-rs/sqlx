@@ -409,10 +409,10 @@ impl<'r> Decode<'r, MySql> for MySqlTime {
     }
 }
 
-impl<'q> Encode<'q, MySql> for MySqlTime {
+impl Encode<'_, MySql> for MySqlTime {
     fn encode_by_ref(
         &self,
-        buf: &mut <MySql as Database>::ArgumentBuffer<'q>,
+        buf: &mut <MySql as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         if self.is_zero() {
             buf.put_u8(0);

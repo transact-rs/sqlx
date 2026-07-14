@@ -120,7 +120,7 @@ pub fn raw_sql(sql: impl SqlSafeStr) -> RawSql {
     RawSql(sql.into_sql_str())
 }
 
-impl<'q, DB: Database> Execute<'q, DB> for RawSql {
+impl<DB: Database> Execute<'_, DB> for RawSql {
     fn sql(self) -> SqlStr {
         self.0
     }
@@ -129,7 +129,7 @@ impl<'q, DB: Database> Execute<'q, DB> for RawSql {
         None
     }
 
-    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments<'q>>, BoxDynError> {
+    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments>, BoxDynError> {
         Ok(None)
     }
 

@@ -7,7 +7,7 @@ use futures_core::stream::BoxStream;
 use futures_util::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 
 use sqlx_core::any::{
-    Any, AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
+    AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
     AnyStatement, AnyTypeInfo, AnyTypeInfoKind, AnyValueKind,
 };
 use sqlx_core::sql_str::SqlStr;
@@ -16,7 +16,6 @@ use crate::arguments::SqliteArgumentsBuffer;
 use crate::type_info::DataType;
 use sqlx_core::connection::{ConnectOptions, Connection};
 use sqlx_core::database::Database;
-use sqlx_core::describe::Describe;
 use sqlx_core::executor::Executor;
 use sqlx_core::transaction::TransactionManager;
 use std::pin::pin;
@@ -80,12 +79,12 @@ impl AnyConnectionBackend for SqliteConnection {
         Ok(self)
     }
 
-    fn fetch_many<'q>(
-        &'q mut self,
+    fn fetch_many(
+        &mut self,
         query: SqlStr,
         persistent: bool,
-        arguments: Option<AnyArguments<'q>>,
-    ) -> BoxStream<'q, sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
+        arguments: Option<AnyArguments>,
+    ) -> BoxStream<'_, sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
         let persistent = persistent && arguments.is_some();
         let args = arguments.map(map_arguments);
 
@@ -103,12 +102,12 @@ impl AnyConnectionBackend for SqliteConnection {
         )
     }
 
-    fn fetch_optional<'q>(
-        &'q mut self,
+    fn fetch_optional(
+        &mut self,
         query: SqlStr,
         persistent: bool,
-        arguments: Option<AnyArguments<'q>>,
-    ) -> BoxFuture<'q, sqlx_core::Result<Option<AnyRow>>> {
+        arguments: Option<AnyArguments>,
+    ) -> BoxFuture<'_, sqlx_core::Result<Option<AnyRow>>> {
         let persistent = persistent && arguments.is_some();
         let args = arguments.map(map_arguments);
 
@@ -140,7 +139,11 @@ impl AnyConnectionBackend for SqliteConnection {
         })
     }
 
-    fn describe(&mut self, sql: SqlStr) -> BoxFuture<'_, sqlx_core::Result<Describe<Any>>> {
+    #[cfg(feature = "offline")]
+    fn describe(
+        &mut self,
+        sql: SqlStr,
+    ) -> BoxFuture<'_, sqlx_core::Result<sqlx_core::describe::Describe<sqlx_core::any::Any>>> {
         Box::pin(async move { Executor::describe(self, sql).await?.try_into_any() })
     }
 }
@@ -206,7 +209,7 @@ impl<'a> TryFrom<&'a AnyConnectOptions> for SqliteConnectOptions {
 }
 
 // Infallible alternative to AnyArguments::convert_into()
-fn map_arguments(args: AnyArguments<'_>) -> SqliteArguments {
+fn map_arguments(args: AnyArguments) -> SqliteArguments {
     let values = args
         .values
         .0

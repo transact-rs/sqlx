@@ -22,7 +22,7 @@ pub fn quote_args<DB: DatabaseExt>(
 
     if input.arg_exprs.is_empty() {
         return Ok(quote! {
-            let query_args = ::core::result::Result::<_, ::sqlx::error::BoxDynError>::Ok(<#db_path as ::sqlx::database::Database>::Arguments::<'_>::default());
+            let query_args = ::core::result::Result::<_, ::sqlx::error::BoxDynError>::Ok(<#db_path as ::sqlx::database::Database>::Arguments::default());
         });
     }
 
@@ -95,7 +95,7 @@ pub fn quote_args<DB: DatabaseExt>(
 
         #args_check
 
-        let mut query_args = <#db_path as ::sqlx::database::Database>::Arguments::<'_>::default();
+        let mut query_args = <#db_path as ::sqlx::database::Database>::Arguments::default();
         query_args.reserve(
             #args_count,
             0 #(+ ::sqlx::encode::Encode::<#db_path>::size_hint(#arg_name))*

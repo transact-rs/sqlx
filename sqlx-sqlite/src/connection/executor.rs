@@ -4,7 +4,6 @@ use crate::{
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::{stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use sqlx_core::describe::Describe;
 use sqlx_core::error::Error;
 use sqlx_core::executor::{Execute, Executor};
 use sqlx_core::sql_str::SqlStr;
@@ -89,7 +88,11 @@ impl<'c> Executor<'c> for &'c mut SqliteConnection {
     }
 
     #[doc(hidden)]
-    fn describe<'e>(self, sql: SqlStr) -> BoxFuture<'e, Result<Describe<Sqlite>, Error>>
+    #[cfg(feature = "offline")]
+    fn describe<'e>(
+        self,
+        sql: SqlStr,
+    ) -> BoxFuture<'e, Result<sqlx_core::describe::Describe<Sqlite>, Error>>
     where
         'c: 'e,
     {

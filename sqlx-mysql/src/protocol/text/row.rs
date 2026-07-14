@@ -22,7 +22,7 @@ impl<'de> ProtocolDecode<'de, &'de [MySqlColumn]> for TextRow {
                 values.push(None);
                 buf.advance(1);
             } else {
-                let size = buf.get_uint_lenenc();
+                let size = buf.get_uint_lenenc()?;
                 if (buf.remaining() as u64) < size {
                     return Err(err_protocol!(
                         "buffer exhausted when reading data for column {:?}; decoded length is {}, but only {} bytes remain in buffer. Malformed packet or protocol error?",

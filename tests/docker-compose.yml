@@ -47,6 +47,8 @@ services:
             dockerfile: mysql/Dockerfile
             args:
                 IMAGE: mysql:5.7
+                SSL_CERT_DIR: certs/rsa
+                SSL_KEY_DIR: certs/rsa/keys
         volumes:
             - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
         ports:
@@ -230,7 +232,7 @@ services:
             args:
                 VERSION: 17
         ports:
-            - 5432:5432
+            - 5432
         environment:
             POSTGRES_DB: sqlx
             POSTGRES_HOST_AUTH_METHOD: trust
@@ -374,7 +376,7 @@ services:
             args:
                 VERSION: 13
         ports:
-            - 5432:5432
+            - 5432
         environment:
             POSTGRES_DB: sqlx
             POSTGRES_HOST_AUTH_METHOD: trust

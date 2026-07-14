@@ -85,10 +85,7 @@ impl Encode<'_, Sqlite> for Cow<'_, str> {
 }
 
 impl Encode<'_, Sqlite> for Arc<str> {
-    fn encode(
-        self,
-        args: &mut <Sqlite as Database>::ArgumentBuffer<'_>,
-    ) -> Result<IsNull, BoxDynError>
+    fn encode(self, args: &mut <Sqlite as Database>::ArgumentBuffer) -> Result<IsNull, BoxDynError>
     where
         Self: Sized,
     {

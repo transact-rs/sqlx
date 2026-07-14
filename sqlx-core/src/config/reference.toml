@@ -44,7 +44,10 @@ database-url-var = "FOO_DATABASE_URL"
 # It is not possible to provide a truly safe version of this API.
 #
 # Use this field with care, and only load extensions that you trust.
-unsafe-load-extensions = ["uuid", "vsv"]
+unsafe-load-extensions = [
+	"uuid",
+	{ path = "vsv_renamed", entrypoint = "sqlite3_vsv_init" },
+]
 
 # Configure external drivers in macros and sqlx-cli.
 #
@@ -90,8 +93,8 @@ numeric = "rust_decimal"
 # or not. They only override the inner type used.
 [macros.type-overrides]
 # Override a built-in type (map all `UUID` columns to `crate::types::MyUuid`)
-# Note: currently, the case of the type name MUST match. 
-# Built-in types are spelled in all-uppercase to match SQL convention. 
+# Note: currently, the case of the type name MUST match.
+# Built-in types are spelled in all-uppercase to match SQL convention.
 'UUID' = "crate::types::MyUuid"
 
 # Support an external or custom wrapper type (e.g. from the `isn` Postgres extension)
@@ -206,7 +209,7 @@ migrations-dir = "foo/migrations"
 # Note that the TOML format requires double-quoted strings to process escapes.
 # ignored-chars = ["\r"]
 
-# Ignore common whitespace characters (beware syntatically significant whitespace!)
+# Ignore common whitespace characters (beware syntactically significant whitespace!)
 # Space, tab, CR, LF, zero-width non-breaking space (U+FEFF)
 #
 # U+FEFF is added by some editors as a magic number at the beginning of a text file indicating it is UTF-8 encoded,

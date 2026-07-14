@@ -112,7 +112,7 @@ impl<DB: Database> FixtureSnapshot<DB> {
 #[allow(clippy::to_string_trait_impl)]
 impl<DB: Database> ToString for Fixture<DB>
 where
-    for<'a> <DB as Database>::Arguments<'a>: Default,
+    for<'a> <DB as Database>::Arguments: Default,
 {
     fn to_string(&self) -> String {
         let mut query = QueryBuilder::<DB>::new("");

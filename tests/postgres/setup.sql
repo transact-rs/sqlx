@@ -1,3 +1,6 @@
+-- Create extra user to be used on runner
+CREATE USER runner WITH SUPERUSER PASSWORD 'runner-password';
+
 -- https://www.postgresql.org/docs/current/ltree.html
 CREATE EXTENSION IF NOT EXISTS ltree;
 
@@ -69,7 +72,7 @@ CREATE TABLE circles (
     EXCLUDE USING gist (c WITH &&)
 );
 
-CREATE DOMAIN positive_int AS integer CHECK (VALUE >= 0);
+CREATE DOMAIN positive_int AS integer CHECK (VALUE > 0);
 CREATE DOMAIN percentage AS positive_int CHECK (VALUE <= 100);
 
 CREATE TYPE person as (

@@ -7,26 +7,27 @@ edition = "2021"
 
 [dependencies]
 # Primary crates
-axum = { version = "0.5.13", features = ["macros"] }
-sqlx = { path = "../../../", features = [ "runtime-tokio", "tls-rustls-ring", "postgres", "time", "uuid" ] }
-tokio = { version = "1.20.1", features = ["rt-multi-thread", "macros"] }
+axum = { version = "0.8", features = ["macros"] }
+sqlx = { path = "../../..", features = [ "runtime-tokio", "tls-rustls-ring", "postgres", "time", "uuid" ] }
+tokio = { version = "1.25.0", features = ["rt-multi-thread", "macros"] }
 
 # Important secondary crates
-argon2 = "0.4.1"
-rand = "0.8.5"
+argon2 = "0.6.0-rc.8" # FIXME: update to `0.6.0` when released
+rand = "0.10.1"
 regex = "1.6.0"
-serde = "1.0.140"
-serde_with = { version = "2.0.0", features = ["time_0_3"] }
-time = "0.3.11"
-uuid = { version = "1.1.2", features = ["serde"] }
-validator = { version = "0.16.0", features = ["derive"] }
+serde = "1.0.219"
+serde_with = { version = "3.18.0", features = ["time_0_3"] }
+time = "0.3.48"
+uuid = { version = "1.12.1", features = ["serde"] }
+validator = { version = "0.20.0", features = ["derive"] }
 
 # Auxilliary crates
 anyhow = "1.0.58"
-dotenvy = "0.15.1"
-thiserror = "2.0.0"
-tracing = "0.1.35"
+dotenvy = "0.15.7"
+thiserror = "2.0.18"
+tracing = "0.1.37"
 
 [dev-dependencies]
-serde_json = "1.0.82"
-tower = "0.4.13"
+http-body-util = "0.1"
+serde_json = "1.0.142"
+tower = "0.5.2"

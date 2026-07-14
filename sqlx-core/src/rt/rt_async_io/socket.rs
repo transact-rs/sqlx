@@ -3,11 +3,11 @@ use crate::net::Socket;
 use std::io;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
-
 use std::task::{Context, Poll};
 
-use crate::io::ReadBuf;
 use async_io::Async;
+
+use crate::io::ReadBuf;
 
 impl Socket for Async<TcpStream> {
     fn try_read(&mut self, buf: &mut dyn ReadBuf) -> io::Result<usize> {

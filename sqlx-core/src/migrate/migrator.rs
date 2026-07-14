@@ -69,6 +69,31 @@ impl Migrator {
         })
     }
 
+    /// Creates a new instance with the given migrations.
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use sqlx::{ SqlSafeStr, migrate::{Migration, MigrationType::*, Migrator}};
+    ///
+    /// // Define your migrations.
+    /// // You can also use include_str!("./xxx.sql") instead of hard-coded SQL statements.
+    /// let migrations = vec![
+    ///     Migration::new(1, "user".into(), ReversibleUp, "create table users ( ... )".into_sql_str(), false),
+    ///     Migration::new(2, "post".into(), ReversibleUp, "create table posts ( ... )".into_sql_str(), false),
+    ///     // add more...
+    ///  ];
+    ///  let m = Migrator::with_migrations(migrations);
+    /// ```
+    pub fn with_migrations(mut migrations: Vec<Migration>) -> Self {
+        migrations.sort();
+        Self {
+            migrations: Cow::Owned(migrations),
+            ..Self::DEFAULT
+        }
+    }
+
     /// Override the name of the table used to track executed migrations.
     ///
     /// May be schema-qualified and/or contain quotes. Defaults to `_sqlx_migrations`.
@@ -154,7 +179,7 @@ impl Migrator {
         <A::Connection as Deref>::Target: Migrate,
     {
         let mut conn = migrator.acquire().await?;
-        self.run_direct(None, &mut *conn).await
+        self.run_direct(None, &mut *conn, false).await
     }
 
     pub async fn run_to<'a, A>(&self, target: i64, migrator: A) -> Result<(), MigrateError>
@@ -163,12 +188,48 @@ impl Migrator {
         <A::Connection as Deref>::Target: Migrate,
     {
         let mut conn = migrator.acquire().await?;
-        self.run_direct(Some(target), &mut *conn).await
+        self.run_direct(Some(target), &mut *conn, false).await
+    }
+
+    /// Skip any pending migrations until a specific version against the database;
+    /// Additionally validate previously applied migrations against the current migration
+    /// source to detect accidental changes in previously-applied migrations.
+    ///
+    /// Skipping entails not executing the SQL of the migrations, but marking them as
+    /// applied in the [_migrations] table.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use sqlx::migrate::MigrateError;
+    /// # fn main() -> Result<(), MigrateError> {
+    /// #     sqlx::__rt::test_block_on(async move {
+    /// use sqlx::migrate::Migrator;
+    /// use sqlx::sqlite::SqlitePoolOptions;
+    ///
+    /// let m = Migrator::new(std::path::Path::new("./migrations")).await?;
+    /// let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+    /// m.skip(&pool, Some(17)).await
+    /// #     })
+    /// # }
+    /// ```
+    pub async fn skip<'a, A>(&self, migrator: A, target: Option<i64>) -> Result<(), MigrateError>
+    where
+        A: Acquire<'a>,
+        <A::Connection as Deref>::Target: Migrate,
+    {
+        let mut conn = migrator.acquire().await?;
+        self.run_direct(target, &mut *conn, true).await
     }
 
     // Getting around the annoying "implementation of `Acquire` is not general enough" error
     #[doc(hidden)]
-    pub async fn run_direct<C>(&self, target: Option<i64>, conn: &mut C) -> Result<(), MigrateError>
+    pub async fn run_direct<C>(
+        &self,
+        target: Option<i64>,
+        conn: &mut C,
+        skip: bool,
+    ) -> Result<(), MigrateError>
     where
         C: Migrate,
     {
@@ -215,7 +276,11 @@ impl Migrator {
                     }
                 }
                 None => {
-                    conn.apply(&self.table_name, migration).await?;
+                    if skip {
+                        conn.skip(&self.table_name, migration).await?;
+                    } else {
+                        conn.apply(&self.table_name, migration).await?;
+                    }
                 }
             }
         }

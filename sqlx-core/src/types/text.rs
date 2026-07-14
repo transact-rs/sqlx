@@ -115,7 +115,7 @@ where
     String: Encode<'q, DB>,
     DB: Database,
 {
-    fn encode_by_ref(&self, buf: &mut <DB as Database>::ArgumentBuffer<'q>) -> Result<IsNull, BoxDynError> {
+    fn encode_by_ref(&self, buf: &mut <DB as Database>::ArgumentBuffer) -> Result<IsNull, BoxDynError> {
         self.0.to_string().encode(buf)
     }
 }

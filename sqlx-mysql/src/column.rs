@@ -13,6 +13,7 @@ pub struct MySqlColumn {
     #[cfg_attr(feature = "offline", serde(default))]
     pub(crate) origin: ColumnOrigin,
 
+    #[allow(unused)]
     #[cfg_attr(feature = "offline", serde(skip))]
     pub(crate) flags: Option<ColumnFlags>,
 }

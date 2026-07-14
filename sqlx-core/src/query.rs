@@ -42,7 +42,7 @@ pub struct Map<'q, DB: Database, F, A> {
 impl<'q, DB, A> Execute<'q, DB> for Query<'q, DB, A>
 where
     DB: Database,
-    A: Send + IntoArguments<'q, DB>,
+    A: Send + IntoArguments<DB>,
 {
     #[inline]
     fn sql(self) -> SqlStr {
@@ -60,7 +60,7 @@ where
     }
 
     #[inline]
-    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments<'q>>, BoxDynError> {
+    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments>, BoxDynError> {
         self.arguments
             .take()
             .transpose()
@@ -73,7 +73,7 @@ where
     }
 }
 
-impl<'q, DB: Database> Query<'q, DB, <DB as Database>::Arguments<'q>> {
+impl<DB: Database> Query<'_, DB, <DB as Database>::Arguments> {
     /// Bind a value for use with this SQL query.
     ///
     /// If the number of times this is called does not match the number of bind parameters that
@@ -84,7 +84,7 @@ impl<'q, DB: Database> Query<'q, DB, <DB as Database>::Arguments<'q>> {
     /// flavors will perform type coercion (Postgres will return a database error).
     ///
     /// If encoding the value fails, the error is stored and later surfaced when executing the query.
-    pub fn bind<T: 'q + Encode<'q, DB> + Type<DB>>(mut self, value: T) -> Self {
+    pub fn bind<'t, T: Encode<'t, DB> + Type<DB>>(mut self, value: T) -> Self {
         let Ok(arguments) = self.get_arguments() else {
             return self;
         };
@@ -101,7 +101,7 @@ impl<'q, DB: Database> Query<'q, DB, <DB as Database>::Arguments<'q>> {
     }
 
     /// Like [`Query::bind`] but immediately returns an error if encoding a value failed.
-    pub fn try_bind<T: 'q + Encode<'q, DB> + Type<DB>>(
+    pub fn try_bind<'t, T: Encode<'t, DB> + Type<DB>>(
         &mut self,
         value: T,
     ) -> Result<(), BoxDynError> {
@@ -110,7 +110,7 @@ impl<'q, DB: Database> Query<'q, DB, <DB as Database>::Arguments<'q>> {
         arguments.add(value)
     }
 
-    fn get_arguments(&mut self) -> Result<&mut DB::Arguments<'q>, BoxDynError> {
+    fn get_arguments(&mut self) -> Result<&mut DB::Arguments, BoxDynError> {
         let Some(Ok(arguments)) = self.arguments.as_mut().map(Result::as_mut) else {
             return Err("A previous call to Query::bind produced an error"
                 .to_owned()
@@ -144,7 +144,7 @@ where
 impl<'q, DB, A: Send> Query<'q, DB, A>
 where
     DB: Database,
-    A: 'q + IntoArguments<'q, DB>,
+    A: 'q + IntoArguments<DB>,
 {
     /// Map each row in the result to another type.
     ///
@@ -301,7 +301,7 @@ where
 impl<'q, DB, F: Send, A: Send> Execute<'q, DB> for Map<'q, DB, F, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
 {
     #[inline]
     fn sql(self) -> SqlStr {
@@ -314,7 +314,7 @@ where
     }
 
     #[inline]
-    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments<'q>>, BoxDynError> {
+    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments>, BoxDynError> {
         self.inner.take_arguments()
     }
 
@@ -329,7 +329,7 @@ where
     DB: Database,
     F: FnMut(DB::Row) -> Result<O, Error> + Send,
     O: Send + Unpin,
-    A: 'q + Send + IntoArguments<'q, DB>,
+    A: 'q + Send + IntoArguments<DB>,
 {
     /// Map each row in the result to another type.
     ///
@@ -500,9 +500,7 @@ where
 }
 
 /// Execute a single SQL query as a prepared statement (explicitly created).
-pub fn query_statement<DB>(
-    statement: &DB::Statement,
-) -> Query<'_, DB, <DB as Database>::Arguments<'_>>
+pub fn query_statement<DB>(statement: &DB::Statement) -> Query<'_, DB, <DB as Database>::Arguments>
 where
     DB: Database,
 {
@@ -515,13 +513,10 @@ where
 }
 
 /// Execute a single SQL query as a prepared statement (explicitly created), with the given arguments.
-pub fn query_statement_with<'q, DB, A>(
-    statement: &'q DB::Statement,
-    arguments: A,
-) -> Query<'q, DB, A>
+pub fn query_statement_with<DB, A>(statement: &DB::Statement, arguments: A) -> Query<'_, DB, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
 {
     Query {
         database: PhantomData,
@@ -655,7 +650,7 @@ where
 ///
 /// As an additional benefit, query parameters are usually sent in a compact binary encoding instead of a human-readable
 /// text encoding, which saves bandwidth.
-pub fn query<'a, DB>(sql: impl SqlSafeStr) -> Query<'a, DB, <DB as Database>::Arguments<'a>>
+pub fn query<'a, DB>(sql: impl SqlSafeStr) -> Query<'a, DB, <DB as Database>::Arguments>
 where
     DB: Database,
 {
@@ -673,7 +668,7 @@ where
 pub fn query_with<'q, DB, A>(sql: impl SqlSafeStr, arguments: A) -> Query<'q, DB, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
 {
     query_with_result(sql, Ok(arguments))
 }
@@ -685,7 +680,7 @@ pub fn query_with_result<'q, DB, A>(
 ) -> Query<'q, DB, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
 {
     Query {
         database: PhantomData,

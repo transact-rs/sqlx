@@ -1,5 +1,4 @@
 use byteorder::{BigEndian, ByteOrder};
-use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
 
 use crate::decode::Decode;
 use crate::encode::{Encode, IsNull};
@@ -46,19 +45,21 @@ impl Decode<'_, Postgres> for Oid {
     }
 }
 
-impl Serialize for Oid {
+#[cfg(feature = "offline")]
+impl serde::Serialize for Oid {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: Serializer,
+        S: serde::Serializer,
     {
         self.0.serialize(serializer)
     }
 }
 
-impl<'de> Deserialize<'de> for Oid {
+#[cfg(feature = "offline")]
+impl<'de> serde::Deserialize<'de> for Oid {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
         u32::deserialize(deserializer).map(Self)
     }

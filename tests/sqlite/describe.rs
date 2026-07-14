@@ -591,6 +591,50 @@ async fn it_describes_table_order_by() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Regression test for https://github.com/launchbadge/sqlx/issues/4147
+// ORDER BY + LIMIT routes data through an ephemeral sorter table;
+// the NOT NULL constraint must survive the round-trip.
+#[sqlx_macros::test]
+async fn it_describes_order_by_with_limit() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    let info = conn
+        .describe("SELECT text FROM tweet ORDER BY id DESC LIMIT 10".into_sql_str())
+        .await?;
+    assert_eq!(info.column(0).type_info().name(), "TEXT");
+    assert_eq!(
+        info.nullable(0),
+        Some(false),
+        "NOT NULL column should stay NOT NULL with ORDER BY + LIMIT"
+    );
+
+    let info = conn
+        .describe("SELECT text, is_sent FROM tweet ORDER BY id DESC LIMIT 10000".into_sql_str())
+        .await?;
+    assert_eq!(
+        info.nullable(0),
+        Some(false),
+        "text should be NOT NULL with ORDER BY DESC + large LIMIT"
+    );
+    assert_eq!(
+        info.nullable(1),
+        Some(false),
+        "is_sent should be NOT NULL with ORDER BY DESC + large LIMIT"
+    );
+
+    // nullable column must remain nullable
+    let info = conn
+        .describe("SELECT owner_id FROM tweet ORDER BY id DESC LIMIT 10".into_sql_str())
+        .await?;
+    assert_eq!(
+        info.nullable(0),
+        Some(true),
+        "nullable column should stay nullable with ORDER BY + LIMIT"
+    );
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_describes_union() -> anyhow::Result<()> {
     async fn assert_union_described(

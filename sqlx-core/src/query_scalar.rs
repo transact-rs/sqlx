@@ -23,7 +23,7 @@ pub struct QueryScalar<'q, DB: Database, O, A> {
 
 impl<'q, DB: Database, O: Send, A: Send> Execute<'q, DB> for QueryScalar<'q, DB, O, A>
 where
-    A: 'q + IntoArguments<'q, DB>,
+    A: 'q + IntoArguments<DB>,
 {
     #[inline]
     fn sql(self) -> SqlStr {
@@ -35,7 +35,7 @@ where
     }
 
     #[inline]
-    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments<'q>>, BoxDynError> {
+    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments>, BoxDynError> {
         self.inner.take_arguments()
     }
 
@@ -45,7 +45,7 @@ where
     }
 }
 
-impl<'q, DB: Database, O> QueryScalar<'q, DB, O, <DB as Database>::Arguments<'q>> {
+impl<'q, DB: Database, O> QueryScalar<'q, DB, O, <DB as Database>::Arguments> {
     /// Bind a value for use with this SQL query.
     ///
     /// See [`Query::bind`](crate::query::Query::bind).
@@ -81,7 +81,7 @@ impl<'q, DB, O, A> QueryScalar<'q, DB, O, A>
 where
     DB: Database,
     O: Send + Unpin,
-    A: 'q + IntoArguments<'q, DB>,
+    A: 'q + IntoArguments<DB>,
     (O,): Send + Unpin + for<'r> FromRow<'r, DB::Row>,
 {
     /// Execute the query and return the generated results as a stream.
@@ -321,7 +321,7 @@ where
 #[inline]
 pub fn query_scalar<'q, DB, O>(
     sql: impl SqlSafeStr,
-) -> QueryScalar<'q, DB, O, <DB as Database>::Arguments<'q>>
+) -> QueryScalar<'q, DB, O, <DB as Database>::Arguments>
 where
     DB: Database,
     (O,): for<'r> FromRow<'r, DB::Row>,
@@ -344,7 +344,7 @@ pub fn query_scalar_with<'q, DB, O, A>(
 ) -> QueryScalar<'q, DB, O, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
     (O,): for<'r> FromRow<'r, DB::Row>,
 {
     query_scalar_with_result(sql, Ok(arguments))
@@ -358,7 +358,7 @@ pub fn query_scalar_with_result<'q, DB, O, A>(
 ) -> QueryScalar<'q, DB, O, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
     (O,): for<'r> FromRow<'r, DB::Row>,
 {
     QueryScalar {
@@ -369,7 +369,7 @@ where
 // Make a SQL query from a statement, that is mapped to a concrete value.
 pub fn query_statement_scalar<DB, O>(
     statement: &DB::Statement,
-) -> QueryScalar<'_, DB, O, <DB as Database>::Arguments<'_>>
+) -> QueryScalar<'_, DB, O, <DB as Database>::Arguments>
 where
     DB: Database,
     (O,): for<'r> FromRow<'r, DB::Row>,
@@ -386,7 +386,7 @@ pub fn query_statement_scalar_with<'q, DB, O, A>(
 ) -> QueryScalar<'q, DB, O, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
     (O,): for<'r> FromRow<'r, DB::Row>,
 {
     QueryScalar {

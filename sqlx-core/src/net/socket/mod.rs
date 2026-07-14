@@ -4,9 +4,9 @@ use std::path::Path;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
-use bytes::BufMut;
-
 pub use buffered::{BufferedSocket, WriteBuffer};
+use bytes::BufMut;
+use cfg_if::cfg_if;
 
 use crate::io::ReadBuf;
 
@@ -142,10 +142,7 @@ where
 pub trait WithSocket {
     type Output;
 
-    fn with_socket<S: Socket>(
-        self,
-        socket: S,
-    ) -> impl std::future::Future<Output = Self::Output> + Send;
+    fn with_socket<S: Socket>(self, socket: S) -> impl Future<Output = Self::Output> + Send;
 }
 
 pub struct SocketIntoBox;
@@ -189,57 +186,67 @@ pub async fn connect_tcp<Ws: WithSocket>(
     port: u16,
     with_socket: Ws,
 ) -> crate::Result<Ws::Output> {
+    #[cfg(feature = "_rt-tokio")]
+    if crate::rt::rt_tokio::available() {
+        return Ok(with_socket
+            .with_socket(tokio::net::TcpStream::connect((host, port)).await?)
+            .await);
+    }
+
+    cfg_if! {
+        if #[cfg(feature = "_rt-async-io")] {
+            Ok(with_socket.with_socket(connect_tcp_async_io(host, port).await?).await)
+        } else {
+            crate::rt::missing_rt((host, port, with_socket))
+        }
+    }
+}
+
+/// Open a TCP socket to `host` and `port`.
+///
+/// If `host` is a hostname, attempt to connect to each address it resolves to.
+///
+/// This implements the same behavior as [`tokio::net::TcpStream::connect()`].
+#[cfg(feature = "_rt-async-io")]
+async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socket> {
+    use async_io::Async;
+    use std::net::{IpAddr, TcpStream, ToSocketAddrs};
+
     // IPv6 addresses in URLs will be wrapped in brackets and the `url` crate doesn't trim those.
     let host = host.trim_matches(&['[', ']'][..]);
 
-    #[cfg(feature = "_rt-tokio")]
-    if crate::rt::rt_tokio::available() {
-        use tokio::net::TcpStream;
-
-        let stream = TcpStream::connect((host, port)).await?;
-        stream.set_nodelay(true)?;
-
-        return Ok(with_socket.with_socket(stream).await);
+    if let Ok(addr) = host.parse::<IpAddr>() {
+        return Ok(Async::<TcpStream>::connect((addr, port)).await?);
     }
 
-    #[cfg(feature = "_rt-async-std")]
-    {
-        use async_io::Async;
-        use async_std::net::ToSocketAddrs;
-        use std::net::TcpStream;
+    let host = host.to_string();
 
-        let mut last_err = None;
+    let addresses = crate::rt::spawn_blocking(move || {
+        let addr = (host.as_str(), port);
+        ToSocketAddrs::to_socket_addrs(&addr)
+    })
+    .await?;
 
-        // Loop through all the Socket Addresses that the hostname resolves to
-        for socket_addr in (host, port).to_socket_addrs().await? {
-            let stream = Async::<TcpStream>::connect(socket_addr)
-                .await
-                .and_then(|s| {
-                    s.get_ref().set_nodelay(true)?;
-                    Ok(s)
-                });
-            match stream {
-                Ok(stream) => return Ok(with_socket.with_socket(stream).await),
-                Err(e) => last_err = Some(e),
-            }
+    let mut last_err = None;
+
+    // Loop through all the Socket Addresses that the hostname resolves to
+    for socket_addr in addresses {
+        match Async::<TcpStream>::connect(socket_addr).await {
+            Ok(stream) => return Ok(stream),
+            Err(e) => last_err = Some(e),
         }
+    }
 
-        // If we reach this point, it means we failed to connect to any of the addresses.
-        // Return the last error we encountered, or a custom error if the hostname didn't resolve to any address.
-        match last_err {
-            Some(err) => Err(err.into()),
-            None => Err(io::Error::new(
+    // If we reach this point, it means we failed to connect to any of the addresses.
+    // Return the last error we encountered, or a custom error if the hostname didn't resolve to any address.
+    Err(last_err
+        .unwrap_or_else(|| {
+            io::Error::new(
                 io::ErrorKind::AddrNotAvailable,
                 "Hostname did not resolve to any addresses",
             )
-            .into()),
-        }
-    }
-
-    #[cfg(not(feature = "_rt-async-std"))]
-    {
-        crate::rt::missing_rt((host, port, with_socket))
-    }
+        })
+        .into())
 }
 
 /// Connect a Unix Domain Socket at the given path.
@@ -260,19 +267,17 @@ pub async fn connect_uds<P: AsRef<Path>, Ws: WithSocket>(
             return Ok(with_socket.with_socket(stream).await);
         }
 
-        #[cfg(feature = "_rt-async-std")]
-        {
-            use async_io::Async;
-            use std::os::unix::net::UnixStream;
+        cfg_if! {
+            if #[cfg(feature = "_rt-async-io")] {
+                use async_io::Async;
+                use std::os::unix::net::UnixStream;
 
-            let stream = Async::<UnixStream>::connect(path).await?;
+                let stream = Async::<UnixStream>::connect(path).await?;
 
-            Ok(with_socket.with_socket(stream).await)
-        }
-
-        #[cfg(not(feature = "_rt-async-std"))]
-        {
-            crate::rt::missing_rt((path, with_socket))
+                Ok(with_socket.with_socket(stream).await)
+            } else {
+                crate::rt::missing_rt((path, with_socket))
+            }
         }
     }
 

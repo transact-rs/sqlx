@@ -56,7 +56,7 @@ pub trait AnyExecutor<'c>: Executor<'c, Database = Any> {}
 impl<'c, T: Executor<'c, Database = Any>> AnyExecutor<'c> for T {}
 
 // NOTE: required due to the lack of lazy normalization
-impl_into_arguments_for_arguments!(AnyArguments<'q>);
+impl_into_arguments_for_arguments!(AnyArguments);
 // impl_executor_for_pool_connection!(Any, AnyConnection, AnyRow);
 // impl_executor_for_transaction!(Any, AnyRow);
 impl_acquire!(Any, AnyConnection);
@@ -71,7 +71,7 @@ where
 {
     fn encode_by_ref(
         &self,
-        buf: &mut AnyArgumentBuffer<'q>,
+        buf: &mut AnyArgumentBuffer,
     ) -> Result<crate::encode::IsNull, crate::error::BoxDynError> {
         if let Some(value) = self {
             value.encode_by_ref(buf)

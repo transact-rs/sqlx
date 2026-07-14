@@ -37,7 +37,7 @@ impl MySqlArguments {
     }
 }
 
-impl<'q> Arguments<'q> for MySqlArguments {
+impl Arguments for MySqlArguments {
     type Database = MySql;
 
     fn reserve(&mut self, len: usize, size: usize) {
@@ -45,9 +45,9 @@ impl<'q> Arguments<'q> for MySqlArguments {
         self.values.reserve(size);
     }
 
-    fn add<T>(&mut self, value: T) -> Result<(), BoxDynError>
+    fn add<'t, T>(&mut self, value: T) -> Result<(), BoxDynError>
     where
-        T: Encode<'q, Self::Database> + Type<Self::Database>,
+        T: Encode<'t, Self::Database> + Type<Self::Database>,
     {
         self.add(value)
     }

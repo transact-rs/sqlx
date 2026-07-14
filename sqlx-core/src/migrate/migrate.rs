@@ -78,4 +78,13 @@ pub trait Migrate {
         table_name: &'e str,
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>>;
+
+    // insert new row to [_migrations] table without running SQL from migration
+    fn skip<'e>(
+        &'e mut self,
+        _table_name: &'e str,
+        _migration: &'e Migration,
+    ) -> BoxFuture<'e, Result<(), MigrateError>> {
+        Box::pin(async move { Err(MigrateError::SkipNotSupported()) })
+    }
 }

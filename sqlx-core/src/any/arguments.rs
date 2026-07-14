@@ -4,22 +4,24 @@ use crate::arguments::Arguments;
 use crate::encode::{Encode, IsNull};
 use crate::error::BoxDynError;
 use crate::types::Type;
+use std::sync::Arc;
 
-pub struct AnyArguments<'q> {
+#[derive(Default)]
+pub struct AnyArguments {
     #[doc(hidden)]
-    pub values: AnyArgumentBuffer<'q>,
+    pub values: AnyArgumentBuffer,
 }
 
-impl<'q> Arguments<'q> for AnyArguments<'q> {
+impl Arguments for AnyArguments {
     type Database = Any;
 
     fn reserve(&mut self, additional: usize, _size: usize) {
         self.values.0.reserve(additional);
     }
 
-    fn add<T>(&mut self, value: T) -> Result<(), BoxDynError>
+    fn add<'t, T>(&mut self, value: T) -> Result<(), BoxDynError>
     where
-        T: 'q + Encode<'q, Self::Database> + Type<Self::Database>,
+        T: Encode<'t, Self::Database> + Type<Self::Database>,
     {
         let _: IsNull = value.encode(&mut self.values)?;
         Ok(())
@@ -30,21 +32,13 @@ impl<'q> Arguments<'q> for AnyArguments<'q> {
     }
 }
 
-pub struct AnyArgumentBuffer<'q>(#[doc(hidden)] pub Vec<AnyValueKind<'q>>);
+#[derive(Default)]
+pub struct AnyArgumentBuffer(#[doc(hidden)] pub Vec<AnyValueKind>);
 
-impl Default for AnyArguments<'_> {
-    fn default() -> Self {
-        AnyArguments {
-            values: AnyArgumentBuffer(vec![]),
-        }
-    }
-}
-
-impl<'q> AnyArguments<'q> {
+impl AnyArguments {
     #[doc(hidden)]
-    pub fn convert_into<'a, A: Arguments<'a>>(self) -> Result<A, BoxDynError>
+    pub fn convert_into<'a, A: Arguments>(self) -> Result<A, BoxDynError>
     where
-        'q: 'a,
         Option<i32>: Type<A::Database> + Encode<'a, A::Database>,
         Option<bool>: Type<A::Database> + Encode<'a, A::Database>,
         Option<i16>: Type<A::Database> + Encode<'a, A::Database>,
@@ -60,8 +54,9 @@ impl<'q> AnyArguments<'q> {
         i64: Type<A::Database> + Encode<'a, A::Database>,
         f32: Type<A::Database> + Encode<'a, A::Database>,
         f64: Type<A::Database> + Encode<'a, A::Database>,
-        String: Type<A::Database> + Encode<'a, A::Database>,
-        Vec<u8>: Type<A::Database> + Encode<'a, A::Database>,
+        Arc<String>: Type<A::Database> + Encode<'a, A::Database>,
+        Arc<str>: Type<A::Database> + Encode<'a, A::Database>,
+        Arc<Vec<u8>>: Type<A::Database> + Encode<'a, A::Database>,
     {
         let mut out = A::default();
 
@@ -82,8 +77,9 @@ impl<'q> AnyArguments<'q> {
                 AnyValueKind::BigInt(i) => out.add(i),
                 AnyValueKind::Real(r) => out.add(r),
                 AnyValueKind::Double(d) => out.add(d),
-                AnyValueKind::Text(t) => out.add(String::from(t)),
-                AnyValueKind::Blob(b) => out.add(Vec::from(b)),
+                AnyValueKind::Text(t) => out.add(t),
+                AnyValueKind::TextSlice(t) => out.add(t),
+                AnyValueKind::Blob(b) => out.add(b),
             }?
         }
         Ok(out)

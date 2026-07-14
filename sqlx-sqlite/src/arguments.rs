@@ -28,10 +28,10 @@ pub struct SqliteArguments {
 #[derive(Default, Debug, Clone)]
 pub struct SqliteArgumentsBuffer(Vec<SqliteArgumentValue>);
 
-impl<'q> SqliteArguments {
-    pub(crate) fn add<T>(&mut self, value: T) -> Result<(), BoxDynError>
+impl SqliteArguments {
+    pub(crate) fn add<'t, T>(&mut self, value: T) -> Result<(), BoxDynError>
     where
-        T: Encode<'q, Sqlite>,
+        T: Encode<'t, Sqlite>,
     {
         let value_length_before_encoding = self.values.0.len();
 
@@ -49,16 +49,16 @@ impl<'q> SqliteArguments {
     }
 }
 
-impl<'q> Arguments<'q> for SqliteArguments {
+impl Arguments for SqliteArguments {
     type Database = Sqlite;
 
     fn reserve(&mut self, len: usize, _size_hint: usize) {
         self.values.0.reserve(len);
     }
 
-    fn add<T>(&mut self, value: T) -> Result<(), BoxDynError>
+    fn add<'t, T>(&mut self, value: T) -> Result<(), BoxDynError>
     where
-        T: Encode<'q, Self::Database>,
+        T: Encode<'t, Self::Database>,
     {
         self.add(value)
     }

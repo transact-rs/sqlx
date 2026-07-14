@@ -25,7 +25,7 @@ pub struct QueryAs<'q, DB: Database, O, A> {
 impl<'q, DB, O: Send, A: Send> Execute<'q, DB> for QueryAs<'q, DB, O, A>
 where
     DB: Database,
-    A: 'q + IntoArguments<'q, DB>,
+    A: 'q + IntoArguments<DB>,
 {
     #[inline]
     fn sql(self) -> SqlStr {
@@ -38,7 +38,7 @@ where
     }
 
     #[inline]
-    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments<'q>>, BoxDynError> {
+    fn take_arguments(&mut self) -> Result<Option<<DB as Database>::Arguments>, BoxDynError> {
         self.inner.take_arguments()
     }
 
@@ -48,7 +48,7 @@ where
     }
 }
 
-impl<'q, DB: Database, O> QueryAs<'q, DB, O, <DB as Database>::Arguments<'q>> {
+impl<'q, DB: Database, O> QueryAs<'q, DB, O, <DB as Database>::Arguments> {
     /// Bind a value for use with this SQL query.
     ///
     /// See [`Query::bind`](Query::bind).
@@ -83,7 +83,7 @@ where
 impl<'q, DB, O, A> QueryAs<'q, DB, O, A>
 where
     DB: Database,
-    A: 'q + IntoArguments<'q, DB>,
+    A: 'q + IntoArguments<DB>,
     O: Send + Unpin + for<'r> FromRow<'r, DB::Row>,
 {
     /// Execute the query and return the generated results as a stream.
@@ -338,9 +338,7 @@ where
 ///
 /// ```
 #[inline]
-pub fn query_as<'q, DB, O>(
-    sql: impl SqlSafeStr,
-) -> QueryAs<'q, DB, O, <DB as Database>::Arguments<'q>>
+pub fn query_as<'q, DB, O>(sql: impl SqlSafeStr) -> QueryAs<'q, DB, O, <DB as Database>::Arguments>
 where
     DB: Database,
     O: for<'r> FromRow<'r, DB::Row>,
@@ -361,7 +359,7 @@ where
 pub fn query_as_with<'q, DB, O, A>(sql: impl SqlSafeStr, arguments: A) -> QueryAs<'q, DB, O, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
     O: for<'r> FromRow<'r, DB::Row>,
 {
     query_as_with_result(sql, Ok(arguments))
@@ -375,7 +373,7 @@ pub fn query_as_with_result<'q, DB, O, A>(
 ) -> QueryAs<'q, DB, O, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
     O: for<'r> FromRow<'r, DB::Row>,
 {
     QueryAs {
@@ -387,7 +385,7 @@ where
 // Make a SQL query from a statement, that is mapped to a concrete type.
 pub fn query_statement_as<DB, O>(
     statement: &DB::Statement,
-) -> QueryAs<'_, DB, O, <DB as Database>::Arguments<'_>>
+) -> QueryAs<'_, DB, O, <DB as Database>::Arguments>
 where
     DB: Database,
     O: for<'r> FromRow<'r, DB::Row>,
@@ -405,7 +403,7 @@ pub fn query_statement_as_with<'q, DB, O, A>(
 ) -> QueryAs<'q, DB, O, A>
 where
     DB: Database,
-    A: IntoArguments<'q, DB>,
+    A: IntoArguments<DB>,
     O: for<'r> FromRow<'r, DB::Row>,
 {
     QueryAs {

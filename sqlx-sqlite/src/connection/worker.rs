@@ -8,18 +8,16 @@ use futures_intrusive::sync::{Mutex, MutexGuard};
 use sqlx_core::sql_str::SqlStr;
 use tracing::span::Span;
 
-use sqlx_core::describe::Describe;
 use sqlx_core::error::Error;
 use sqlx_core::transaction::{
     begin_ansi_transaction_sql, commit_ansi_transaction_sql, rollback_ansi_transaction_sql,
 };
 use sqlx_core::Either;
 
-use crate::connection::describe::describe;
 use crate::connection::establish::EstablishParams;
 use crate::connection::execute;
 use crate::connection::ConnectionState;
-use crate::{Sqlite, SqliteArguments, SqliteQueryResult, SqliteRow, SqliteStatement};
+use crate::{SqliteArguments, SqliteQueryResult, SqliteRow, SqliteStatement};
 
 #[cfg(feature = "deserialize")]
 use crate::connection::deserialize::{deserialize, serialize, SchemaName, SqliteOwnedBuf};
@@ -57,9 +55,10 @@ enum Command {
         query: SqlStr,
         tx: oneshot::Sender<Result<SqliteStatement, Error>>,
     },
+    #[cfg(feature = "offline")]
     Describe {
         query: SqlStr,
-        tx: oneshot::Sender<Result<Describe<Sqlite>, Error>>,
+        tx: oneshot::Sender<Result<sqlx_core::describe::Describe<crate::Sqlite>, Error>>,
     },
     Execute {
         query: SqlStr,
@@ -157,8 +156,9 @@ impl ConnectionWorker {
                                 &shared.cached_statements_size,
                             );
                         }
+                        #[cfg(feature = "offline")]
                         Command::Describe { query, tx } => {
-                            tx.send(describe(&mut conn, query)).ok();
+                            tx.send(crate::connection::describe::describe(&mut conn, query)).ok();
                         }
                         Command::Execute {
                             query,
@@ -352,7 +352,11 @@ impl ConnectionWorker {
             .await?
     }
 
-    pub(crate) async fn describe(&mut self, query: SqlStr) -> Result<Describe<Sqlite>, Error> {
+    #[cfg(feature = "offline")]
+    pub(crate) async fn describe(
+        &mut self,
+        query: SqlStr,
+    ) -> Result<sqlx_core::describe::Describe<crate::Sqlite>, Error> {
         self.oneshot_cmd(|tx| Command::Describe { query, tx })
             .await?
     }

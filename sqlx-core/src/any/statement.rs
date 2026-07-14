@@ -44,7 +44,7 @@ impl Statement for AnyStatement {
         &self.columns
     }
 
-    impl_statement_query!(AnyArguments<'_>);
+    impl_statement_query!(AnyArguments);
 }
 
 impl ColumnIndex<AnyStatement> for &'_ str {

@@ -93,10 +93,15 @@ impl EstablishParams {
 
         if !query_params.is_empty() {
             filename = format!(
-                "file:{}?{}",
+                "file:{}?",
                 percent_encoding::percent_encode(filename.as_bytes(), NON_ALPHANUMERIC),
-                serde_urlencoded::to_string(&query_params).unwrap()
             );
+
+            // Suffix serializer automatically handles `&` separators for us.
+            let filename_len = filename.len();
+            filename = form_urlencoded::Serializer::for_suffix(filename, filename_len)
+                .extend_pairs(query_params)
+                .finish();
         }
 
         let filename = CString::new(filename).map_err(|_| {

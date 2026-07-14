@@ -1,5 +1,5 @@
 use anyhow::Context;
-use assert_cmd::Command;
+use assert_cmd::cargo_bin_cmd;
 use std::cmp::Ordering;
 use std::fs::read_dir;
 use std::ops::Index;
@@ -117,7 +117,7 @@ impl AddMigrations {
         sequential: bool,
         expect_success: bool,
     ) -> anyhow::Result<&'_ Self> {
-        let cmd_result = Command::cargo_bin("cargo-sqlx")?
+        let cmd_result = cargo_bin_cmd!("cargo-sqlx")
             .current_dir(&self.tempdir)
             .args(
                 [

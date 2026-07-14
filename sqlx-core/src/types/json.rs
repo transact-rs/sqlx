@@ -86,6 +86,13 @@ use crate::types::Type;
 #[serde(transparent)]
 pub struct Json<T: ?Sized>(pub T);
 
+impl<T> Json<T> {
+    /// Extract the inner value.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<T> From<T> for Json<T> {
     fn from(value: T) -> Self {
         Self(value)
@@ -166,7 +173,7 @@ where
 {
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+        buf: &mut <DB as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         <Json<&Self> as Encode<'q, DB>>::encode(Json(self), buf)
     }
@@ -196,9 +203,56 @@ where
     }
 }
 
-// We don't have to implement Encode for JsonRawValue because that's covered by the default
-// implementation for Encode
+impl<'q, DB> Encode<'q, DB> for JsonRawValue
+where
+    for<'a> Json<&'a Self>: Encode<'q, DB>,
+    DB: Database,
+{
+    fn encode_by_ref(
+        &self,
+        buf: &mut <DB as Database>::ArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        <Json<&Self> as Encode<'q, DB>>::encode(Json(self), buf)
+    }
+}
+
+impl<'q, DB> Encode<'q, DB> for &'q JsonRawValue
+where
+    for<'a> Json<&'a Self>: Encode<'q, DB>,
+    DB: Database,
+{
+    fn encode_by_ref(
+        &self,
+        buf: &mut <DB as Database>::ArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        <Json<&Self> as Encode<'q, DB>>::encode(Json(self), buf)
+    }
+}
+
+impl<'q, DB> Encode<'q, DB> for Box<JsonRawValue>
+where
+    for<'a> Json<&'a Self>: Encode<'q, DB>,
+    DB: Database,
+{
+    fn encode_by_ref(
+        &self,
+        buf: &mut <DB as Database>::ArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        <Json<&Self> as Encode<'q, DB>>::encode(Json(self), buf)
+    }
+}
+
 impl<'r, DB> Decode<'r, DB> for &'r JsonRawValue
+where
+    Json<Self>: Decode<'r, DB>,
+    DB: Database,
+{
+    fn decode(value: <DB as Database>::ValueRef<'r>) -> Result<Self, BoxDynError> {
+        <Json<Self> as Decode<DB>>::decode(value).map(|item| item.0)
+    }
+}
+
+impl<'r, DB> Decode<'r, DB> for Box<JsonRawValue>
 where
     Json<Self>: Decode<'r, DB>,
     DB: Database,

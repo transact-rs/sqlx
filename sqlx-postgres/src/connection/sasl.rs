@@ -1,13 +1,15 @@
 use crate::connection::stream::PgStream;
 use crate::error::Error;
 use crate::message::{Authentication, AuthenticationSasl, SaslInitialResponse, SaslResponse};
+use crate::rt;
 use crate::PgConnectOptions;
 use hmac::{Hmac, Mac};
-use rand::Rng;
+use hmac::{HmacReset, KeyInit};
 use sha2::{Digest, Sha256};
 use stringprep::saslprep;
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
+use rand::RngExt;
 
 const GS2_HEADER: &str = "n,,";
 const CHANNEL_ATTR: &str = "c";
@@ -55,8 +57,11 @@ pub(crate) async fn authenticate(
     let username = format!("{}={}", USERNAME_ATTR, options.username);
     let username = match saslprep(&username) {
         Ok(v) => v,
-        // TODO(danielakhterov): Remove panic when we have proper support for configuration errors
-        Err(_) => panic!("Failed to saslprep username"),
+        Err(error) => {
+            return Err(Error::Configuration(
+                format!("Failed to saslprep username: {:?}", error).into(),
+            ))
+        }
     };
 
     // nonce = "r=" c-nonce [s-nonce] ;; Second part provided by server.
@@ -85,12 +90,19 @@ pub(crate) async fn authenticate(
         }
     };
 
+    // Normalize(password):
+    let password = options.password.as_deref().unwrap_or_default();
+    let password = match saslprep(password) {
+        Ok(v) => v,
+        Err(error) => {
+            return Err(Error::Configuration(
+                format!("Failed to saslprep password: {:?}", error).into(),
+            ))
+        }
+    };
+
     // SaltedPassword := Hi(Normalize(password), salt, i)
-    let salted_password = hi(
-        options.password.as_deref().unwrap_or_default(),
-        &cont.salt,
-        cont.iterations,
-    )?;
+    let salted_password = hi(&password, &cont.salt, cont.iterations).await?;
 
     // ClientKey := HMAC(SaltedPassword, "Client Key")
     let mut mac = Hmac::<Sha256>::new_from_slice(&salted_password).map_err(Error::protocol)?;
@@ -161,8 +173,8 @@ pub(crate) async fn authenticate(
 
 // nonce is a sequence of random printable bytes
 fn gen_nonce() -> String {
-    let mut rng = rand::thread_rng();
-    let count = rng.gen_range(64..128);
+    let mut rng = rand::rng();
+    let count = rng.random_range(64..128);
 
     // printable = %x21-2B / %x2D-7E
     // ;; Printable ASCII except ",".
@@ -170,10 +182,10 @@ fn gen_nonce() -> String {
     // ;; a valid "value".
     let nonce: String = std::iter::repeat(())
         .map(|()| {
-            let mut c = rng.gen_range(0x21u8..0x7F);
+            let mut c = rng.random_range(0x21u8..0x7F);
 
             while c == 0x2C {
-                c = rng.gen_range(0x21u8..0x7F);
+                c = rng.random_range(0x21u8..0x7F);
             }
 
             c
@@ -182,13 +194,12 @@ fn gen_nonce() -> String {
         .map(|c| c as char)
         .collect();
 
-    rng.gen_range(32..128);
     format!("{NONCE_ATTR}={nonce}")
 }
 
 // Hi(str, salt, i):
-fn hi<'a>(s: &'a str, salt: &'a [u8], iter_count: u32) -> Result<[u8; 32], Error> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(s.as_bytes()).map_err(Error::protocol)?;
+async fn hi<'a>(s: &'a str, salt: &'a [u8], iter_count: u32) -> Result<[u8; 32], Error> {
+    let mut mac = HmacReset::<Sha256>::new_from_slice(s.as_bytes()).map_err(Error::protocol)?;
 
     mac.update(salt);
     mac.update(&1u32.to_be_bytes());
@@ -196,30 +207,19 @@ fn hi<'a>(s: &'a str, salt: &'a [u8], iter_count: u32) -> Result<[u8; 32], Error
     let mut u = mac.finalize_reset().into_bytes();
     let mut hi = u;
 
-    for _ in 1..iter_count {
+    for i in 1..iter_count {
         mac.update(u.as_slice());
         u = mac.finalize_reset().into_bytes();
         hi = hi.iter().zip(u.iter()).map(|(&a, &b)| a ^ b).collect();
+
+        // For large iteration counts, this process can take a long time and block the event loop.
+        // It was measured as taking ~50ms for 4096 iterations (the default) on a developer machine.
+        // If we want to yield every 10-100us (as generally advised for tokio), then we can yield
+        // every 5 iterations which should be every ~50us.
+        if i % 5 == 0 {
+            rt::yield_now().await;
+        }
     }
 
     Ok(hi.into())
-}
-
-#[cfg(all(test, not(debug_assertions)))]
-#[bench]
-fn bench_sasl_hi(b: &mut test::Bencher) {
-    use test::black_box;
-
-    let mut rng = rand::thread_rng();
-    let nonce: Vec<u8> = std::iter::repeat(())
-        .map(|()| rng.sample(rand::distributions::Alphanumeric))
-        .take(64)
-        .collect();
-    b.iter(|| {
-        let _ = hi(
-            test::black_box("secret_password"),
-            test::black_box(&nonce),
-            test::black_box(4096),
-        );
-    });
 }

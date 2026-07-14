@@ -7,13 +7,13 @@ use sqlx_test::new;
 
 #[test]
 fn test_new() {
-    let qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("SELECT * FROM users");
+    let qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM users");
     assert_eq!(qb.sql(), "SELECT * FROM users");
 }
 
 #[test]
 fn test_push() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("SELECT * FROM users");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM users");
     let second_line = " WHERE last_name LIKE '[A-N]%';";
     qb.push(second_line);
 
@@ -26,7 +26,7 @@ fn test_push() {
 #[test]
 #[should_panic]
 fn test_push_panics_after_build_without_reset() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("SELECT * FROM users;");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM users;");
 
     let _query = qb.build();
 
@@ -35,7 +35,7 @@ fn test_push_panics_after_build_without_reset() {
 
 #[test]
 fn test_push_bind() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("SELECT * FROM users WHERE id = ");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM users WHERE id = ");
 
     qb.push_bind(42i32)
         .push(" OR membership_level = ")
@@ -49,7 +49,7 @@ fn test_push_bind() {
 
 #[test]
 fn test_build() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("SELECT * FROM users");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT * FROM users");
 
     qb.push(" WHERE id = ").push_bind(42i32);
     let query = qb.build();
@@ -60,7 +60,7 @@ fn test_build() {
 
 #[test]
 fn test_reset() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("");
 
     {
         let _query = qb
@@ -76,7 +76,7 @@ fn test_reset() {
 
 #[test]
 fn test_query_builder_reuse() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("");
 
     let _query = qb
         .push("SELECT * FROM users WHERE id = ")
@@ -92,7 +92,7 @@ fn test_query_builder_reuse() {
 
 #[test]
 fn test_query_builder_with_args() {
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("");
 
     let mut query = qb
         .push("SELECT * FROM users WHERE id = ")
@@ -101,8 +101,7 @@ fn test_query_builder_with_args() {
 
     let args = query.take_arguments().unwrap().unwrap();
 
-    let mut qb: QueryBuilder<'_, Postgres> =
-        QueryBuilder::with_arguments(query.sql().as_str(), args);
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::with_arguments(query.sql().as_str(), args);
     let query = qb.push(" OR membership_level = ").push_bind(3i32).build();
 
     assert_eq!(
@@ -118,7 +117,7 @@ async fn test_max_number_of_binds() -> anyhow::Result<()> {
     //
     // https://github.com/launchbadge/sqlx/issues/3464
 
-    let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new("SELECT ARRAY[");
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new("SELECT ARRAY[");
 
     let mut elements = qb.separated(',');
 

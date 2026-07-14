@@ -8,7 +8,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use sqlx::mysql::MySql;
-use sqlx::{Executor, FromRow, Row};
+use sqlx::{Executor, Row};
 
 use sqlx::types::Text;
 

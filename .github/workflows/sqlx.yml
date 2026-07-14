@@ -7,13 +7,23 @@ on:
       - main
       - "*-dev"
 
+env:
+  MYSQL_ISOLATED_TESTS: |
+    it_can_handle_split_packets
+    rustsec_2024_0363
+  PG_ISOLATED_TESTS: |
+    test_pg_copy_chunked
+    rustsec_2024_0363
+  SQLITE_ISOLATED_TESTS: |
+    rustsec_2024_0363
+
 jobs:
   format:
     name: Format
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 
@@ -22,11 +32,15 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        runtime: [ async-std, tokio ]
+        # Note: because `async-std` is deprecated, we only check it in a single job to save CI time.
+        runtime: [ async-global-executor, smol, tokio ]
         tls: [ native-tls, rustls, none ]
+        include:
+          - runtime: async-std
+            tls: rustls
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Swatinem/rust-cache recommends setting up the rust toolchain first because it's used in cache keys
       - name: Setup Rust
@@ -54,11 +68,11 @@ jobs:
           --target-dir target/beta/
 
   check-minimal-versions:
-    name: Check build using minimal versions
+    name: Check build using direct minimal versions
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Rust
         run: |
           rustup show active-toolchain || rustup toolchain install
@@ -71,7 +85,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # https://blog.rust-lang.org/2025/03/02/Rustup-1.28.0.html
       - name: Setup Rust
@@ -122,12 +136,12 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        runtime: [ async-std, tokio ]
+        runtime: [ async-global-executor, smol, tokio ]
         linking: [ sqlite, sqlite-unbundled ]
     needs: check
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - run: mkdir /tmp/sqlite3-lib && wget -O /tmp/sqlite3-lib/ipaddr.so https://github.com/nalgeon/sqlean/releases/download/0.15.2/ipaddr.so
 
@@ -146,12 +160,17 @@ jobs:
       # Create data dir for offline mode
       - run: mkdir .sqlx
 
-      - run: >
-          cargo test
-          --no-default-features
-          --features any,macros,migrate,${{ matrix.linking }},_unstable-all-types,runtime-${{ matrix.runtime }},${{ matrix.linking == 'sqlite' && 'sqlite-preupdate-hook' || ''}}
-          --
-          --test-threads=1
+      - run: |
+          SKIP_ARGS=()
+          for test in $SQLITE_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,macros,migrate,${{ matrix.linking }},_unstable-all-types,runtime-${{ matrix.runtime }},${{ matrix.linking == 'sqlite' && 'sqlite-preupdate-hook' || ''}} \
+            -- \
+            "${SKIP_ARGS[@]}" \
+            --test-threads=1
         env:
           DATABASE_URL: sqlite:tests/sqlite/sqlite.db
           SQLX_OFFLINE_DIR: .sqlx
@@ -181,7 +200,7 @@ jobs:
       - run: >
           cargo build
           --no-default-features
-          --test ${{ matrix.linking }}-macros
+          --test sqlite-macros
           --features any,macros,${{ matrix.linking }},_unstable-all-types,runtime-${{ matrix.runtime }}
         env:
           SQLX_OFFLINE: true
@@ -193,7 +212,7 @@ jobs:
       - run: >
           cargo test
           --no-default-features
-          --test ${{ matrix.linking }}-macros
+          --test sqlite-macros
           --features any,macros,${{ matrix.linking }},_unstable-all-types,runtime-${{ matrix.runtime }}
         env:
           DATABASE_URL: sqlite://tests/sqlite/sqlite.db
@@ -202,18 +221,49 @@ jobs:
           RUSTFLAGS: --cfg sqlite_ipaddr
           LD_LIBRARY_PATH: /tmp/sqlite3-lib
 
+  sqlite-isolated:
+    name: SQLite Isolated
+    runs-on: ubuntu-24.04
+    needs: check
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: mkdir /tmp/sqlite3-lib && wget -O /tmp/sqlite3-lib/ipaddr.so https://github.com/nalgeon/sqlean/releases/download/0.15.2/ipaddr.so
+
+      # https://blog.rust-lang.org/2025/03/02/Rustup-1.28.0.html
+      - name: Setup Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: |
+          for test in $SQLITE_ISOLATED_TESTS; do
+            cargo test \
+              --no-default-features \
+              --features sqlite,macros,runtime-tokio \
+              --test sqlite-rustsec \
+              -- \
+              --exact "$test" \
+              --test-threads=1
+          done
+        env:
+          DATABASE_URL: sqlite:tests/sqlite/sqlite.db
+          RUSTFLAGS: --cfg sqlite_ipaddr --cfg sqlite_test_sqlcipher
+          LD_LIBRARY_PATH: /tmp/sqlite3-lib
+
   postgres:
     name: Postgres
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         postgres: [ 17, 13 ]
-        runtime: [ async-std, tokio ]
+        runtime: [ async-global-executor, smol, tokio ]
         tls: [ native-tls, rustls-aws-lc-rs, rustls-ring, none ]
     needs: check
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
@@ -236,14 +286,36 @@ jobs:
       # Create data dir for offline mode
       - run: mkdir .sqlx
 
-      - run: >
-          cargo test
-          --no-default-features
-          --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+      - run: |
+          SKIP_ARGS=()
+          for test in $PG_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           SQLX_OFFLINE_DIR: .sqlx
-          RUSTFLAGS: --cfg postgres="${{ matrix.postgres }}"
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
+
+      # Run tests again with implied linux user
+      - run: |
+          SKIP_ARGS=()
+          for test in $PG_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
+        env:
+          DATABASE_URL: postgres:///sqlx?password=runner-password
+          SQLX_OFFLINE_DIR: .sqlx
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
       # Run the `test-attr` test again to cover cleanup.
       - run: >
@@ -254,17 +326,23 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           SQLX_OFFLINE_DIR: .sqlx
-          RUSTFLAGS: --cfg postgres="${{ matrix.postgres }}"
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
       - if: matrix.tls != 'none'
-        run: >
-          cargo test
-          --no-default-features
-          --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        run: |
+          SKIP_ARGS=()
+          for test in $PG_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx?sslmode=verify-ca&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt
           SQLX_OFFLINE_DIR: .sqlx
-          RUSTFLAGS: --cfg postgres="${{ matrix.postgres }}"
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
       # Remove test artifacts
       - run: cargo clean -p sqlx
@@ -290,7 +368,7 @@ jobs:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           SQLX_OFFLINE: true
           SQLX_OFFLINE_DIR: .sqlx
-          RUSTFLAGS: --cfg postgres="${{ matrix.postgres }}"
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
   postgres-ssl-auth:
     name: Postgres SSL Auth
@@ -303,7 +381,7 @@ jobs:
     needs: check
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
@@ -316,13 +394,51 @@ jobs:
       - run: |
           docker exec postgres_${{ matrix.postgres }}_client_ssl bash -c "until pg_isready; do sleep 1; done"
 
-      - run: >
-          cargo test
-          --no-default-features
-          --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+      - run: |
+          SKIP_ARGS=()
+          for test in $PG_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: postgres://postgres@localhost:5432/sqlx?sslmode=verify-ca&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
-          RUSTFLAGS: --cfg postgres="${{ matrix.postgres }}"
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
+
+  postgres-isolated:
+    name: Postgres Isolated
+    runs-on: ubuntu-24.04
+    needs: check
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: |
+          docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_17 postgres_17
+          docker exec postgres_17 bash -c "until pg_isready; do sleep 1; done"
+
+      # Run isolated Postgres tests to avoid stalling the main job.
+      - run: |
+          for test in $PG_ISOLATED_TESTS; do
+            cargo test \
+              --no-default-features \
+              --features any,postgres,macros,_unstable-all-types,runtime-tokio,tls-none \
+              --test postgres \
+              -- \
+              --exact "$test" \
+              --test-threads=1
+          done
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
+          RUSTFLAGS: -D warnings --cfg postgres="17"
 
   mysql:
     name: MySQL
@@ -330,12 +446,12 @@ jobs:
     strategy:
       matrix:
         mysql: [ 8 ]
-        runtime: [ async-std, tokio ]
+        runtime: [ async-global-executor, smol, tokio ]
         tls: [ native-tls, rustls-aws-lc-rs, rustls-ring, none ]
     needs: check
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
@@ -345,15 +461,28 @@ jobs:
       - run: cargo build --features mysql,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
 
       - run: docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_${{ matrix.mysql }} mysql_${{ matrix.mysql }}
-      - run: sleep 60
+      - name: Wait for MySQL
+        run: |
+          docker exec mysql_${{ matrix.mysql }} bash -c '
+            until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot -ppassword --silent) || \
+                  (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot -ppassword --silent); do
+              sleep 2
+            done
+          '
 
       # Create data dir for offline mode
       - run: mkdir .sqlx
 
-      - run: >
-          cargo test
-          --no-default-features
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+      - run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,mysql-rsa,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: mysql://root:password@localhost:3306/sqlx?ssl-mode=disabled
           SQLX_OFFLINE_DIR: .sqlx
@@ -364,7 +493,7 @@ jobs:
           cargo test
           --test mysql-test-attr
           --no-default-features
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+          --features any,mysql,mysql-rsa,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: mysql://root:password@localhost:3306/sqlx?ssl-mode=disabled
           SQLX_OFFLINE_DIR: .sqlx
@@ -372,10 +501,27 @@ jobs:
 
       # MySQL 5.7 supports TLS but not TLSv1.3 as required by RusTLS.
       - if: ${{ !(matrix.mysql == '5_7' && matrix.tls == 'rustls') }}
+        run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,${{ matrix.tls == 'none' && 'mysql-rsa,' || '' }}macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
+        env:
+          DATABASE_URL: mysql://root:password@localhost:3306/sqlx
+          SQLX_OFFLINE_DIR: .sqlx
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+      # Minimal coverage for mysql-rsa with TLS enabled; RSA should be inert when TLS is used.
+      - if: ${{ matrix.mysql == '8' && matrix.runtime == 'tokio' && matrix.tls == 'native-tls' }}
         run: >
           cargo test
           --no-default-features
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+          --features any,mysql,mysql-rsa,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: mysql://root:password@localhost:3306/sqlx
           SQLX_OFFLINE_DIR: .sqlx
@@ -401,7 +547,7 @@ jobs:
           cargo test
           --no-default-features
           --test mysql-macros
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+          --features any,mysql,${{ matrix.tls == 'none' && 'mysql-rsa,' || '' }}macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: mysql://root:password@localhost:3306/sqlx
           SQLX_OFFLINE: true
@@ -414,16 +560,65 @@ jobs:
         run: |
           docker stop mysql_${{ matrix.mysql }}
           docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_${{ matrix.mysql }}_client_ssl mysql_${{ matrix.mysql }}_client_ssl
-          sleep 60
+          docker exec mysql_${{ matrix.mysql }}_client_ssl bash -c '
+            until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot --silent) || \
+                  (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot --silent); do
+              sleep 2
+            done
+          '
 
       - if: ${{ matrix.tls != 'none' }}
-        run: >
-          cargo test
-          --no-default-features
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+  mysql-isolated:
+    name: MySQL Isolated
+    runs-on: ubuntu-24.04
+    needs: check
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_8 mysql_8
+      - name: Wait for MySQL
+        run: |
+          docker exec mysql_8 bash -c '
+            until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot -ppassword --silent) || \
+                  (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot -ppassword --silent); do
+              sleep 2
+            done
+          '
+
+      # Run isolated MySQL tests to avoid stalling the main job.
+      - run: |
+          for test in $MYSQL_ISOLATED_TESTS; do
+            cargo test \
+              --no-default-features \
+              --features any,mysql,mysql-rsa,macros,migrate,_unstable-all-types,runtime-tokio,tls-none \
+              --test mysql \
+              -- \
+              --exact "$test" \
+              --test-threads=1
+          done
+        env:
+          DATABASE_URL: mysql://root:password@localhost:3306/sqlx?ssl-mode=disabled
+          RUSTFLAGS: --cfg mysql_8
 
   mariadb:
     name: MariaDB
@@ -431,12 +626,12 @@ jobs:
     strategy:
       matrix:
         mariadb: [ verylatest, 11_8, 11_4, 10_11, 10_6 ]
-        runtime: [ async-std, tokio ]
+        runtime: [ async-global-executor, smol, tokio ]
         tls: [ native-tls, rustls-aws-lc-rs, rustls-ring, none ]
     needs: check
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
@@ -446,15 +641,28 @@ jobs:
       - run: cargo build --features mysql,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
 
       - run: docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mariadb_${{ matrix.mariadb }} mariadb_${{ matrix.mariadb }}
-      - run: sleep 30
+      - name: Wait for MariaDB
+        run: |
+          docker exec mariadb_${{ matrix.mariadb }} bash -c '
+            until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot -ppassword --silent) || \
+                  (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot -ppassword --silent); do
+              sleep 2
+            done
+          '
 
       # Create data dir for offline mode
       - run: mkdir .sqlx
 
-      - run: >
-          cargo test
-          --no-default-features
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+      - run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: mysql://root:password@localhost:3306/sqlx
           SQLX_OFFLINE_DIR: .sqlx
@@ -503,13 +711,24 @@ jobs:
         run: |
           docker stop mariadb_${{ matrix.mariadb }}
           docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mariadb_${{ matrix.mariadb }}_client_ssl mariadb_${{ matrix.mariadb }}_client_ssl
-          sleep 60
+          docker exec mariadb_${{ matrix.mariadb }}_client_ssl bash -c '
+            until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot --silent) || \
+                  (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot --silent); do
+              sleep 2
+            done
+          '
 
       - if: ${{ matrix.tls != 'none' }}
-        run: >
-          cargo test
-          --no-default-features
-          --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"

@@ -89,7 +89,7 @@ fn expand_derive_encode_transparent(
         {
             fn encode_by_ref(
                 &self,
-                buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer<#lifetime>,
+                buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer,
             ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
                 <#ty as ::sqlx::encode::Encode<#lifetime, DB>>::encode_by_ref(&self.#field_ident, buf)
             }
@@ -128,7 +128,7 @@ fn expand_derive_encode_weak_enum(
         {
             fn encode_by_ref(
                 &self,
-                buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer<'q>,
+                buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer,
             ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
                 let value = match self {
                     #(#values)*
@@ -178,7 +178,7 @@ fn expand_derive_encode_strong_enum(
         {
             fn encode_by_ref(
                 &self,
-                buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer<'q>,
+                buf: &mut <DB as ::sqlx::database::Database>::ArgumentBuffer,
             ) -> ::std::result::Result<::sqlx::encode::IsNull, ::sqlx::error::BoxDynError> {
                 let val = match self {
                     #(#value_arms)*

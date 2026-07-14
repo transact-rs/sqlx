@@ -39,7 +39,7 @@ where
 {
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+        buf: &mut <DB as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         <&[u8] as Encode<DB>>::encode(self.as_bytes(), buf)
     }
@@ -52,7 +52,7 @@ where
 {
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+        buf: &mut <DB as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         <Vec<u8> as Encode<DB>>::encode(self.as_bytes().to_vec(), buf)
     }

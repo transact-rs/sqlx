@@ -1,5 +1,5 @@
 [migrate]
-# Ignore common whitespace characters (beware syntatically significant whitespace!)
+# Ignore common whitespace characters (beware syntactically significant whitespace!)
 # Space, tab, CR, LF, zero-width non-breaking space (U+FEFF)
 #
 # U+FEFF is added by some editors as a magic number at the beginning of a text file indicating it is UTF-8 encoded,

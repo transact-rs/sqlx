@@ -68,7 +68,8 @@ enum ColumnNullabilityOverride {
 }
 
 enum ColumnTypeOverride {
-    Exact(Type),
+    // Significantly larger variant
+    Exact(Box<Type>),
     Wildcard,
     None,
 }
@@ -394,7 +395,7 @@ impl Parse for ColumnOverride {
             if let Type::Infer(_) = ty {
                 ColumnTypeOverride::Wildcard
             } else {
-                ColumnTypeOverride::Exact(ty)
+                ColumnTypeOverride::Exact(ty.into())
             }
         } else {
             ColumnTypeOverride::None

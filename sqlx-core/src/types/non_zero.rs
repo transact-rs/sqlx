@@ -33,11 +33,11 @@ macro_rules! impl_non_zero {
             DB: Database,
             $int: Encode<'q, DB>,
         {
-            fn encode_by_ref(&self, buf: &mut <DB as Database>::ArgumentBuffer<'q>) -> Result<IsNull, crate::error::BoxDynError> {
+            fn encode_by_ref(&self, buf: &mut <DB as Database>::ArgumentBuffer) -> Result<IsNull, crate::error::BoxDynError> {
                 <$int as Encode<'q, DB>>::encode_by_ref(&self.get(), buf)
             }
 
-            fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer<'q>) -> Result<IsNull, crate::error::BoxDynError>
+            fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer) -> Result<IsNull, crate::error::BoxDynError>
             where
                 Self: Sized,
             {

@@ -1,5 +1,4 @@
 use proc_macro2::Span;
-use std::env;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn resolve_path(path: impl AsRef<Path>, err_span: Span) -> syn::Result<PathBuf> {
@@ -25,13 +24,9 @@ pub(crate) fn resolve_path(path: impl AsRef<Path>, err_span: Span) -> syn::Resul
         ));
     }
 
-    let base_dir = env::var("CARGO_MANIFEST_DIR").map_err(|_| {
-        syn::Error::new(
-            err_span,
-            "CARGO_MANIFEST_DIR is not set; please use Cargo to build",
-        )
-    })?;
-    let base_dir_path = Path::new(&base_dir);
+    let mut out_path = crate::manifest_dir().map_err(|e| syn::Error::new(err_span, e))?;
 
-    Ok(base_dir_path.join(path))
+    out_path.push(path);
+
+    Ok(out_path)
 }

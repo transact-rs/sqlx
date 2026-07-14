@@ -330,7 +330,15 @@ mod chrono {
 
     test_type!(chrono_date_time_tz<DateTime::<FixedOffset>>(Postgres,
         "TIMESTAMPTZ '2019-01-02 05:10:20.115100+06:30'"
-            == FixedOffset::east_opt(60 * 60 * 6 + 1800).unwrap().ymd(2019, 1, 2).and_hms_micro_opt(5, 10, 20, 115100).unwrap()
+            == FixedOffset::east_opt(60 * 60 * 6 + 1800)
+                .unwrap()
+                .from_local_datetime(
+                    &NaiveDate::from_ymd_opt(2019, 1, 2)
+                        .unwrap()
+                        .and_hms_micro_opt(5, 10, 20, 115_100)
+                        .unwrap()
+                )
+                .unwrap()
     ));
 
     test_type!(chrono_date_time_tz_vec<Vec<DateTime::<Utc>>>(Postgres,
@@ -468,7 +476,9 @@ mod json {
             .await?;
 
         let value: &JsonRawValue = row.try_get(0)?;
+        assert_eq!(value.get(), "{\"hello\": \"world\"}");
 
+        let value: Box<JsonRawValue> = row.try_get(0)?;
         assert_eq!(value.get(), "{\"hello\": \"world\"}");
 
         // prepared, binary API
@@ -477,7 +487,9 @@ mod json {
             .await?;
 
         let value: &JsonRawValue = row.try_get(0)?;
+        assert_eq!(value.get(), "{\"hello\": \"world\"}");
 
+        let value: Box<JsonRawValue> = row.try_get(0)?;
         assert_eq!(value.get(), "{\"hello\": \"world\"}");
 
         Ok(())
@@ -701,6 +713,22 @@ test_type!(nested_domain_types_1<Person>(Postgres,
     "ROW(1, 21::positive_int, 50::percentage)::person" == Person { id: 1, age: PositiveInt(21), percent: Percentage(PositiveInt(50)) })
 );
 
+test_type!(domain_type_array_1<Vec<PositiveInt>>(Postgres,
+    "ARRAY[1, 50, 1000]::positive_int[]" == vec![
+        PositiveInt(1),
+        PositiveInt(50),
+        PositiveInt(1000),
+    ],
+));
+
+test_type!(domain_type_array_2<Vec<Percentage>>(Postgres,
+    "ARRAY[4, 66, 100]::percentage[]" == vec![
+        Percentage(PositiveInt(4)),
+        Percentage(PositiveInt(66)),
+        Percentage(PositiveInt(100))
+    ],
+));
+
 #[derive(sqlx::Type, Debug, PartialEq)]
 #[sqlx(type_name = "leaf_composite")]
 struct LeafComposite {
@@ -718,8 +746,16 @@ struct RootComposite {
 }
 
 test_type!(nested_domain_types_2<RootComposite>(Postgres,
-    "ROW(ROW(1))::root_composite" == RootComposite { domain: Domain(LeafComposite { prim: 1})})
+    "ROW(ROW(1))::root_composite" == RootComposite { domain: Domain(LeafComposite { prim: 1 }) })
 );
+
+test_type!(domain_type_array_3<Vec<Domain>>(Postgres,
+    "ARRAY[ROW(50), ROW(1), ROW(1000)]::domain[]" == vec![
+        Domain(LeafComposite { prim: 50 }),
+        Domain(LeafComposite { prim: 1 }),
+        Domain(LeafComposite { prim: 1000 }),
+    ]
+));
 
 test_type!(test_arc<Arc<i32>>(Postgres, "1::INT4" == Arc::new(1i32)));
 test_type!(test_cow<Cow<'_, i32>>(Postgres, "1::INT4" == Cow::<i32>::Owned(1i32)));

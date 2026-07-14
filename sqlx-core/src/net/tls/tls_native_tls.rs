@@ -4,6 +4,7 @@ use crate::io::ReadBuf;
 use crate::net::tls::util::StdSocket;
 use crate::net::tls::TlsConfig;
 use crate::net::Socket;
+use crate::rt;
 use crate::Error;
 
 use native_tls::{HandshakeError, Identity};
@@ -61,7 +62,11 @@ pub async fn handshake<S: Socket>(
         builder.identity(identity);
     }
 
-    let connector = builder.build().map_err(Error::tls)?;
+    // The openssl TlsConnector synchronously loads certificates from files.
+    // Loading these files can block for tens of milliseconds.
+    let connector = rt::spawn_blocking(move || builder.build())
+        .await
+        .map_err(Error::tls)?;
 
     let mut mid_handshake = match connector.connect(config.hostname, StdSocket::new(socket)) {
         Ok(tls_stream) => return Ok(NativeTlsSocket { stream: tls_stream }),

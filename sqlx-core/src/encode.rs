@@ -29,7 +29,7 @@ impl IsNull {
 /// Encode a single value to be sent to the database.
 pub trait Encode<'q, DB: Database> {
     /// Writes the value of `self` into `buf` in the expected format for the database.
-    fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer<'q>) -> Result<IsNull, BoxDynError>
+    fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer) -> Result<IsNull, BoxDynError>
     where
         Self: Sized,
     {
@@ -42,7 +42,7 @@ pub trait Encode<'q, DB: Database> {
     /// memory.
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+        buf: &mut <DB as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError>;
 
     fn produces(&self) -> Option<DB::TypeInfo> {
@@ -62,14 +62,14 @@ where
     T: Encode<'q, DB>,
 {
     #[inline]
-    fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer<'q>) -> Result<IsNull, BoxDynError> {
+    fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer) -> Result<IsNull, BoxDynError> {
         <T as Encode<DB>>::encode_by_ref(self, buf)
     }
 
     #[inline]
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+        buf: &mut <DB as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         <&T as Encode<DB>>::encode(self, buf)
     }
@@ -104,7 +104,7 @@ macro_rules! impl_encode_for_option {
             #[inline]
             fn encode(
                 self,
-                buf: &mut <$DB as $crate::database::Database>::ArgumentBuffer<'q>,
+                buf: &mut <$DB as $crate::database::Database>::ArgumentBuffer,
             ) -> Result<$crate::encode::IsNull, $crate::error::BoxDynError> {
                 if let Some(v) = self {
                     v.encode(buf)
@@ -116,7 +116,7 @@ macro_rules! impl_encode_for_option {
             #[inline]
             fn encode_by_ref(
                 &self,
-                buf: &mut <$DB as $crate::database::Database>::ArgumentBuffer<'q>,
+                buf: &mut <$DB as $crate::database::Database>::ArgumentBuffer,
             ) -> Result<$crate::encode::IsNull, $crate::error::BoxDynError> {
                 if let Some(v) = self {
                     v.encode_by_ref(buf)
@@ -142,7 +142,7 @@ macro_rules! impl_encode_for_smartpointer {
             #[inline]
             fn encode(
                 self,
-                buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+                buf: &mut <DB as Database>::ArgumentBuffer,
             ) -> Result<IsNull, BoxDynError> {
                 <T as Encode<DB>>::encode_by_ref(self.as_ref(), buf)
             }
@@ -150,7 +150,7 @@ macro_rules! impl_encode_for_smartpointer {
             #[inline]
             fn encode_by_ref(
                 &self,
-                buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+                buf: &mut <DB as Database>::ArgumentBuffer,
             ) -> Result<IsNull, BoxDynError> {
                 <&T as Encode<DB>>::encode(self, buf)
             }
@@ -178,14 +178,14 @@ where
     T: ToOwned,
 {
     #[inline]
-    fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer<'q>) -> Result<IsNull, BoxDynError> {
+    fn encode(self, buf: &mut <DB as Database>::ArgumentBuffer) -> Result<IsNull, BoxDynError> {
         <&T as Encode<DB>>::encode_by_ref(&self.as_ref(), buf)
     }
 
     #[inline]
     fn encode_by_ref(
         &self,
-        buf: &mut <DB as Database>::ArgumentBuffer<'q>,
+        buf: &mut <DB as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         <&T as Encode<DB>>::encode_by_ref(&self.as_ref(), buf)
     }
@@ -207,7 +207,7 @@ macro_rules! forward_encode_impl {
         impl<'q> Encode<'q, $db> for $for_type {
             fn encode_by_ref(
                 &self,
-                buf: &mut <$db as sqlx_core::database::Database>::ArgumentBuffer<'q>,
+                buf: &mut <$db as sqlx_core::database::Database>::ArgumentBuffer,
             ) -> Result<IsNull, BoxDynError> {
                 <$forward_to as Encode<$db>>::encode(self.as_ref(), buf)
             }

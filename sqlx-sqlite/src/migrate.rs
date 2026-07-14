@@ -160,41 +160,27 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
         Box::pin(async move {
-            let mut tx = self.begin().await?;
             let start = Instant::now();
 
-            // Use a single transaction for the actual migration script and the essential bookeeping so we never
-            // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
-            // The `execution_time` however can only be measured for the whole transaction. This value _only_ exists for
-            // data lineage and debugging reasons, so it is not super important if it is lost. So we initialize it to -1
-            // and update it once the actual transaction completed.
-            let _ = tx
-                .execute(migration.sql.clone())
-                .await
-                .map_err(|e| MigrateError::ExecuteMigration(e, migration.version))?;
-
-            // language=SQL
-            let _ = query(AssertSqlSafe(format!(
-                r#"
-    INSERT INTO {table_name} ( version, description, success, checksum, execution_time )
-    VALUES ( ?1, ?2, TRUE, ?3, -1 )
-                "#
-            )))
-            .bind(migration.version)
-            .bind(&*migration.description)
-            .bind(&*migration.checksum)
-            .execute(&mut *tx)
-            .await?;
-
-            tx.commit().await?;
+            if migration.no_tx {
+                execute_migration(self, table_name, migration).await?;
+            } else {
+                // Use a single transaction for the actual migration script and the essential bookkeeping so we never
+                // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
+                // The `execution_time` however can only be measured for the whole transaction. This value _only_ exists for
+                // data lineage and debugging reasons, so it is not super important if it is lost. So we initialize it to -1
+                // and update it once the actual transaction completed.
+                let mut tx = self.begin().await?;
+                execute_migration(&mut tx, table_name, migration).await?;
+                tx.commit().await?;
+            }
 
             // Update `elapsed_time`.
             // NOTE: The process may disconnect/die at this point, so the elapsed time value might be lost. We accept
             //       this small risk since this value is not super important.
-
             let elapsed = start.elapsed();
 
-            // language=SQL
+            // language=SQLite
             #[allow(clippy::cast_possible_truncation)]
             let _ = query(AssertSqlSafe(format!(
                 r#"
@@ -218,26 +204,94 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
         Box::pin(async move {
-            // Use a single transaction for the actual migration script and the essential bookeeping so we never
-            // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
-            let mut tx = self.begin().await?;
             let start = Instant::now();
 
-            let _ = tx.execute(migration.sql.clone()).await?;
-
-            // language=SQLite
-            let _ = query(AssertSqlSafe(format!(
-                r#"DELETE FROM {table_name} WHERE version = ?1"#
-            )))
-            .bind(migration.version)
-            .execute(&mut *tx)
-            .await?;
-
-            tx.commit().await?;
+            if migration.no_tx {
+                revert_migration(self, table_name, migration).await?;
+            } else {
+                // Use a single transaction for the actual migration script and the essential bookkeeping so we never
+                // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
+                let mut tx = self.begin().await?;
+                revert_migration(&mut tx, table_name, migration).await?;
+                tx.commit().await?;
+            }
 
             let elapsed = start.elapsed();
 
             Ok(elapsed)
         })
     }
+
+    fn skip<'e>(
+        &'e mut self,
+        table_name: &'e str,
+        migration: &'e Migration,
+    ) -> BoxFuture<'e, Result<(), MigrateError>> {
+        Box::pin(async move {
+            // language=SQLite
+            let _ = query(AssertSqlSafe(format!(
+                r#"
+    INSERT INTO {table_name} ( version, description, success, checksum, execution_time )
+    VALUES ( ?1, ?2, TRUE, ?3, -1 )
+        "#
+            )))
+            .bind(migration.version)
+            .bind(&*migration.description)
+            .bind(&*migration.checksum)
+            .execute(self)
+            .await?;
+
+            Ok(())
+        })
+    }
+}
+
+async fn execute_migration(
+    conn: &mut SqliteConnection,
+    table_name: &str,
+    migration: &Migration,
+) -> Result<(), MigrateError> {
+    let _ = conn
+        .execute(migration.sql.clone())
+        .await
+        .map_err(|e| MigrateError::ExecuteMigration(e, migration.version))?;
+
+    // language=SQLite
+    let _ = query(AssertSqlSafe(format!(
+        r#"
+    INSERT INTO {table_name} ( version, description, success, checksum, execution_time )
+    VALUES ( ?1, ?2, TRUE, ?3, -1 )
+        "#
+    )))
+    .bind(migration.version)
+    .bind(&*migration.description)
+    .bind(&*migration.checksum)
+    .execute(conn)
+    .await?;
+
+    Ok(())
+}
+
+async fn revert_migration(
+    conn: &mut SqliteConnection,
+    table_name: &str,
+    migration: &Migration,
+) -> Result<(), MigrateError> {
+    let _ = conn
+        .execute(migration.sql.clone())
+        .await
+        .map_err(|e| MigrateError::ExecuteMigration(e, migration.version))?;
+
+    // language=SQLite
+    let _ = query(AssertSqlSafe(format!(
+        r#"
+    DELETE FROM {table_name}
+    WHERE version = ?1
+        "#
+    )))
+    .bind(migration.version)
+    .execute(conn)
+    .await?;
+
+    Ok(())
 }

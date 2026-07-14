@@ -4,7 +4,7 @@ use crate::decode::Decode;
 use crate::encode::{Encode, IsNull};
 use crate::error::BoxDynError;
 use crate::types::Type;
-use std::borrow::Cow;
+use std::sync::Arc;
 
 impl Type<Any> for [u8] {
     fn type_info() -> AnyTypeInfo {
@@ -17,9 +17,9 @@ impl Type<Any> for [u8] {
 impl<'q> Encode<'q, Any> for &'q [u8] {
     fn encode_by_ref(
         &self,
-        buf: &mut <Any as Database>::ArgumentBuffer<'q>,
+        buf: &mut <Any as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
-        buf.0.push(AnyValueKind::Blob((*self).into()));
+        buf.0.push(AnyValueKind::Blob(Arc::new(self.to_vec())));
         Ok(IsNull::No)
     }
 }
@@ -27,12 +27,7 @@ impl<'q> Encode<'q, Any> for &'q [u8] {
 impl<'r> Decode<'r, Any> for &'r [u8] {
     fn decode(value: <Any as Database>::ValueRef<'r>) -> Result<Self, BoxDynError> {
         match value.kind {
-            AnyValueKind::Blob(Cow::Borrowed(blob)) => Ok(blob),
-            // This shouldn't happen in practice, it means the user got an `AnyValueRef`
-            // constructed from an owned `Vec<u8>` which shouldn't be allowed by the API.
-            AnyValueKind::Blob(Cow::Owned(_text)) => {
-                panic!("attempting to return a borrow that outlives its buffer")
-            }
+            AnyValueKind::Blob(blob) => Ok(blob.as_slice()),
             other => other.unexpected(),
         }
     }
@@ -44,12 +39,12 @@ impl Type<Any> for Vec<u8> {
     }
 }
 
-impl<'q> Encode<'q, Any> for Vec<u8> {
+impl Encode<'_, Any> for Vec<u8> {
     fn encode_by_ref(
         &self,
-        buf: &mut <Any as Database>::ArgumentBuffer<'q>,
+        buf: &mut <Any as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
-        buf.0.push(AnyValueKind::Blob(Cow::Owned(self.clone())));
+        buf.0.push(AnyValueKind::Blob(Arc::new(self.clone())));
         Ok(IsNull::No)
     }
 }
@@ -57,7 +52,7 @@ impl<'q> Encode<'q, Any> for Vec<u8> {
 impl<'r> Decode<'r, Any> for Vec<u8> {
     fn decode(value: <Any as Database>::ValueRef<'r>) -> Result<Self, BoxDynError> {
         match value.kind {
-            AnyValueKind::Blob(blob) => Ok(blob.into_owned()),
+            AnyValueKind::Blob(blob) => Ok(blob.as_ref().clone()),
             other => other.unexpected(),
         }
     }
