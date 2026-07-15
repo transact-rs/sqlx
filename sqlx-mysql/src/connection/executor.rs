@@ -21,6 +21,7 @@ use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
+use sqlx_core::arguments::Arguments as _;
 use sqlx_core::column::{ColumnOrigin, TableColumn};
 use sqlx_core::sql_str::SqlStr;
 use std::{pin::pin, sync::Arc};
@@ -116,7 +117,7 @@ impl MySqlConnection {
         skip_all,
         fields(
             db.system = "mysql",
-            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.types.len()),
+            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.len()),
             db.mysql.prepared = arguments.is_some(),
         ),
         level = "debug",
