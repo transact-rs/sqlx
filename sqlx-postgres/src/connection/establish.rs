@@ -28,6 +28,7 @@ impl PgConnection {
             // Recorded once the startup handshake completes.
             db.postgresql.backend_pid = tracing::field::Empty,
         ),
+        level = "debug",
     )]
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
         tracing::debug!("establishing PostgreSQL connection");
