@@ -167,7 +167,6 @@ impl Connection for PgConnection {
         level = "debug",
     )]
     async fn close(mut self) -> Result<(), Error> {
-        tracing::debug!("closing PostgreSQL connection gracefully");
         // The normal, graceful termination procedure is that the frontend sends a Terminate
         // message and immediately closes the connection.
 
