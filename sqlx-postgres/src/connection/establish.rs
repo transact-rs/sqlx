@@ -31,8 +31,6 @@ impl PgConnection {
         level = "debug",
     )]
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
-        tracing::debug!("establishing PostgreSQL connection");
-
         // Upgrade to TLS if we were asked to and the server supports it
         let mut stream = PgStream::connect(options).await?;
 

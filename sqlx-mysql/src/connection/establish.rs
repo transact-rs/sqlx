@@ -26,7 +26,6 @@ impl MySqlConnection {
         level = "debug",
     )]
     pub(crate) async fn establish(options: &MySqlConnectOptions) -> Result<Self, Error> {
-        tracing::debug!("establishing MySQL connection");
         let do_handshake = DoHandshake::new(options)?;
 
         let handshake = match &options.socket {

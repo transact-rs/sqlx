@@ -78,7 +78,6 @@ impl Connection for MySqlConnection {
         level = "debug",
     )]
     async fn close(mut self) -> Result<(), Error> {
-        tracing::debug!("closing MySQL connection gracefully");
         self.inner.stream.send_packet(Quit).await?;
         self.inner.stream.shutdown().await?;
 

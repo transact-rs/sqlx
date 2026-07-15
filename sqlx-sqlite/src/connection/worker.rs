@@ -111,7 +111,6 @@ impl ConnectionWorker {
         level = "debug",
     )]
     pub(crate) async fn establish(params: EstablishParams) -> Result<Self, Error> {
-        tracing::debug!("establishing SQLite connection worker");
         let (establish_tx, establish_rx) = oneshot::channel();
 
         thread::Builder::new()
