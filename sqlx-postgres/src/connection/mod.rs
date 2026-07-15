@@ -163,7 +163,7 @@ impl Connection for PgConnection {
         target = "sqlx::connect",
         name = "postgres.close",
         skip_all,
-        fields(db.system = "postgresql", backend_pid = self.inner.process_id),
+        fields(db.system = "postgresql", db.postgresql.backend_pid = self.inner.process_id),
         level = "debug",
     )]
     async fn close(mut self) -> Result<(), Error> {
