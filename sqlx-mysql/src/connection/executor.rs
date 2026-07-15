@@ -26,6 +26,13 @@ use sqlx_core::sql_str::SqlStr;
 use std::{pin::pin, sync::Arc};
 
 impl MySqlConnection {
+    #[tracing::instrument(
+        target = "sqlx::prepare",
+        name = "mysql.prepare",
+        skip_all,
+        fields(db.system = "mysql"),
+        level = "debug",
+    )]
     async fn prepare_statement(
         &mut self,
         sql: &str,
@@ -78,9 +85,12 @@ impl MySqlConnection {
         sql: &str,
     ) -> Result<(u32, MySqlStatementMetadata), Error> {
         if let Some(statement) = self.inner.cache_statement.get_mut(sql) {
+            tracing::trace!(target: "sqlx::prepare", "prepared statement cache hit");
             // <MySqlStatementMetadata> is internally reference-counted
             return Ok((*statement).clone());
         }
+
+        tracing::trace!(target: "sqlx::prepare", "prepared statement cache miss");
 
         let (id, metadata) = self.prepare_statement(sql).await?;
 
@@ -100,6 +110,17 @@ impl MySqlConnection {
     }
 
     #[allow(clippy::needless_lifetimes)]
+    #[tracing::instrument(
+        target = "sqlx::query",
+        name = "mysql.run",
+        skip_all,
+        fields(
+            db.system = "mysql",
+            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.types.len()),
+            db.mysql.prepared = arguments.is_some(),
+        ),
+        level = "debug",
+    )]
     pub(crate) async fn run<'e, 'c: 'e, 'q: 'e>(
         &'c mut self,
         sql: SqlStr,

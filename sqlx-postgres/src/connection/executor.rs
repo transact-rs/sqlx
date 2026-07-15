@@ -20,6 +20,17 @@ use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
 use std::{pin::pin, sync::Arc};
 
+#[tracing::instrument(
+    target = "sqlx::prepare",
+    name = "postgres.prepare",
+    skip_all,
+    fields(
+        db.system = "postgresql",
+        db.operation.parameters = arg_types.len(),
+        db.postgresql.persistent = persistent,
+    ),
+    level = "debug",
+)]
 async fn prepare(
     conn: &mut PgConnection,
     sql: &str,
@@ -168,8 +179,11 @@ impl PgConnection {
         resolve_column_origin: bool,
     ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
         if let Some(statement) = self.inner.cache_statement.get_mut(sql) {
+            tracing::trace!(target: "sqlx::prepare", "prepared statement cache hit");
             return Ok((*statement).clone());
         }
+
+        tracing::trace!(target: "sqlx::prepare", "prepared statement cache miss");
 
         let statement = prepare(
             self,
@@ -196,6 +210,17 @@ impl PgConnection {
         Ok(statement)
     }
 
+    #[tracing::instrument(
+        target = "sqlx::query",
+        name = "postgres.run",
+        skip_all,
+        fields(
+            db.system = "postgresql",
+            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.len()),
+            db.postgresql.prepared = arguments.is_some(),
+        ),
+        level = "debug",
+    )]
     pub(crate) async fn run<'e, 'c: 'e, 'q: 'e>(
         &'c mut self,
         query: SqlStr,

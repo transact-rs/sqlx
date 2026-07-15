@@ -15,7 +15,23 @@ use super::PgConnectionInner;
 // https://www.postgresql.org/docs/current/protocol-flow.html#id-1.10.5.7.11
 
 impl PgConnection {
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "postgres.establish",
+        skip_all,
+        fields(
+            db.system = "postgresql",
+            server.address = %options.host,
+            server.port = options.port,
+            db.name = options.database.as_deref().unwrap_or_default(),
+            db.user = %options.username,
+            // Recorded once the startup handshake completes.
+            db.postgresql.backend_pid = tracing::field::Empty,
+        ),
+    )]
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
+        tracing::debug!("establishing PostgreSQL connection");
+
         // Upgrade to TLS if we were asked to and the server supports it
         let mut stream = PgStream::connect(options).await?;
 
@@ -122,6 +138,12 @@ impl PgConnection {
                 BackendMessageFormat::ReadyForQuery => {
                     // start-up is completed. The frontend can now issue commands
                     transaction_status = message.decode::<ReadyForQuery>()?.transaction_status;
+
+                    tracing::Span::current().record("db.postgresql.backend_pid", process_id);
+                    tracing::debug!(
+                        backend_pid = process_id,
+                        "PostgreSQL connection established"
+                    );
 
                     break;
                 }
