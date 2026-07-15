@@ -23,6 +23,7 @@ use futures_core::Stream;
 use futures_util::TryStreamExt;
 use sqlx_core::arguments::Arguments as _;
 use sqlx_core::column::{ColumnOrigin, TableColumn};
+use sqlx_core::instrument_stream::InstrumentStream;
 use sqlx_core::sql_str::SqlStr;
 use std::{pin::pin, sync::Arc};
 
@@ -111,17 +112,6 @@ impl MySqlConnection {
     }
 
     #[allow(clippy::needless_lifetimes)]
-    #[tracing::instrument(
-        target = "sqlx::query",
-        name = "mysql.run",
-        skip_all,
-        fields(
-            db.system = "mysql",
-            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.len()),
-            db.mysql.prepared = arguments.is_some(),
-        ),
-        level = "debug",
-    )]
     pub(crate) async fn run<'e, 'c: 'e, 'q: 'e>(
         &'c mut self,
         sql: SqlStr,
@@ -129,6 +119,17 @@ impl MySqlConnection {
         persistent: bool,
     ) -> Result<impl Stream<Item = Result<Either<MySqlQueryResult, MySqlRow>, Error>> + 'e, Error>
     {
+        // The span is attached to the returned stream (see `instrument_stream`)
+        // rather than via `#[tracing::instrument]` so it stays open while rows
+        // are fetched, not just while the query is set up.
+        let span = tracing::debug_span!(
+            target: "sqlx::query",
+            "mysql.run",
+            db.system = "mysql",
+            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.len()),
+            db.mysql.prepared = arguments.is_some(),
+        );
+
         let mut logger = QueryLogger::new(sql, self.inner.log_settings.clone());
 
         self.inner.stream.wait_until_ready().await?;
@@ -288,7 +289,8 @@ impl MySqlConnection {
                     r#yield!(v);
                 }
             }
-        })
+        }
+        .instrument_stream(span))
     }
 }
 
