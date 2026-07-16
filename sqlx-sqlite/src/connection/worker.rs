@@ -8,6 +8,7 @@ use futures_intrusive::sync::{Mutex, MutexGuard};
 use sqlx_core::sql_str::SqlStr;
 use tracing::span::Span;
 
+use sqlx_core::arguments::Arguments as _;
 use sqlx_core::error::Error;
 use sqlx_core::transaction::{
     begin_ansi_transaction_sql, commit_ansi_transaction_sql, rollback_ansi_transaction_sql,
@@ -102,6 +103,13 @@ enum Command {
 }
 
 impl ConnectionWorker {
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "sqlite.establish",
+        skip_all,
+        fields(db.system = "sqlite"),
+        level = "debug",
+    )]
     pub(crate) async fn establish(params: EstablishParams) -> Result<Self, Error> {
         let (establish_tx, establish_rx) = oneshot::channel();
 
@@ -347,6 +355,13 @@ impl ConnectionWorker {
         establish_rx.await.map_err(|_| Error::WorkerCrashed)?
     }
 
+    #[tracing::instrument(
+        target = "sqlx::prepare",
+        name = "sqlite.prepare",
+        skip_all,
+        fields(db.system = "sqlite"),
+        level = "debug",
+    )]
     pub(crate) async fn prepare(&mut self, query: SqlStr) -> Result<SqliteStatement, Error> {
         self.oneshot_cmd(|tx| Command::Prepare { query, tx })
             .await?
@@ -361,6 +376,17 @@ impl ConnectionWorker {
             .await?
     }
 
+    #[tracing::instrument(
+        target = "sqlx::query",
+        name = "sqlite.execute",
+        skip_all,
+        fields(
+            db.system = "sqlite",
+            db.operation.parameters = args.as_ref().map_or(0, |a| a.len()),
+            db.sqlite.persistent = persistent,
+        ),
+        level = "debug",
+    )]
     pub(crate) async fn execute(
         &mut self,
         query: SqlStr,
@@ -388,16 +414,37 @@ impl ConnectionWorker {
         Ok(rx)
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "sqlite.transaction.begin",
+        skip_all,
+        fields(db.system = "sqlite", depth = self.shared.get_transaction_depth()),
+        level = "debug",
+    )]
     pub(crate) async fn begin(&mut self, statement: Option<SqlStr>) -> Result<(), Error> {
         self.oneshot_cmd_with_ack(|tx| Command::Begin { tx, statement })
             .await?
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "sqlite.transaction.commit",
+        skip_all,
+        fields(db.system = "sqlite", depth = self.shared.get_transaction_depth()),
+        level = "debug",
+    )]
     pub(crate) async fn commit(&mut self) -> Result<(), Error> {
         self.oneshot_cmd_with_ack(|tx| Command::Commit { tx })
             .await?
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "sqlite.transaction.rollback",
+        skip_all,
+        fields(db.system = "sqlite", depth = self.shared.get_transaction_depth()),
+        level = "debug",
+    )]
     pub(crate) async fn rollback(&mut self) -> Result<(), Error> {
         self.oneshot_cmd_with_ack(|tx| Command::Rollback { tx: Some(tx) })
             .await?
@@ -409,6 +456,13 @@ impl ConnectionWorker {
             .map_err(|_| Error::WorkerCrashed)
     }
 
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "sqlite.ping",
+        skip_all,
+        fields(db.system = "sqlite"),
+        level = "trace",
+    )]
     pub(crate) async fn ping(&mut self) -> Result<(), Error> {
         self.oneshot_cmd(|tx| Command::Ping { tx }).await
     }

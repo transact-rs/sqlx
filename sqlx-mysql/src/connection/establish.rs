@@ -12,6 +12,19 @@ use crate::protocol::Capabilities;
 use crate::{MySqlConnectOptions, MySqlConnection, MySqlSslMode};
 
 impl MySqlConnection {
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "mysql.establish",
+        skip_all,
+        fields(
+            db.system = "mysql",
+            server.address = %options.host,
+            server.port = options.port,
+            db.name = options.database.as_deref().unwrap_or_default(),
+            db.user = %options.username,
+        ),
+        level = "debug",
+    )]
     pub(crate) async fn establish(options: &MySqlConnectOptions) -> Result<Self, Error> {
         let do_handshake = DoHandshake::new(options)?;
 
@@ -21,6 +34,11 @@ impl MySqlConnection {
         };
 
         let stream = handshake?;
+
+        tracing::debug!(
+            server_version = ?stream.server_version,
+            "MySQL connection established"
+        );
 
         Ok(Self {
             inner: Box::new(MySqlConnectionInner {

@@ -159,6 +159,13 @@ impl Connection for PgConnection {
 
     type Options = PgConnectOptions;
 
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "postgres.close",
+        skip_all,
+        fields(db.system = "postgresql", db.postgresql.backend_pid = self.inner.process_id),
+        level = "debug",
+    )]
     async fn close(mut self) -> Result<(), Error> {
         // The normal, graceful termination procedure is that the frontend sends a Terminate
         // message and immediately closes the connection.
@@ -177,6 +184,13 @@ impl Connection for PgConnection {
         Ok(())
     }
 
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "postgres.ping",
+        skip_all,
+        fields(db.system = "postgresql"),
+        level = "trace",
+    )]
     async fn ping(&mut self) -> Result<(), Error> {
         // Users were complaining about this showing up in query statistics on the server.
         // By sending a comment we avoid an error if the connection was in the middle of a rowset

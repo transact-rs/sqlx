@@ -16,10 +16,22 @@ use futures_core::stream::BoxStream;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
 use sqlx_core::arguments::Arguments;
+use sqlx_core::instrument_stream::InstrumentStream;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
 use std::{pin::pin, sync::Arc};
 
+#[tracing::instrument(
+    target = "sqlx::prepare",
+    name = "postgres.prepare",
+    skip_all,
+    fields(
+        db.system = "postgresql",
+        db.operation.parameters = arg_types.len(),
+        db.postgresql.persistent = persistent,
+    ),
+    level = "debug",
+)]
 async fn prepare(
     conn: &mut PgConnection,
     sql: &str,
@@ -168,8 +180,11 @@ impl PgConnection {
         resolve_column_origin: bool,
     ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
         if let Some(statement) = self.inner.cache_statement.get_mut(sql) {
+            tracing::trace!(target: "sqlx::prepare", "prepared statement cache hit");
             return Ok((*statement).clone());
         }
+
+        tracing::trace!(target: "sqlx::prepare", "prepared statement cache miss");
 
         let statement = prepare(
             self,
@@ -203,6 +218,17 @@ impl PgConnection {
         persistent: bool,
         metadata_opt: Option<Arc<PgStatementMetadata>>,
     ) -> Result<impl Stream<Item = Result<Either<PgQueryResult, PgRow>, Error>> + 'e, Error> {
+        // The span is attached to the returned stream (see `instrument_stream`)
+        // rather than via `#[tracing::instrument]` so it stays open while rows
+        // are fetched, not just while the query is set up.
+        let span = tracing::debug_span!(
+            target: "sqlx::query",
+            "postgres.run",
+            db.system = "postgresql",
+            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.len()),
+            db.postgresql.prepared = arguments.is_some(),
+        );
+
         let mut logger = QueryLogger::new(query, self.inner.log_settings.clone());
         let sql = logger.sql().as_str();
 
@@ -372,7 +398,8 @@ impl PgConnection {
             }
 
             Ok(())
-        })
+        }
+        .instrument_stream(span))
     }
 }
 
