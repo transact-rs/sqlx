@@ -105,6 +105,34 @@ This behavior is _only_ implemented for the environment variables, not the URL p
 
 Note: passing the SSL private key via environment variable may be a security risk.
 
+# Note: TimeZone
+Upon connection, SQLx sets the session `TimeZone` parameter to `UTC`,
+regardless of the server's default. This ensures consistent behavior
+across environments (e.g., replicas in different regions, servers with
+locale-specific configurations) and matches the default of the MySQL
+driver, which is required for correct binary timestamp interpretation.
+
+This differs from the behavior of `psql`, which does not set a session
+`TimeZone` and thus inherits the server's default. As a result, functions
+whose output depends on the session `TimeZone` — such as [`date_trunc`],
+[`now`], [`current_time`] and [`AT TIME ZONE`] — may produce different
+results in SQLx than in `psql` against the same database.
+
+For example, `date_trunc('day', ts)` on a `timestamptz` truncates relative
+to the session `TimeZone`, so under SQLx it always truncates relative to UTC.
+To truncate relative to a specific time zone, pass an explicit third argument:
+
+```text
+date_trunc('day', ts, 'Europe/Helsinki')
+```
+
+If you need `psql`-compatible behavior, you can override the session
+`TimeZone` after connection with `SET TIME ZONE`, or handle time zones
+explicitly in your SQL.
+
+The general recommendation is to store timestamps as `TIMESTAMP WITH TIME ZONE`
+and to keep all application logic in UTC.
+
 # Note: Unix Domain Sockets
 If you want to connect to Postgres over a Unix domain socket, you can pass the path
 to the _directory_ containing the socket as the `host` parameter.
@@ -183,3 +211,7 @@ let pool = PgPool::connect_with(opts).await?;
 [libpq-envars]: https://www.postgresql.org/docs/current/libpq-envars.html
 [rfc7468]: https://datatracker.ietf.org/doc/html/rfc7468
 [`webpki-roots`]: https://docs.rs/webpki-roots
+[`date_trunc`]: https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-TRUNC
+[`now`]: https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT
+[`current_time`]: https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT
+[`AT TIME ZONE`]: https://www.postgresql.org/docs/current/functions-datetime.html#FUNCTIONS-DATETIME-ZONECONVERT
