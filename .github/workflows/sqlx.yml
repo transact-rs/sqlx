@@ -749,7 +749,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - run: cargo build --features any,postgres,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }}
+      - run: cargo build --features any,postgres,mysql,mysql-rsa,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }}
 
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_1_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
@@ -775,7 +775,7 @@ jobs:
           cargo test
           --test mixed-test-attr
           --no-default-features
-          --features any,postgres,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }}
+          --features any,postgres,mysql,mysql-rsa,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }}
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           PG_1_DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
