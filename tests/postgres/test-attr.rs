@@ -180,8 +180,52 @@ async fn it_gets_comments(pool: PgPool) -> sqlx::Result<()> {
 }
 
 #[sqlx::test(
+    env(migrations = "tests/postgres/migrations", fixtures("users")),
+    env(migrator = "MIGRATOR", fixtures("users", "posts", "comments"))
+)]
+async fn it_gets_from_invidual_environments(pool_1: PgPool, pool_2: PgPool) -> sqlx::Result<()> {
+    let pool_1_usernames: Vec<String> =
+        sqlx::query_scalar(r#"SELECT username FROM "user" ORDER BY username"#)
+            .fetch_all(&pool_1)
+            .await?;
+
+    assert_eq!(pool_1_usernames, ["alice", "bob"]);
+
+    let pool_2_usernames: Vec<String> =
+        sqlx::query_scalar(r#"SELECT username FROM "user" ORDER BY username"#)
+            .fetch_all(&pool_2)
+            .await?;
+
+    assert_eq!(pool_2_usernames, ["alice", "bob"]);
+
+    let pool1_comments: Vec<String> = sqlx::query_scalar(
+        "SELECT content FROM comment WHERE post_id = $1::uuid ORDER BY created_at",
+    )
+    .bind("252c1d98-a9b0-4f18-8298-e59058bdfe16")
+    .fetch_all(&pool_1)
+    .await?;
+
+    assert_eq!(pool1_comments.len(), 0);
+
+    let pool_2_comments: Vec<String> = sqlx::query_scalar(
+        "SELECT content FROM comment WHERE post_id = $1::uuid ORDER BY created_at",
+    )
+    .bind("252c1d98-a9b0-4f18-8298-e59058bdfe16")
+    .fetch_all(&pool_2)
+    .await?;
+
+    assert_eq!(
+        pool_2_comments,
+        ["lol bet ur still bad, 1v1 me", "you're on!"]
+    );
+
+    Ok(())
+}
+
+#[sqlx::test(
     migrations = "tests/postgres/migrations",
-    fixtures(path = "../fixtures/postgres", scripts("users", "posts"))
+    fixtures(path = "../fixtures/postgres", scripts("users", "posts")),
+    var("DATABASE_URL")
 )]
 async fn this_should_compile(_pool: PgPool) -> sqlx::Result<()> {
     Ok(())

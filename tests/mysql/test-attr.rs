@@ -172,3 +172,56 @@ async fn it_gets_comments(pool: MySqlPool) -> sqlx::Result<()> {
 
     Ok(())
 }
+
+#[sqlx::test(
+    env(migrations = "tests/mysql/migrations", fixtures("users")),
+    env(migrator = "MIGRATOR", fixtures("users", "posts", "comments"))
+)]
+async fn it_gets_from_invidual_environments(
+    pool_1: MySqlPool,
+    pool_2: MySqlPool,
+) -> sqlx::Result<()> {
+    let pool_1_usernames: Vec<String> =
+        sqlx::query_scalar(r#"SELECT username FROM user ORDER BY username"#)
+            .fetch_all(&pool_1)
+            .await?;
+
+    assert_eq!(pool_1_usernames, ["alice", "bob"]);
+
+    let pool_2_usernames: Vec<String> =
+        sqlx::query_scalar(r#"SELECT username FROM user ORDER BY username"#)
+            .fetch_all(&pool_2)
+            .await?;
+
+    assert_eq!(pool_2_usernames, ["alice", "bob"]);
+
+    let pool_1_post_comments: Vec<String> =
+        sqlx::query_scalar("SELECT content FROM comment WHERE post_id = ? ORDER BY created_at")
+            .bind(&1)
+            .fetch_all(&pool_1)
+            .await?;
+
+    assert_eq!(pool_1_post_comments.len(), 0);
+
+    let pool_2_post_comments: Vec<String> =
+        sqlx::query_scalar("SELECT content FROM comment WHERE post_id = ? ORDER BY created_at")
+            .bind(&1)
+            .fetch_all(&pool_2)
+            .await?;
+
+    assert_eq!(
+        pool_2_post_comments,
+        ["lol bet ur still bad, 1v1 me", "you're on!"]
+    );
+
+    Ok(())
+}
+
+#[sqlx::test(
+    migrations = "tests/mysql/migrations",
+    fixtures(path = "../fixtures/mysql", scripts("users", "posts")),
+    var("DATABASE_URL")
+)]
+async fn this_should_compile(_pool: MySqlPool) -> sqlx::Result<()> {
+    Ok(())
+}

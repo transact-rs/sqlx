@@ -16,14 +16,19 @@ impl TestSupport for Sqlite {
         test_context(args)
     }
 
-    async fn cleanup_test(db_name: &str) -> Result<(), Error> {
-        crate::fs::remove_file(db_name).await?;
+    async fn cleanup_test(args: &TestArgs) -> Result<(), Error> {
+        let db_name = Self::db_name(args);
+        crate::fs::remove_file(&db_name).await?;
         Ok(())
     }
 
     async fn cleanup_test_dbs() -> Result<Option<usize>, Error> {
         crate::fs::remove_dir_all(BASE_PATH).await?;
         Ok(None)
+    }
+
+    async fn cleanup_test_dbs_by_url(_: &str) -> Result<Option<usize>, Error> {
+        unimplemented!()
     }
 
     async fn snapshot(_conn: &mut Self::Connection) -> Result<FixtureSnapshot<Self>, Error> {
