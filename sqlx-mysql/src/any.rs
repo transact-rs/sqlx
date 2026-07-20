@@ -165,6 +165,15 @@ impl<'a> TryFrom<&'a MySqlTypeInfo> for AnyTypeInfo {
                 ColumnType::LongLong => AnyTypeInfoKind::BigInt,
                 ColumnType::Float => AnyTypeInfoKind::Real,
                 ColumnType::Double => AnyTypeInfoKind::Double,
+                ColumnType::Blob
+                | ColumnType::TinyBlob
+                | ColumnType::MediumBlob
+                | ColumnType::LongBlob => AnyTypeInfoKind::Blob,
+                ColumnType::String | ColumnType::VarString | ColumnType::VarChar => {
+                    AnyTypeInfoKind::Text
+                }
+                #[cfg(feature = "json")]
+                ColumnType::Json => AnyTypeInfoKind::Json,
                 // Checks for any applicable type and compatible collations
                 _ if <str as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Text,
                 _ if <[u8] as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Blob,

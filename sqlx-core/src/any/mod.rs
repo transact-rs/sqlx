@@ -47,6 +47,52 @@ use crate::types::Type;
 #[doc(hidden)]
 pub use value::AnyValueKind;
 
+/// Encode and decode support for JSON with the `Any` driver.
+#[doc(hidden)]
+pub trait AnyJson: crate::database::Database {
+    #[cfg(feature = "json")]
+    fn add_json<A>(
+        args: &mut A,
+        value: Box<serde_json::value::RawValue>,
+    ) -> Result<(), crate::error::BoxDynError>
+    where
+        A: crate::arguments::Arguments<Database = Self>;
+
+    #[cfg(feature = "json")]
+    fn decode_json(
+        value: <Self as crate::database::Database>::ValueRef<'_>,
+    ) -> Result<Box<serde_json::value::RawValue>, crate::error::BoxDynError>;
+}
+
+/// No-op impl when `json` feature is disabled.
+#[cfg(not(feature = "json"))]
+impl<DB: crate::database::Database> AnyJson for DB {}
+
+#[cfg(feature = "json")]
+impl<DB> AnyJson for DB
+where
+    DB: crate::database::Database,
+    crate::types::Json<Box<serde_json::value::RawValue>>:
+        Type<DB> + for<'a> crate::decode::Decode<'a, DB> + for<'a> crate::encode::Encode<'a, DB>,
+{
+    fn add_json<'a, A>(
+        args: &mut A,
+        value: Box<serde_json::value::RawValue>,
+    ) -> Result<(), crate::error::BoxDynError>
+    where
+        A: crate::arguments::Arguments<Database = Self>,
+    {
+        args.add(crate::types::Json(value))
+    }
+
+    fn decode_json(
+        value: <Self as crate::database::Database>::ValueRef<'_>,
+    ) -> Result<Box<serde_json::value::RawValue>, crate::error::BoxDynError> {
+        use crate::decode::Decode;
+        <crate::types::Json<Box<serde_json::value::RawValue>>>::decode(value).map(|j| j.0)
+    }
+}
+
 pub type AnyPool = crate::pool::Pool<Any>;
 
 pub type AnyPoolOptions = crate::pool::PoolOptions<Any>;

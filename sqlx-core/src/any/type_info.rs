@@ -27,6 +27,9 @@ pub enum AnyTypeInfoKind {
     Double,
     Text,
     Blob,
+    #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
+    Json,
 }
 
 impl TypeInfo for AnyTypeInfo {
@@ -47,6 +50,8 @@ impl TypeInfo for AnyTypeInfo {
             Text => "TEXT",
             Blob => "BLOB",
             Null => "NULL",
+            #[cfg(feature = "json")]
+            Json => "JSON",
         }
     }
 }

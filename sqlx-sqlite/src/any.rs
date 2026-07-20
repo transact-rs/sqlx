@@ -224,6 +224,8 @@ fn map_arguments(args: AnyArguments) -> SqliteArguments {
             AnyValueKind::Double(d) => SqliteArgumentValue::Double(d),
             AnyValueKind::Text(t) => SqliteArgumentValue::Text(Arc::new(t.to_string())),
             AnyValueKind::Blob(b) => SqliteArgumentValue::Blob(Arc::new(b.to_vec())),
+            #[cfg(feature = "json")]
+            AnyValueKind::Json(j) => SqliteArgumentValue::Text(Arc::new(j.get().to_string())),
             // AnyValueKind is `#[non_exhaustive]` but we should have covered everything
             _ => unreachable!("BUG: missing mapping for {val:?}"),
         })

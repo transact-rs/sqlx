@@ -5,6 +5,11 @@ use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_core::Error;
 use sqlx_test::new;
 
+#[cfg(feature = "json")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "json")]
+use sqlx::types::Json;
+
 #[sqlx_macros::test]
 async fn it_connects() -> anyhow::Result<()> {
     sqlx::any::install_default_drivers();
@@ -205,6 +210,67 @@ async fn it_can_query_by_string_args() -> sqlx::Result<()> {
 
         assert_eq!(column_0, string);
     }
+    Ok(())
+}
+
+#[cfg(feature = "json")]
+#[sqlx_macros::test]
+async fn it_encodes_decodes_json() -> anyhow::Result<()> {
+    sqlx::any::install_default_drivers();
+
+    // Create new connection
+    let mut conn = new::<Any>().await?;
+
+    // Test with serde_json::Value
+    let json_value = serde_json::json!({
+        "name": "test",
+        "value": 42,
+        "items": [1, 2, 3]
+    });
+
+    // Create temp table:
+    sqlx::query("create temporary table json_test (data TEXT)")
+        .execute(&mut conn)
+        .await?;
+
+    #[cfg(feature = "postgres")]
+    let query = "insert into json_test (data) values ($1)";
+
+    #[cfg(not(feature = "postgres"))]
+    let query = "insert into json_test (data) values (?)";
+
+    // Insert into the temporary table:
+    sqlx::query(query)
+        .bind(Json(&json_value))
+        .execute(&mut conn)
+        .await?;
+
+    // This will work by encoding JSON as text and decoding it back
+    let result: serde_json::Value = sqlx::query_scalar("select data from json_test")
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(result, json_value);
+
+    // Test with custom struct
+    #[derive(Serialize, Deserialize, Debug, PartialEq)]
+    struct TestData {
+        name: String,
+        value: i32,
+        items: [i32; 3],
+    }
+
+    let test_data = TestData {
+        name: "test".to_string(),
+        value: 42,
+        items: [1, 2, 3],
+    };
+
+    let result: Json<TestData> = sqlx::query_scalar("select data from json_test")
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(result.0, test_data);
 
     Ok(())
 }
