@@ -41,7 +41,7 @@ impl FrontendMessage for SaslInitialResponse<'_> {
 
         let response_len = i32::try_from(self.response.len()).map_err(|_| {
             err_protocol!(
-                "SASL Initial Response length too long for protcol: {}",
+                "SASL Initial Response length too long for protocol: {}",
                 self.response.len()
             )
         })?;

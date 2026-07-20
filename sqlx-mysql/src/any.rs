@@ -8,15 +8,15 @@ use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::{stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use sqlx_core::any::{
-    Any, AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
+    AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
     AnyStatement, AnyTypeInfo, AnyTypeInfoKind,
 };
 use sqlx_core::connection::Connection;
 use sqlx_core::database::Database;
-use sqlx_core::describe::Describe;
 use sqlx_core::executor::Executor;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::transaction::TransactionManager;
+use sqlx_core::types::Type;
 use std::{future, pin::pin};
 
 sqlx_core::declare_driver_with_optional_migrate!(DRIVER = MySql);
@@ -141,7 +141,11 @@ impl AnyConnectionBackend for MySqlConnection {
         })
     }
 
-    fn describe(&mut self, sql: SqlStr) -> BoxFuture<'_, sqlx_core::Result<Describe<Any>>> {
+    #[cfg(feature = "offline")]
+    fn describe(
+        &mut self,
+        sql: SqlStr,
+    ) -> BoxFuture<'_, sqlx_core::Result<sqlx_core::describe::Describe<sqlx_core::any::Any>>> {
         Box::pin(async move {
             let describe = Executor::describe(self, sql).await?;
             describe.try_into_any()
@@ -170,6 +174,9 @@ impl<'a> TryFrom<&'a MySqlTypeInfo> for AnyTypeInfo {
                 }
                 #[cfg(feature = "json")]
                 ColumnType::Json => AnyTypeInfoKind::Json,
+                // Checks for any applicable type and compatible collations
+                _ if <str as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Text,
+                _ if <[u8] as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Blob,
                 _ => {
                     return Err(sqlx_core::Error::AnyDriverError(
                         format!("Any driver does not support MySql type {type_info:?}").into(),

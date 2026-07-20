@@ -4,11 +4,9 @@ use std::sync::Arc;
 
 use crate::encode::{Encode, IsNull};
 use crate::error::Error;
-use crate::ext::ustr::UStr;
 use crate::types::Type;
 use crate::{PgConnection, PgTypeInfo, Postgres};
 
-use crate::type_info::PgArrayOf;
 pub(crate) use sqlx_core::arguments::Arguments;
 use sqlx_core::error::BoxDynError;
 
@@ -43,13 +41,10 @@ pub struct PgArgumentBuffer {
     // This is done for Records and Arrays as the OID is needed well before we are in an async
     // function and can just ask postgres.
     //
-    type_holes: Vec<(usize, HoleKind)>, // Vec<{ offset, type_name }>
-}
-
-#[derive(Debug, Clone)]
-enum HoleKind {
-    Type { name: UStr },
-    Array(Arc<PgArrayOf>),
+    hole_offsets: Vec<usize>,
+    // Separate vecator so that we don't have to generify or duplicate the logic in
+    // `PgConnection::resolve_types()`.
+    hole_types: Vec<PgTypeInfo>,
 }
 
 #[derive(Clone)]
@@ -114,7 +109,8 @@ impl PgArguments {
     ) -> Result<(), Error> {
         let PgArgumentBuffer {
             ref patches,
-            ref type_holes,
+            ref hole_types,
+            ref hole_offsets,
             ref mut buffer,
             ..
         } = self.buffer;
@@ -126,12 +122,10 @@ impl PgArguments {
             (patch.callback)(buf, ty);
         }
 
-        for (offset, kind) in type_holes {
-            let oid = match kind {
-                HoleKind::Type { name } => conn.fetch_type_id_by_name(name).await?,
-                HoleKind::Array(array) => conn.fetch_array_type_id(array).await?,
-            };
-            buffer[*offset..(*offset + 4)].copy_from_slice(&oid.0.to_be_bytes());
+        let resolved_holes = conn.resolve_types(hole_types).await?;
+
+        for (&offset, oid) in hole_offsets.iter().zip(resolved_holes) {
+            buffer[offset..][..4].copy_from_slice(&oid.0.to_be_bytes());
         }
 
         Ok(())
@@ -195,8 +189,8 @@ impl PgArgumentBuffer {
     }
 
     // Adds a callback to be invoked later when we know the parameter type
-    #[allow(dead_code)]
-    pub(crate) fn patch<F>(&mut self, callback: F)
+    #[cfg_attr(not(feature = "json"), expect(dead_code))]
+    pub(crate) fn patch_with<F>(&mut self, callback: F)
     where
         F: Fn(&mut [u8], &PgTypeInfo) + 'static + Send + Sync,
     {
@@ -212,23 +206,12 @@ impl PgArgumentBuffer {
 
     // Extends the inner buffer by enough space to have an OID
     // Remembers where the OID goes and type name for the OID
-    pub(crate) fn patch_type_by_name(&mut self, type_name: &UStr) {
+    pub(crate) fn push_hole(&mut self, type_info: PgTypeInfo) {
         let offset = self.len();
 
         self.extend_from_slice(&0_u32.to_be_bytes());
-        self.type_holes.push((
-            offset,
-            HoleKind::Type {
-                name: type_name.clone(),
-            },
-        ));
-    }
-
-    pub(crate) fn patch_array_type(&mut self, array: Arc<PgArrayOf>) {
-        let offset = self.len();
-
-        self.extend_from_slice(&0_u32.to_be_bytes());
-        self.type_holes.push((offset, HoleKind::Array(array)));
+        self.hole_offsets.push(offset);
+        self.hole_types.push(type_info);
     }
 
     fn snapshot(&self) -> PgArgumentBufferSnapshot {
@@ -236,14 +219,15 @@ impl PgArgumentBuffer {
             buffer,
             count,
             patches,
-            type_holes,
+            hole_offsets,
+            ..
         } = self;
 
         PgArgumentBufferSnapshot {
             buffer_length: buffer.len(),
             count: *count,
             patches_length: patches.len(),
-            type_holes_length: type_holes.len(),
+            type_holes_length: hole_offsets.len(),
         }
     }
 
@@ -259,7 +243,8 @@ impl PgArgumentBuffer {
         self.buffer.truncate(buffer_length);
         self.count = count;
         self.patches.truncate(patches_length);
-        self.type_holes.truncate(type_holes_length);
+        self.hole_offsets.truncate(type_holes_length);
+        self.hole_types.truncate(type_holes_length);
     }
 }
 

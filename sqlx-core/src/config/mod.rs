@@ -158,7 +158,16 @@ impl Config {
     /// * If the file exists but could not be read or parsed.
     /// * If the file exists but the `sqlx-toml` feature is disabled.
     pub fn try_from_crate_or_default() -> Result<Self, ConfigError> {
-        Self::read_from(get_crate_path()?).or_else(|e| {
+        Self::try_from_path_or_default(get_crate_path()?)
+    }
+
+    /// Attempt to read `Config` from the path given, or return `Config::default()` if it does not exist.
+    ///
+    /// # Errors
+    /// * If the file exists but could not be read or parsed.
+    /// * If the file exists but the `sqlx-toml` feature is disabled.
+    pub fn try_from_path_or_default(path: PathBuf) -> Result<Self, ConfigError> {
+        Self::read_from(path).or_else(|e| {
             if let ConfigError::NotFound { .. } = e {
                 Ok(Config::default())
             } else {

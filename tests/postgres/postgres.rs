@@ -417,7 +417,7 @@ async fn copy_can_work_with_failed_transactions() -> anyhow::Result<()> {
 
     tx.rollback().await?;
 
-    // conn should be usable again, as we explictly rolled back the transaction
+    // conn should be usable again, as we explicitly rolled back the transaction
     let got: i32 = sqlx::query_scalar("SELECT 1")
         .fetch_one(conn.as_mut())
         .await?;
@@ -445,7 +445,7 @@ async fn it_can_work_with_failed_transactions() -> anyhow::Result<()> {
         .is_err());
     tx.rollback().await?;
 
-    // conn should be usable again, as we explictly rolled back the transaction
+    // conn should be usable again, as we explicitly rolled back the transaction
     let got: i32 = sqlx::query_scalar("SELECT 1")
         .fetch_one(conn.as_mut())
         .await?;
@@ -2086,6 +2086,7 @@ async fn test_issue_3052() {
 }
 
 #[sqlx_macros::test]
+#[cfg(feature = "chrono")]
 async fn test_bind_iter() -> anyhow::Result<()> {
     use sqlx::postgres::PgBindIterExt;
     use sqlx::types::chrono::{DateTime, Utc};

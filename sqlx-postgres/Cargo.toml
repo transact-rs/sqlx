@@ -11,9 +11,9 @@ rust-version.workspace = true
 
 [features]
 any = ["sqlx-core/any"]
-json = ["sqlx-core/json"]
-migrate = ["sqlx-core/migrate"]
-offline = ["sqlx-core/offline"]
+json = ["dep:serde", "dep:serde_json", "sqlx-core/json"]
+migrate = ["sqlx-core/migrate", "dep:crc"]
+offline = ["json", "sqlx-core/offline", "smallvec/serde"]
 
 # Type Integration features
 bigdecimal = ["dep:bigdecimal", "dep:num-bigint", "sqlx-core/bigdecimal"]
@@ -28,17 +28,17 @@ uuid = ["dep:uuid", "sqlx-core/uuid"]
 
 [dependencies]
 # Futures crates
-futures-channel = { version = "0.3.19", default-features = false, features = ["sink", "alloc", "std"] }
-futures-core = { version = "0.3.19", default-features = false }
-futures-util = { version = "0.3.19", default-features = false, features = ["alloc", "sink", "io"] }
+futures-channel = { version = "0.3.32", default-features = false, features = ["sink", "alloc", "std"] }
+futures-core = { version = "0.3.32", default-features = false }
+futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
 
 # Cryptographic Primitives
-crc = "3.0.0"
-hkdf = "0.12.0"
-hmac = { version = "0.12.0", default-features = false, features = ["reset"]}
-md-5 = { version = "0.10.0", default-features = false }
-rand = { version = "0.8.4", default-features = false, features = ["std", "std_rng"] }
-sha2 = { version = "0.10.0", default-features = false }
+crc = { workspace = true, optional = true }
+hkdf = { workspace = true }
+hmac = { workspace = true }
+md-5 = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
 
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
 bigdecimal = { workspace = true, optional = true }
@@ -53,36 +53,36 @@ uuid = { workspace = true, optional = true }
 
 # Misc
 atoi = "2.0"
-base64 = { version = "0.22.0", default-features = false, features = ["std"] }
-bitflags = { version = "2", default-features = false }
+base64.workspace = true
+bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
-dotenvy = { workspace = true }
 hex = "0.4.3"
-home = "0.5.5"
-itoa = "1.0.1"
+itoa = "1.0.5"
 log = "0.4.18"
-memchr = { version = "2.4.1", default-features = false }
+memchr = { version = "2.5.0", default-features = false }
 num-bigint = { version = "0.4.3", optional = true }
-smallvec = { version = "1.7.0", features = ["serde"] }
+smallvec = { version = "1.13.1" }
 stringprep = "0.1.2"
-thiserror = "2.0.0"
 tracing = { version = "0.1.37", features = ["log"] }
-whoami = { version = "1.2.1", default-features = false }
+whoami = { version = "2.0.2", features = ["std"], default-features = false }
 
-serde = { version = "1.0.144", features = ["derive"] }
-serde_json = { version = "1.0.85", features = ["raw_value"] }
+dotenvy.workspace = true
+thiserror.workspace = true
+
+serde = { version = "1.0.219", optional = true, features = ["derive"] }
+serde_json = { version = "1.0.142", optional = true, features = ["raw_value"] }
 
 [dependencies.sqlx-core]
 workspace = true
-# We use JSON in the driver implementation itself so there's no reason not to enable it here.
-features = ["json"]
 
 [dev-dependencies.sqlx]
-workspace = true
+# FIXME: https://github.com/rust-lang/cargo/issues/15622
+# workspace = true
+path = ".."
 features = ["postgres", "derive"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
-etcetera = "0.10.0"
+etcetera = "0.11.0"
 
 [lints]
 workspace = true

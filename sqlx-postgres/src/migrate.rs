@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             if migration.no_tx {
                 execute_migration(self, table_name, migration).await?;
             } else {
-                // Use a single transaction for the actual migration script and the essential bookeeping so we never
+                // Use a single transaction for the actual migration script and the essential bookkeeping so we never
                 // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
                 // The `execution_time` however can only be measured for the whole transaction. This value _only_ exists for
                 // data lineage and debugging reasons, so it is not super important if it is lost. So we initialize it to -1
@@ -286,6 +286,28 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             let elapsed = start.elapsed();
 
             Ok(elapsed)
+        })
+    }
+
+    fn skip<'e>(
+        &'e mut self,
+        table_name: &'e str,
+        migration: &'e Migration,
+    ) -> BoxFuture<'e, Result<(), MigrateError>> {
+        Box::pin(async move {
+            // language=SQL
+            let _ = query(AssertSqlSafe(format!(
+                r#"
+    INSERT INTO {table_name} ( version, description, success, checksum, execution_time )
+    VALUES ( $1, $2, TRUE, $3, -1 )
+                "#
+            )))
+            .bind(migration.version)
+            .bind(&*migration.description)
+            .bind(&*migration.checksum)
+            .execute(self)
+            .await?;
+            Ok(())
         })
     }
 }

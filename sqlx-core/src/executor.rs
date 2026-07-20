@@ -1,5 +1,4 @@
 use crate::database::Database;
-use crate::describe::Describe;
 use crate::error::{BoxDynError, Error};
 use crate::sql_str::{SqlSafeStr, SqlStr};
 
@@ -31,6 +30,26 @@ use std::{fmt::Debug, future};
 /// * `&mut transaction` -> `&mut *transaction`
 /// * `&mut connection` -> `&mut *connection`
 ///
+/// # Note: Methods Not for General Use
+/// This is a building-block trait that is exposed mainly for use as a trait bound.
+///
+/// Instead of calling the methods of this trait, use the free functions in the `sqlx` crate root:
+/// * [`sqlx::query()`]: use for DML queries (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, etc.)
+///     * uses and caches prepared statements internally per-connection
+///     * may use argument placeholders (MySQL/MariaDB: `?`, Postgres/SQLite: `$1`, `$2`, etc.)
+///     * one query per string
+/// * [`sqlx::query_as()`], [`sqlx::query_scalar()`]: preferred for DML queries with type mapping
+/// * [`sqlx::raw_sql()`]: for DDL (`CREATE`, `ALTER`, etc.), batch queries and administration functions
+///     * accepts multiple queries separated by semicolons (`;`) in the same string
+///     * never uses prepared statements
+///
+/// Consider also the `query!()` family of macros, which offer queries and type mapping checked
+/// at compile-time.
+///
+/// [`sqlx::query()`]: crate::query::query
+/// [`sqlx::query_as()`]: crate::query_as::query_as
+/// [`sqlx::query_scalar()`]: crate::query_scalar::query_scalar
+/// [`sqlx::raw_sql()`]: crate::raw_sql::raw_sql
 pub trait Executor<'c>: Send + Debug + Sized {
     type Database: Database;
 
@@ -178,7 +197,11 @@ pub trait Executor<'c>: Send + Debug + Sized {
     /// This is used by compile-time verification in the query macros to
     /// power their type inference.
     #[doc(hidden)]
-    fn describe<'e>(self, sql: SqlStr) -> BoxFuture<'e, Result<Describe<Self::Database>, Error>>
+    #[cfg(feature = "offline")]
+    fn describe<'e>(
+        self,
+        sql: SqlStr,
+    ) -> BoxFuture<'e, Result<crate::describe::Describe<Self::Database>, Error>>
     where
         'c: 'e;
 }

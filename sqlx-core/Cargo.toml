@@ -56,12 +56,13 @@ tokio = { workspace = true, optional = true }
 native-tls = { version = "0.2.10", optional = true }
 
 rustls = { version = "0.23.24", default-features = false, features = ["std", "tls12"], optional = true }
-webpki-roots = { version = "0.26", optional = true }
+webpki-roots = { version = "1", optional = true }
 rustls-native-certs = { version = "0.8.0", optional = true }
 
 # Type Integrations
 bit-vec = { workspace = true, optional = true }
 bigdecimal = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 rust_decimal = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 ipnet = { workspace = true, optional = true }
@@ -69,44 +70,50 @@ ipnetwork = { workspace = true, optional = true }
 mac_address = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 
+# work around bug in async-fs 2.0.0, which references futures-lite dependency wrongly, see https://github.com/launchbadge/sqlx/pull/3791#issuecomment-3043363281
+async-fs = { version = "2.1", optional = true }
 async-io = { version = "2.4.1", optional = true }
 async-task = { version = "4.7.1", optional = true }
 
-# work around bug in async-fs 2.0.0, which references futures-lite dependency wrongly, see https://github.com/launchbadge/sqlx/pull/3791#issuecomment-3043363281
-async-fs = { version = "2.1", optional = true }
-base64 = { version = "0.22.0", default-features = false, features = ["std"] }
-bytes = "1.1.0"
+base64.workspace = true
+bytes = "1.2.0"
 cfg-if = { workspace = true }
-chrono = { version = "0.4.34", default-features = false, features = ["clock"], optional = true }
 crc = { version = "3", optional = true }
 crossbeam-queue = "0.3.2"
 either = "1.6.1"
-futures-core = { version = "0.3.19", default-features = false }
-futures-io = "0.3.24"
+futures-core = { version = "0.3.32", default-features = false }
+futures-io = "0.3.32"
 futures-intrusive = "0.5.0"
-futures-util = { version = "0.3.19", default-features = false, features = ["alloc", "sink", "io"] }
+futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink", "io"] }
 log = { version = "0.4.18", default-features = false }
-memchr = { version = "2.4.1", default-features = false }
-percent-encoding = "2.1.0"
-serde = { version = "1.0.132", features = ["derive", "rc"], optional = true }
-serde_json = { version = "1.0.73", features = ["raw_value"], optional = true }
+memchr = { version = "2.5.0", default-features = false }
+percent-encoding = "2.3.0"
+serde = { version = "1.0.219", features = ["derive", "rc"], optional = true }
+serde_json = { version = "1.0.142", features = ["raw_value"], optional = true }
 toml = { version = "0.8.16", optional = true }
-sha2 = { version = "0.10.0", default-features = false, optional = true }
+sha2 = { workspace = true, optional = true }
 #sqlformat = "0.2.0"
-thiserror = "2.0.0"
 tokio-stream = { version = "0.1.8", features = ["fs"], optional = true }
 tracing = { version = "0.1.37", features = ["log"] }
-smallvec = "1.7.0"
+smallvec = "1.13.1"
 url = { version = "2.2.2" }
-bstr = { version = "1.0", default-features = false, features = ["std"], optional = true }
-hashlink = "0.10.0"
+bstr = { version = "1.0.1", default-features = false, features = ["std"], optional = true }
+hashlink = "0.11.0"
 indexmap = "2.0"
 event-listener = "5.2.0"
-hashbrown = "0.15.0"
+hashbrown = "0.16.0"
+
+thiserror.workspace = true
 
 [dev-dependencies]
-sqlx = { workspace = true, features = ["postgres", "sqlite", "mysql", "migrate", "macros", "time", "uuid"] }
-tokio = { version = "1", features = ["rt"] }
+tokio = { version = "1.25.0", features = ["rt"] }
+
+[dev-dependencies.sqlx]
+# FIXME: https://github.com/rust-lang/cargo/issues/15622
+# workspace = true
+path = ".."
+default-features = false
+features = ["postgres", "sqlite", "mysql", "migrate", "macros", "time", "uuid"]
 
 [lints]
 workspace = true

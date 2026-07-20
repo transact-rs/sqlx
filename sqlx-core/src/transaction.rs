@@ -189,6 +189,7 @@ where
 //     }
 //
 //     #[doc(hidden)]
+//     #[cfg(feature = "offline")]
 //     fn describe<'e, 'q: 'e>(
 //         self,
 //         query: &'q str,

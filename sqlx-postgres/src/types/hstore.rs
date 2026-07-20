@@ -12,7 +12,6 @@ use crate::{
     types::Type,
     PgArgumentBuffer, PgHasArrayType, PgTypeInfo, PgValueRef, Postgres,
 };
-use serde::{Deserialize, Serialize};
 use sqlx_core::bytes::Buf;
 
 /// Key-value support (`hstore`) for Postgres.
@@ -88,7 +87,8 @@ use sqlx_core::bytes::Buf;
 /// }
 /// ```
 ///
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "offline", derive(serde::Serialize, serde::Deserialize))]
 pub struct PgHstore(pub BTreeMap<String, Option<String>>);
 
 impl Deref for PgHstore {

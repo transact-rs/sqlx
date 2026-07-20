@@ -26,20 +26,20 @@ name = "cargo-sqlx"
 path = "src/bin/cargo-sqlx.rs"
 
 [dependencies]
-dotenvy = "0.15.0"
-tokio = { version = "1.15.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }
-futures-util = { version = "0.3.19", features = ["alloc"] }
-clap = { version = "4.3.10", features = ["derive", "env", "wrap_help"] }
+dotenvy = "0.15.7"
+tokio = { version = "1.25.0", features = ["macros", "rt", "rt-multi-thread", "signal"] }
+futures-util = { version = "0.3.32", features = ["alloc"] }
+clap = { version = "4.4.7", features = ["derive", "env", "wrap_help"] }
 clap_complete = { version = "4.3.1", optional = true }
-chrono = { version = "0.4.19", default-features = false, features = ["clock"] }
-anyhow = "1.0.52"
+chrono = { version = "0.4.34", default-features = false, features = ["clock"] }
+anyhow = "1.0.58"
 console = "0.15.0"
 dialoguer = { version = "0.11", default-features = false }
-serde_json = "1.0.73"
+serde_json = "1.0.142"
 glob = "0.3.0"
-openssl = { version = "0.10.38", optional = true }
-cargo_metadata = "0.18.1"
-filetime = "0.2"
+openssl = { version = "0.10.46", optional = true }
+cargo_metadata = "0.23.1"
+filetime = "0.2.25"
 
 backoff = { version = "0.4.0", features = ["futures", "tokio"] }
 
@@ -62,6 +62,7 @@ native-tls = ["sqlx/tls-native-tls"]
 
 # databases
 mysql = ["sqlx/mysql"]
+mysql-rsa = ["sqlx/mysql-rsa"]
 postgres = ["sqlx/postgres"]
 sqlite = ["sqlx/sqlite", "_sqlite"]
 sqlite-unbundled = ["sqlx/sqlite-unbundled", "_sqlite"]
@@ -77,7 +78,7 @@ sqlx-toml = ["sqlx/sqlx-toml"]
 _sqlite = []
 
 [dev-dependencies]
-assert_cmd = "2.0.11"
+assert_cmd = "2.1.1"
 tempfile = "3.10.1"
 
 [lints]

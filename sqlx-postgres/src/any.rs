@@ -9,14 +9,13 @@ use sqlx_core::sql_str::SqlStr;
 use std::{future, pin::pin};
 
 use sqlx_core::any::{
-    Any, AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
+    AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
     AnyStatement, AnyTypeInfo, AnyTypeInfoKind,
 };
 
 use crate::type_info::PgType;
 use sqlx_core::connection::Connection;
 use sqlx_core::database::Database;
-use sqlx_core::describe::Describe;
 use sqlx_core::executor::Executor;
 use sqlx_core::ext::ustr::UStr;
 use sqlx_core::transaction::TransactionManager;
@@ -84,7 +83,7 @@ impl AnyConnectionBackend for PgConnection {
         query: SqlStr,
         persistent: bool,
         arguments: Option<AnyArguments>,
-    ) -> BoxStream<sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
+    ) -> BoxStream<'_, sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
         let persistent = persistent && arguments.is_some();
         let arguments = match arguments.map(AnyArguments::convert_into).transpose() {
             Ok(arguments) => arguments,
@@ -110,7 +109,7 @@ impl AnyConnectionBackend for PgConnection {
         query: SqlStr,
         persistent: bool,
         arguments: Option<AnyArguments>,
-    ) -> BoxFuture<sqlx_core::Result<Option<AnyRow>>> {
+    ) -> BoxFuture<'_, sqlx_core::Result<Option<AnyRow>>> {
         let persistent = persistent && arguments.is_some();
         let arguments = arguments
             .map(AnyArguments::convert_into)
@@ -136,12 +135,16 @@ impl AnyConnectionBackend for PgConnection {
     ) -> BoxFuture<'c, sqlx_core::Result<AnyStatement>> {
         Box::pin(async move {
             let statement = Executor::prepare_with(self, sql, &[]).await?;
-            let colunn_names = statement.metadata.column_names.clone();
-            AnyStatement::try_from_statement(statement, colunn_names)
+            let column_names = statement.metadata.column_names.clone();
+            AnyStatement::try_from_statement(statement, column_names)
         })
     }
 
-    fn describe<'c>(&mut self, sql: SqlStr) -> BoxFuture<'_, sqlx_core::Result<Describe<Any>>> {
+    #[cfg(feature = "offline")]
+    fn describe<'c>(
+        &mut self,
+        sql: SqlStr,
+    ) -> BoxFuture<'_, sqlx_core::Result<sqlx_core::describe::Describe<sqlx_core::any::Any>>> {
         Box::pin(async move {
             let describe = Executor::describe(self, sql).await?;
 
@@ -172,7 +175,7 @@ impl AnyConnectionBackend for PgConnection {
                 None => None,
             };
 
-            Ok(Describe {
+            Ok(sqlx_core::describe::Describe {
                 columns,
                 parameters,
                 nullable: describe.nullable,

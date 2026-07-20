@@ -42,4 +42,7 @@ pub enum MigrateError {
 
     #[error("database driver does not support creation of schemas at migrate time: {0}")]
     CreateSchemasNotSupported(String),
+
+    #[error("database driver does not support skipping migrations")]
+    SkipNotSupported(),
 }

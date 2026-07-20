@@ -12,7 +12,6 @@ use sqlx_core::transaction::Transaction;
 use sqlx_core::Either;
 use tracing::Instrument;
 
-use crate::describe::Describe;
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::message::{BackendMessageFormat, Notification};
@@ -37,6 +36,7 @@ pub struct PgListener {
 }
 
 /// An asynchronous notification from Postgres.
+#[derive(Clone)]
 pub struct PgNotification(Notification);
 
 impl PgListener {
@@ -336,7 +336,7 @@ impl PgListener {
     ///
     /// This is helpful if you want to retrieve all buffered notifications and process them in batches.
     pub fn next_buffered(&mut self) -> Option<PgNotification> {
-        if let Ok(Some(notification)) = self.buffer_rx.try_next() {
+        if let Ok(notification) = self.buffer_rx.try_recv() {
             Some(PgNotification(notification))
         } else {
             None
@@ -439,7 +439,11 @@ impl<'c> Executor<'c> for &'c mut PgListener {
     }
 
     #[doc(hidden)]
-    fn describe<'e>(self, query: SqlStr) -> BoxFuture<'e, Result<Describe<Self::Database>, Error>>
+    #[cfg(feature = "offline")]
+    fn describe<'e>(
+        self,
+        query: SqlStr,
+    ) -> BoxFuture<'e, Result<crate::describe::Describe<Self::Database>, Error>>
     where
         'c: 'e,
     {

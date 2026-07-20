@@ -16,17 +16,21 @@
 
 #![cfg_attr(
     any(sqlx_macros_unstable, procmacro2_semver_exempt),
-    feature(track_path)
+    feature(proc_macro_tracked_path, proc_macro_tracked_env)
 )]
 
+#[cfg(any(sqlx_macros_unstable, procmacro2_semver_exempt))]
+extern crate proc_macro;
+
 use cfg_if::cfg_if;
+use std::path::PathBuf;
 
 #[cfg(feature = "macros")]
 use crate::query::QueryDriver;
 
 pub type Error = Box<dyn std::error::Error>;
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 mod common;
 pub mod database;
@@ -83,4 +87,30 @@ where
             sqlx_core::rt::missing_rt(f)
         }
     }
+}
+
+pub fn env(var: &str) -> Result<String> {
+    env_opt(var)?
+        .ok_or_else(|| format!("env var {var:?} must be set to use the query macros").into())
+}
+
+#[allow(clippy::disallowed_methods)]
+pub fn env_opt(var: &str) -> Result<Option<String>> {
+    use std::env::VarError;
+
+    #[cfg(any(sqlx_macros_unstable, procmacro2_semver_exempt))]
+    let res: Result<String, VarError> = proc_macro::tracked::env_var(var);
+
+    #[cfg(not(any(sqlx_macros_unstable, procmacro2_semver_exempt)))]
+    let res: Result<String, VarError> = std::env::var(var);
+
+    match res {
+        Ok(val) => Ok(Some(val)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(VarError::NotUnicode(_)) => Err(format!("env var {var:?} is not valid UTF-8").into()),
+    }
+}
+
+pub fn manifest_dir() -> Result<PathBuf> {
+    Ok(env("CARGO_MANIFEST_DIR")?.into())
 }

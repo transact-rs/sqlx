@@ -84,7 +84,7 @@ pub enum Error {
         source: BoxDynError,
     },
 
-    /// Error occured while encoding a value.
+    /// Error occurred while encoding a value.
     #[error("error occurred while encoding a value: {0}")]
     Encode(#[source] BoxDynError),
 

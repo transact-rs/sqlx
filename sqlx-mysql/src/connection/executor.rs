@@ -1,6 +1,5 @@
 use super::MySqlStream;
 use crate::connection::stream::Waiting;
-use crate::describe::Describe;
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::ext::ustr::UStr;
@@ -10,7 +9,7 @@ use crate::protocol::response::Status;
 use crate::protocol::statement::{
     BinaryRow, Execute as StatementExecute, Prepare, PrepareOk, StmtClose,
 };
-use crate::protocol::text::{ColumnDefinition, ColumnFlags, Query, TextRow};
+use crate::protocol::text::{ColumnDefinition, Query, TextRow};
 use crate::statement::{MySqlStatement, MySqlStatementMetadata};
 use crate::HashMap;
 use crate::{
@@ -121,7 +120,7 @@ impl MySqlConnection {
             // to re-use this memory freely between result sets
             let mut columns = Arc::new(Vec::new());
 
-            let (mut column_names, format, mut needs_metadata) = if let Some(arguments) = arguments {
+            let format = if let Some(arguments) = arguments {
                 if persistent && self.inner.cache_statement.is_enabled() {
                     let (id, metadata) = self
                         .get_or_prepare_statement(sql)
@@ -145,7 +144,7 @@ impl MySqlConnection {
                         })
                         .await?;
 
-                    (metadata.column_names, MySqlValueFormat::Binary, false)
+                    MySqlValueFormat::Binary
                 } else {
                     let (id, metadata) = self
                         .prepare_statement(sql)
@@ -171,13 +170,13 @@ impl MySqlConnection {
 
                     self.inner.stream.send_packet(StmtClose { statement: id }).await?;
 
-                    (metadata.column_names, MySqlValueFormat::Binary, false)
+                    MySqlValueFormat::Binary
                 }
             } else {
                 // https://dev.mysql.com/doc/internals/en/com-query.html
                 self.inner.stream.send_packet(Query(sql)).await?;
 
-                (Arc::default(), MySqlValueFormat::Text, true)
+                MySqlValueFormat::Text
             };
 
             loop {
@@ -213,19 +212,13 @@ impl MySqlConnection {
                 // otherwise, this first packet is the start of the result-set metadata,
                 *self.inner.stream.waiting.front_mut().unwrap() = Waiting::Row;
 
-                let num_columns = packet.get_uint_lenenc(); // column count
+                let num_columns = packet.get_uint_lenenc()?; // column count
                 let num_columns = usize::try_from(num_columns)
                     .map_err(|_| err_protocol!("column count overflows usize: {num_columns}"))?;
 
-                if needs_metadata {
-                    column_names = Arc::new(recv_result_metadata(&mut self.inner.stream, num_columns, Arc::make_mut(&mut columns)).await?);
-                } else {
-                    // next time we hit here, it'll be a new result set and we'll need the
-                    // full metadata
-                    needs_metadata = true;
-
-                    recv_result_columns(&mut self.inner.stream, num_columns, Arc::make_mut(&mut columns)).await?;
-                }
+                // Always reload column names, even for prepared statements (the schema
+                // may change between PREPARE and EXECUTE).
+                let column_names = Arc::new(recv_result_metadata(&mut self.inner.stream, num_columns, Arc::make_mut(&mut columns)).await?);
 
                 // finally, there will be none or many result-rows
                 loop {
@@ -359,7 +352,11 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
     }
 
     #[doc(hidden)]
-    fn describe<'e>(self, sql: SqlStr) -> BoxFuture<'e, Result<Describe<MySql>, Error>>
+    #[cfg(feature = "offline")]
+    fn describe<'e>(
+        self,
+        sql: SqlStr,
+    ) -> BoxFuture<'e, Result<crate::describe::Describe<MySql>, Error>>
     where
         'c: 'e,
     {
@@ -379,36 +376,17 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
                 .iter()
                 .map(|col| {
                     col.flags
-                        .map(|flags| !flags.contains(ColumnFlags::NOT_NULL))
+                        .map(|flags| !flags.contains(crate::protocol::text::ColumnFlags::NOT_NULL))
                 })
                 .collect();
 
-            Ok(Describe {
+            Ok(crate::describe::Describe {
                 parameters: Some(Either::Right(metadata.parameters)),
                 columns,
                 nullable,
             })
         })
     }
-}
-
-async fn recv_result_columns(
-    stream: &mut MySqlStream,
-    num_columns: usize,
-    columns: &mut Vec<MySqlColumn>,
-) -> Result<(), Error> {
-    columns.clear();
-    columns.reserve(num_columns);
-
-    for ordinal in 0..num_columns {
-        columns.push(recv_next_result_column(&stream.recv().await?, ordinal)?);
-    }
-
-    if num_columns > 0 {
-        stream.maybe_recv_eof().await?;
-    }
-
-    Ok(())
 }
 
 fn recv_next_result_column(def: &ColumnDefinition, ordinal: usize) -> Result<MySqlColumn, Error> {
