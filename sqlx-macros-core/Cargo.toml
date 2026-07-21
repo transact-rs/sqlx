@@ -19,8 +19,9 @@ _rt-tokio = ["tokio", "sqlx-core/_rt-tokio"]
 
 _tls-native-tls = ["sqlx-core/_tls-native-tls"]
 _tls-rustls-aws-lc-rs = ["sqlx-core/_tls-rustls-aws-lc-rs"]
+_tls-rustls-aws-lc-rs-platform-verifier = ["sqlx-core/_tls-rustls-aws-lc-rs-platform-verifier"]
 _tls-rustls-ring-webpki = ["sqlx-core/_tls-rustls-ring-webpki"]
-_tls-rustls-ring-native-roots = ["sqlx-core/_tls-rustls-ring-native-roots"]
+_tls-rustls-ring-platform-verifier = ["sqlx-core/_tls-rustls-aws-lc-rs-platform-verifier"]
 
 _sqlite = []
 
