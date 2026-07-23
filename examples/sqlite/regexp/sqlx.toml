@@ -1,0 +1,4 @@
+[drivers.sqlite]
+unsafe-load-extensions = []
+
+register-regexp = true
