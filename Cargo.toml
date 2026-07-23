@@ -449,6 +449,13 @@ name = "postgres-error"
 path = "tests/postgres/error.rs"
 required-features = ["postgres"]
 
+# Uses a tokio fake server + `#[tokio::test]`, so it only runs on the tokio
+# runtime; skipped under the other runtime matrix cells.
+[[test]]
+name = "postgres-pool"
+path = "tests/postgres/pool.rs"
+required-features = ["postgres", "runtime-tokio"]
+
 [[test]]
 name = "postgres-test-attr"
 path = "tests/postgres/test-attr.rs"
