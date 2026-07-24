@@ -15,6 +15,15 @@ use crate::pool::options::PoolConnectionMetadata;
 
 const CLOSE_ON_DROP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Bounds each step of returning a connection to the pool.
+///
+/// Every step here does I/O on a connection that may be dead in a way the socket
+/// cannot report: if the server disappeared without closing it, and the client has
+/// nothing left to retransmit, reads never complete. The returning task holds the
+/// pool's `DecrementSizeGuard` for as long as it runs, so an unbounded step leaks a
+/// permit and the pool shrinks by one connection every time it happens.
+const RETURN_TO_POOL_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A connection managed by a [`Pool`][crate::pool::Pool].
 ///
 /// Will be returned to the pool on-drop.
@@ -275,29 +284,37 @@ impl<DB: Database> Floating<DB, Live<DB>> {
     async fn return_to_pool(mut self) -> bool {
         // Immediately close the connection.
         if self.guard.pool.is_closed() {
-            self.close().await;
+            self.close_bounded().await;
             return false;
         }
 
         // If the connection is beyond max lifetime, close the connection and
         // immediately create a new connection
         if is_beyond_max_lifetime(&self.inner, &self.guard.pool.options) {
-            self.close().await;
+            self.close_bounded().await;
             return false;
         }
 
         if let Some(test) = &self.guard.pool.options.after_release {
             let meta = self.metadata();
-            match (test)(&mut self.inner.raw, meta).await {
-                Ok(true) => (),
-                Ok(false) => {
-                    self.close().await;
+            let result =
+                crate::rt::timeout(RETURN_TO_POOL_TIMEOUT, (test)(&mut self.inner.raw, meta)).await;
+
+            match result {
+                Ok(Ok(true)) => (),
+                Ok(Ok(false)) => {
+                    self.close_bounded().await;
                     return false;
                 }
-                Err(error) => {
+                Ok(Err(error)) => {
                     tracing::warn!(%error, "error from `after_release`");
                     // Connection is broken, don't try to gracefully close as
                     // something weird might happen.
+                    self.close_hard().await;
+                    return false;
+                }
+                Err(_) => {
+                    tracing::warn!("timed out in `after_release`; discarding the connection");
                     self.close_hard().await;
                     return false;
                 }
@@ -311,20 +328,40 @@ impl<DB: Database> Floating<DB, Live<DB>> {
         // returned to the pool; also of course, if it was dropped due to an error
         // this is simply a band-aid as SQLx-next connections should be able
         // to recover from cancellations
-        if let Err(error) = self.raw.ping().await {
-            tracing::warn!(
-                %error,
-                "error occurred while testing the connection on-release",
-            );
+        let result = crate::rt::timeout(RETURN_TO_POOL_TIMEOUT, self.raw.ping()).await;
 
-            // Connection is broken, don't try to gracefully close.
-            self.close_hard().await;
-            false
-        } else {
-            // if the connection is still viable, release it to the pool
-            self.release();
-            true
+        match result {
+            Ok(Ok(())) => {
+                // if the connection is still viable, release it to the pool
+                self.release();
+                true
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    %error,
+                    "error occurred while testing the connection on-release",
+                );
+
+                // Connection is broken, don't try to gracefully close.
+                self.close_hard().await;
+                false
+            }
+            Err(_) => {
+                tracing::warn!("timed out while testing the connection on-release; discarding it",);
+
+                // The socket is not answering; dropping it is the only way to get the
+                // pool permit back.
+                self.close_hard().await;
+                false
+            }
         }
+    }
+
+    /// Close the connection, giving up on a graceful close if it does not complete
+    /// promptly. Cancelling `close()` still drops the connection and releases the
+    /// pool permit, which is the outcome that matters here.
+    async fn close_bounded(self) {
+        let _ = crate::rt::timeout(RETURN_TO_POOL_TIMEOUT, self.close()).await;
     }
 
     pub async fn close(self) {

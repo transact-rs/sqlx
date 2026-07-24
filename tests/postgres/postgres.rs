@@ -12,7 +12,7 @@ use sqlx_test::{new, pool, setup_if_needed};
 use std::env;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[sqlx_macros::test]
 async fn it_connects() -> anyhow::Result<()> {
@@ -317,6 +317,34 @@ async fn it_can_fail_and_recover() -> anyhow::Result<()> {
 
         assert_eq!(val, i);
     }
+
+    Ok(())
+}
+
+/// A hook that never completes must not hold the pool permit forever: returning a
+/// connection to the pool does I/O on a socket that may be dead in a way it cannot
+/// report, so each step is bounded and the connection is discarded on timeout.
+#[sqlx_macros::test]
+async fn pool_recovers_from_a_hanging_after_release() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(30))
+        .after_release(|_conn, _meta| Box::pin(std::future::pending()))
+        .connect(&env::var("DATABASE_URL")?)
+        .await?;
+
+    let conn = pool.acquire().await?;
+    drop(conn);
+
+    // The permit comes back once the bounded return-to-pool gives up on the hook.
+    let started_at = Instant::now();
+    let _conn = pool.acquire().await?;
+    assert!(
+        started_at.elapsed() < Duration::from_secs(30),
+        "acquire waited on a connection whose return never finished",
+    );
 
     Ok(())
 }
