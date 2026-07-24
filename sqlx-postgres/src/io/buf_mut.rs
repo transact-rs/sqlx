@@ -19,7 +19,8 @@ impl PgBufMutExt for Vec<u8> {
     {
         // reserve space to write the prefixed length
         let offset = self.len();
-        self.extend(&[0; 4]);
+        self.reserve(4);
+        self.extend_from_slice(&[0; 4]);
 
         // write the main body of the message
         let write_result = write_contents(self);
