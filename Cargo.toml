@@ -366,6 +366,12 @@ path = "benches/sqlite/describe.rs"
 harness = false
 required-features = ["sqlite"]
 
+[[bench]]
+name = "sqlite-simple"
+path = "benches/sqlite/simple.rs"
+harness = false
+required-features = ["sqlite"]
+
 #
 # MySQL
 #
