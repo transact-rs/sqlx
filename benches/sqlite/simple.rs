@@ -1,4 +1,5 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use futures_util::TryStreamExt;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Executor;
 use sqlx::Row;
@@ -29,7 +30,7 @@ async fn setup_pool() -> SqlitePool {
     .unwrap();
 
     // Seed 10,000 rows for large result benchmarks.
-    // Using a single INSERT with a recursive CTE to avoid 10K round-trips.
+    // Using a recursive CTE to avoid 10K round-trips.
     pool.execute(
         r#"
         WITH RECURSIVE cnt(id) AS (
@@ -93,8 +94,10 @@ async fn bench_query_small(pool: &SqlitePool) {
 
 /// #5: Small query, huge results (10K rows, 5+ columns with String and BLOB).
 async fn bench_query_large(pool: &SqlitePool) {
-    let mut rows = sqlx::query("SELECT id, i32_val, i64_val, f64_val, text_val, blob_val FROM bench")
-        .fetch(pool);
+    let mut rows = sqlx::query(
+        "SELECT id, i32_val, i64_val, f64_val, text_val, blob_val FROM bench",
+    )
+    .fetch(pool);
 
     let mut count = 0u64;
     while let Some(row) = rows.try_next().await.unwrap() {
