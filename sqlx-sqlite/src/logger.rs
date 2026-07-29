@@ -224,7 +224,7 @@ impl<R: Debug, S: Debug + DebugDiff, P: Debug> core::fmt::Display for QueryPlanL
         let max_branch_id: i64 = [
             self.branch_operations.last_index().unwrap_or(0),
             self.branch_results.last_index().unwrap_or(0),
-            self.branch_results.last_index().unwrap_or(0),
+            self.branch_origins.last_index().unwrap_or(0),
         ]
         .into_iter()
         .max()

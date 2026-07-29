@@ -175,7 +175,7 @@ fn load_env(
     }))
 }
 
-/// Returns `true` if `val` is `"true"`,
+/// Returns `true` if `val` is `"true"` (case-insensitive) or `"1"`.
 fn is_truthy_bool(val: &str) -> bool {
     val.eq_ignore_ascii_case("true") || val == "1"
 }
