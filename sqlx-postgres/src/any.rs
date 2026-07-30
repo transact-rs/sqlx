@@ -5,7 +5,8 @@ use crate::{
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::{stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
-use sqlx_core::sql_str::SqlStr;
+use sqlx_core::sql_str::{AssertSqlSafe, SqlSafeStr, SqlStr};
+use std::borrow::Cow;
 use std::{future, pin::pin};
 
 use sqlx_core::any::{
@@ -21,6 +22,177 @@ use sqlx_core::ext::ustr::UStr;
 use sqlx_core::transaction::TransactionManager;
 
 sqlx_core::declare_driver_with_optional_migrate!(DRIVER = Postgres);
+
+/// Rewrite `?`-style placeholders (as produced by the `Any` driver, e.g. via `QueryBuilder<Any>`)
+/// into Postgres-style positional placeholders (`$1`, `$2`, ...).
+///
+/// `AnyArguments` binds its values in the same left-to-right order that `?` placeholders were
+/// written, so numbering them `1..=N` in order of appearance preserves the correct binding.
+///
+/// This is SQL-aware to avoid rewriting a literal `?` character that appears inside:
+/// - a single-quoted string literal (`'...'`, with `''` as an escaped quote)
+/// - a double-quoted identifier (`"..."`, with `""` as an escaped quote)
+/// - a dollar-quoted string (`$$...$$` or `$tag$...$tag$`)
+/// - a `--` line comment or a `/* */` block comment (not nested)
+///
+/// Only MySQL and SQLite use `?` natively, so this rewrite is only needed on the Postgres leg
+/// of the `Any` driver; see <https://github.com/transact-rs/sqlx/issues/3000>.
+fn rewrite_any_placeholders(sql: &str) -> Cow<'_, str> {
+    if !sql.contains('?') {
+        return Cow::Borrowed(sql);
+    }
+
+    let chars: Vec<char> = sql.chars().collect();
+    let mut out = String::with_capacity(sql.len() + 8);
+    let mut i = 0usize;
+    let mut placeholder_num = 0usize;
+
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '?' => {
+                placeholder_num += 1;
+                out.push('$');
+                out.push_str(&placeholder_num.to_string());
+                i += 1;
+            }
+            '\'' | '"' => {
+                // String literal or quoted identifier; the doubled-quote is the escape for both.
+                let quote = c;
+                out.push(c);
+                i += 1;
+                while i < chars.len() {
+                    let ch = chars[i];
+                    out.push(ch);
+                    i += 1;
+                    if ch == quote {
+                        if chars.get(i) == Some(&quote) {
+                            out.push(quote);
+                            i += 1;
+                            continue;
+                        }
+                        break;
+                    }
+                }
+            }
+            '-' if chars.get(i + 1) == Some(&'-') => {
+                // Line comment: copy through to (but not including) the newline.
+                while i < chars.len() && chars[i] != '\n' {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '/' if chars.get(i + 1) == Some(&'*') => {
+                // Block comment (not handling nesting; Postgres nested comments are a rare
+                // edge case and out of scope for this fix).
+                out.push(chars[i]);
+                out.push(chars[i + 1]);
+                i += 2;
+                while i < chars.len() {
+                    if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                        out.push('*');
+                        out.push('/');
+                        i += 2;
+                        break;
+                    }
+                    out.push(chars[i]);
+                    i += 1;
+                }
+            }
+            '$' => {
+                // Possible dollar-quote opening tag: `$tag$` where `tag` is `[A-Za-z0-9_]*`
+                // (empty tag is the common `$$...$$` form).
+                let mut j = i + 1;
+                while j < chars.len() && (chars[j].is_alphanumeric() || chars[j] == '_') {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == '$' {
+                    let tag: String = chars[i + 1..j].iter().collect();
+                    let open: String = chars[i..=j].iter().collect();
+                    out.push_str(&open);
+                    i = j + 1;
+
+                    let close: Vec<char> = format!("${tag}$").chars().collect();
+                    let mut found = false;
+                    while i < chars.len() {
+                        if chars[i..].starts_with(&close[..]) {
+                            out.extend(&close);
+                            i += close.len();
+                            found = true;
+                            break;
+                        }
+                        out.push(chars[i]);
+                        i += 1;
+                    }
+                    // If unterminated, we've already copied through to the end of input;
+                    // nothing further to do (matches Postgres's own eventual parse error).
+                    let _ = found;
+                } else {
+                    out.push('$');
+                    i += 1;
+                }
+            }
+            _ => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+
+    Cow::Owned(out)
+}
+
+/// Rewrite `?`-style placeholders into `$1, $2, ...` using exact byte offsets recorded by
+/// `QueryBuilder<Any>::push_bind()` (see `Arguments::note_placeholder_offset`), rather than
+/// re-parsing the SQL string to find them.
+///
+/// `offsets` must be given in ascending order and each one must point at the first (and only)
+/// byte of a `?` placeholder in `sql`. This holds by construction, since `QueryBuilder` records
+/// them in order as it writes the query left-to-right, so no quote/comment-awareness is needed
+/// here: we already know unambiguously where every placeholder is.
+fn rewrite_any_placeholders_by_offset(sql: &str, offsets: &[usize]) -> String {
+    let mut out = String::with_capacity(sql.len() + offsets.len() * 2);
+    let mut last = 0;
+
+    for (i, &offset) in offsets.iter().enumerate() {
+        out.push_str(&sql[last..offset]);
+        out.push('$');
+        out.push_str(&(i + 1).to_string());
+        // `?` is a single ASCII byte, so this is always a valid char boundary to resume at.
+        last = offset + 1;
+    }
+
+    out.push_str(&sql[last..]);
+    out
+}
+
+/// Rewrite `?`-style placeholders (as produced by the `Any` driver, e.g. via `QueryBuilder<Any>`)
+/// into Postgres-style positional placeholders (`$1`, `$2`, ...), as a [`SqlStr`], only
+/// allocating a new one if a rewrite was actually needed.
+///
+/// When `arguments` carries offsets recorded by `QueryBuilder<Any>::push_bind()` (see
+/// [`rewrite_any_placeholders_by_offset`]), those are used directly since they're unambiguous.
+/// Otherwise (e.g. a plain `sqlx::query()` call with a hand-written `?` in the SQL), we fall
+/// back to [`rewrite_any_placeholders`], which parses the query to skip `?` that isn't really a
+/// placeholder.
+fn maybe_rewrite_any_placeholders(sql: SqlStr, arguments: Option<&AnyArguments>) -> SqlStr {
+    if let Some(arguments) = arguments {
+        let offsets = &arguments.placeholder_offsets;
+
+        // Only trust the recorded offsets if there's exactly one per bound value; if they don't
+        // line up (e.g. `?` was hand-written into `QueryBuilder::push()` SQL rather than added
+        // via `push_bind()`), fall through to the parser instead of risking a bad rewrite.
+        if !offsets.is_empty() && offsets.len() == arguments.values.0.len() {
+            let rewritten = rewrite_any_placeholders_by_offset(sql.as_str(), offsets);
+            return AssertSqlSafe(rewritten).into_sql_str();
+        }
+    }
+
+    match rewrite_any_placeholders(sql.as_str()) {
+        Cow::Borrowed(_) => sql,
+        Cow::Owned(rewritten) => AssertSqlSafe(rewritten).into_sql_str(),
+    }
+}
 
 impl AnyConnectionBackend for PgConnection {
     fn name(&self) -> &str {
@@ -84,6 +256,7 @@ impl AnyConnectionBackend for PgConnection {
         persistent: bool,
         arguments: Option<AnyArguments>,
     ) -> BoxStream<'_, sqlx_core::Result<Either<AnyQueryResult, AnyRow>>> {
+        let query = maybe_rewrite_any_placeholders(query, arguments.as_ref());
         let persistent = persistent && arguments.is_some();
         let arguments = match arguments.map(AnyArguments::convert_into).transpose() {
             Ok(arguments) => arguments,
@@ -110,6 +283,7 @@ impl AnyConnectionBackend for PgConnection {
         persistent: bool,
         arguments: Option<AnyArguments>,
     ) -> BoxFuture<'_, sqlx_core::Result<Option<AnyRow>>> {
+        let query = maybe_rewrite_any_placeholders(query, arguments.as_ref());
         let persistent = persistent && arguments.is_some();
         let arguments = arguments
             .map(AnyArguments::convert_into)
@@ -133,6 +307,9 @@ impl AnyConnectionBackend for PgConnection {
         sql: SqlStr,
         _parameters: &[AnyTypeInfo],
     ) -> BoxFuture<'c, sqlx_core::Result<AnyStatement>> {
+        // No bound arguments are available here (this is a prepare-only call), so we can't use
+        // the offset-based rewrite; fall back to parsing the SQL for hand-written `?`.
+        let sql = maybe_rewrite_any_placeholders(sql, None);
         Box::pin(async move {
             let statement = Executor::prepare_with(self, sql, &[]).await?;
             let column_names = statement.metadata.column_names.clone();
@@ -145,6 +322,8 @@ impl AnyConnectionBackend for PgConnection {
         &mut self,
         sql: SqlStr,
     ) -> BoxFuture<'_, sqlx_core::Result<sqlx_core::describe::Describe<sqlx_core::any::Any>>> {
+        // Same reasoning as `prepare_with`: no arguments in scope, so fall back to parsing.
+        let sql = maybe_rewrite_any_placeholders(sql, None);
         Box::pin(async move {
             let describe = Executor::describe(self, sql).await?;
 
@@ -250,5 +429,119 @@ fn map_result(res: PgQueryResult) -> AnyQueryResult {
     AnyQueryResult {
         rows_affected: res.rows_affected(),
         last_insert_id: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rewrite_any_placeholders, rewrite_any_placeholders_by_offset};
+
+    #[test]
+    fn no_placeholders_is_borrowed_unchanged() {
+        let sql = "SELECT * FROM foo";
+        assert!(matches!(
+            rewrite_any_placeholders(sql),
+            std::borrow::Cow::Borrowed(s) if s == sql
+        ));
+    }
+
+    #[test]
+    fn simple_placeholders_are_numbered_in_order() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT * FROM foo WHERE a = ? AND b = ?"),
+            "SELECT * FROM foo WHERE a = $1 AND b = $2"
+        );
+    }
+
+    #[test]
+    fn limit_offset_placeholders() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT * FROM foo LIMIT ? OFFSET ?"),
+            "SELECT * FROM foo LIMIT $1 OFFSET $2"
+        );
+    }
+
+    #[test]
+    fn question_mark_in_string_literal_is_untouched() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT * FROM foo WHERE q = 'is this ok?' AND a = ?"),
+            "SELECT * FROM foo WHERE q = 'is this ok?' AND a = $1"
+        );
+    }
+
+    #[test]
+    fn escaped_quote_in_string_literal() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT 'it''s a ? test' WHERE a = ?"),
+            "SELECT 'it''s a ? test' WHERE a = $1"
+        );
+    }
+
+    #[test]
+    fn question_mark_in_quoted_identifier_is_untouched() {
+        assert_eq!(
+            rewrite_any_placeholders(r#"SELECT "weird?col" FROM foo WHERE a = ?"#),
+            r#"SELECT "weird?col" FROM foo WHERE a = $1"#
+        );
+    }
+
+    #[test]
+    fn question_mark_in_dollar_quoted_string_is_untouched() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT $$has a ? in it$$ WHERE a = ?"),
+            "SELECT $$has a ? in it$$ WHERE a = $1"
+        );
+    }
+
+    #[test]
+    fn question_mark_in_tagged_dollar_quoted_string_is_untouched() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT $tag$has a ? in it$tag$ WHERE a = ?"),
+            "SELECT $tag$has a ? in it$tag$ WHERE a = $1"
+        );
+    }
+
+    #[test]
+    fn question_mark_in_line_comment_is_untouched() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT a -- is this ok?\nWHERE a = ?"),
+            "SELECT a -- is this ok?\nWHERE a = $1"
+        );
+    }
+
+    #[test]
+    fn question_mark_in_block_comment_is_untouched() {
+        assert_eq!(
+            rewrite_any_placeholders("SELECT a /* ok? */ WHERE a = ?"),
+            "SELECT a /* ok? */ WHERE a = $1"
+        );
+    }
+
+    #[test]
+    fn offset_based_rewrite_orders_by_position() {
+        let sql = "SELECT * FROM foo WHERE a = ? AND b = ?";
+        let offsets: Vec<usize> = sql.match_indices('?').map(|(i, _)| i).collect();
+        assert_eq!(
+            rewrite_any_placeholders_by_offset(sql, &offsets),
+            "SELECT * FROM foo WHERE a = $1 AND b = $2"
+        );
+    }
+
+    #[test]
+    fn offset_based_rewrite_only_touches_given_offsets() {
+        // There's a `?` inside the string literal too, but since we trust the caller's
+        // offsets completely (no re-parsing), only the offset we pass in gets rewritten.
+        let sql = "SELECT * FROM foo WHERE q = 'is this ok?' AND a = ?";
+        let last_offset = sql.rfind('?').unwrap();
+        assert_eq!(
+            rewrite_any_placeholders_by_offset(sql, &[last_offset]),
+            "SELECT * FROM foo WHERE q = 'is this ok?' AND a = $1"
+        );
+    }
+
+    #[test]
+    fn offset_based_rewrite_no_offsets_is_unchanged() {
+        let sql = "SELECT * FROM foo";
+        assert_eq!(rewrite_any_placeholders_by_offset(sql, &[]), sql);
     }
 }
