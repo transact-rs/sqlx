@@ -165,6 +165,7 @@ where
         arguments.add(value).expect("Failed to add argument");
 
         let query: &mut String = Arc::get_mut(&mut self.query).expect(ERROR);
+        arguments.note_placeholder_offset(query.len());
         arguments
             .format_placeholder(query)
             .expect("error in format_placeholder");

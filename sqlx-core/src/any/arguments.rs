@@ -10,6 +10,19 @@ use std::sync::Arc;
 pub struct AnyArguments {
     #[doc(hidden)]
     pub values: AnyArgumentBuffer,
+
+    /// Byte offsets, into the query string being built by
+    /// [`QueryBuilder`][crate::query_builder::QueryBuilder], of each `?` placeholder written by
+    /// [`push_bind()`][crate::query_builder::QueryBuilder::push_bind], in the order they were
+    /// added.
+    ///
+    /// This is empty unless the query was built with `QueryBuilder<Any>`; e.g. a plain
+    /// `sqlx::query()` call with a hand-written `?` in the SQL string has no way to report
+    /// where that `?` is, since the string is opaque to us. Backends that can't use `?`
+    /// natively (namely Postgres) use this, when available, to rewrite placeholders precisely
+    /// instead of re-parsing the query string.
+    #[doc(hidden)]
+    pub placeholder_offsets: Vec<usize>,
 }
 
 impl Arguments for AnyArguments {
@@ -17,6 +30,7 @@ impl Arguments for AnyArguments {
 
     fn reserve(&mut self, additional: usize, _size: usize) {
         self.values.0.reserve(additional);
+        self.placeholder_offsets.reserve(additional);
     }
 
     fn add<'t, T>(&mut self, value: T) -> Result<(), BoxDynError>
@@ -29,6 +43,10 @@ impl Arguments for AnyArguments {
 
     fn len(&self) -> usize {
         self.values.0.len()
+    }
+
+    fn note_placeholder_offset(&mut self, offset: usize) {
+        self.placeholder_offsets.push(offset);
     }
 }
 
