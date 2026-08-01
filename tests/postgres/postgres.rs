@@ -1920,6 +1920,28 @@ CREATE TABLE issue_1254 (id INT4 PRIMARY KEY, pairs PAIR[]);
 }
 
 #[sqlx_macros::test]
+async fn test_issue_4305() -> anyhow::Result<()> {
+    let mut setup = new::<Postgres>().await?;
+    setup
+        .execute(
+            "DROP TYPE IF EXISTS issue_4305 CASCADE; CREATE TYPE issue_4305 AS ENUM ('a', 'b');",
+        )
+        .await?;
+
+    // A fresh connection so the type-OID cache is cold. A non-persistent query
+    // returning a custom type used to fail with "unnamed prepared statement does
+    // not exist" (SQLSTATE 26000): resolving the type's OID runs a simple query
+    // that destroyed the just-parsed unnamed statement.
+    let mut conn = new::<Postgres>().await?;
+    sqlx::query("SELECT 'a'::issue_4305")
+        .persistent(false)
+        .fetch_one(&mut conn)
+        .await?;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn test_advisory_locks() -> anyhow::Result<()> {
     let pool = PgPoolOptions::new()
         .max_connections(2)
