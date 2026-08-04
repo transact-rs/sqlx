@@ -425,6 +425,11 @@ path = "tests/postgres/postgres.rs"
 required-features = ["postgres"]
 
 [[test]]
+name = "postgres-pool"
+path = "tests/postgres/pool.rs"
+required-features = ["postgres", "runtime-tokio"]
+
+[[test]]
 name = "postgres-types"
 path = "tests/postgres/types.rs"
 required-features = ["postgres"]
