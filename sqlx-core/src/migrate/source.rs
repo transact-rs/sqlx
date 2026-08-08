@@ -16,7 +16,8 @@ use std::path::{Path, PathBuf};
 /// `<VERSION>` is a string that can be parsed into `i64` and its value is
 /// greater than zero, and `<DESCRIPTION>` is a string.
 ///
-/// Files that don't match this format are silently ignored.
+/// Files that don't end in `.sql` are silently ignored. A `.sql` file that doesn't match this
+/// format is an error, since it is almost certainly a migration that was named incorrectly.
 ///
 /// You can create a new empty migration script using sqlx-cli:
 /// `sqlx migrate add <DESCRIPTION>`.
@@ -204,6 +205,18 @@ pub fn resolve_blocking_with_config(
         let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
 
         if parts.len() != 2 || !parts[1].ends_with(".sql") {
+            if file_name.ends_with(".sql") {
+                // A `.sql` file that doesn't parse is almost certainly a migration that was
+                // named incorrectly, so erroring is more useful than silently skipping it.
+                return Err(ResolveError {
+                    message: format!(
+                        "error parsing migration filename {file_name:?}; \
+                         expected the format `<VERSION>_<DESCRIPTION>.sql` (e.g. `01_foo.sql`)"
+                    ),
+                    source: None,
+                });
+            }
+
             // not of the format: <VERSION>_<DESCRIPTION>.<REVERSIBLE_DIRECTION>.sql; ignore
             continue;
         }
@@ -295,4 +308,32 @@ fn checksum_with_ignored_chars() {
     let digest_stripped = migration::checksum(&stripped_sql);
 
     assert_eq!(digest_ignored, digest_stripped);
+}
+
+#[test]
+fn resolve_errors_on_sql_file_without_version_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("schema.sql"), "create table foo();").unwrap();
+
+    let error = resolve_blocking(dir.path())
+        .expect_err("expected an error for a `.sql` file with no version prefix");
+
+    assert!(
+        error.to_string().contains("schema.sql"),
+        "error should name the offending file, got: {error}"
+    );
+}
+
+#[test]
+fn resolve_ignores_files_not_ending_in_sql() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("README.md"), "these are the migrations").unwrap();
+    fs::write(dir.path().join(".gitkeep"), "").unwrap();
+    fs::write(dir.path().join("1_foo.sql"), "create table foo();").unwrap();
+
+    let migrations = resolve_blocking(dir.path()).unwrap();
+
+    assert_eq!(migrations.len(), 1);
+    assert_eq!(migrations[0].0.version, 1);
+    assert_eq!(migrations[0].0.description, "foo");
 }

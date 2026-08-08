@@ -106,6 +106,7 @@ hashbrown = "0.16.0"
 thiserror.workspace = true
 
 [dev-dependencies]
+tempfile = "3.10.1"
 tokio = { version = "1.25.0", features = ["rt"] }
 
 [dev-dependencies.sqlx]
