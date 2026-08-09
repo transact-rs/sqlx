@@ -372,6 +372,12 @@ path = "benches/sqlite/connection.rs"
 harness = false
 required-features = ["sqlite", "runtime-tokio"]
 
+[[bench]]
+name = "postgres-connection"
+path = "benches/postgres/connection.rs"
+harness = false
+required-features = ["postgres", "runtime-tokio"]
+
 #
 # MySQL
 #
