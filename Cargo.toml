@@ -366,6 +366,12 @@ path = "benches/sqlite/describe.rs"
 harness = false
 required-features = ["sqlite"]
 
+[[bench]]
+name = "sqlite-connection"
+path = "benches/sqlite/connection.rs"
+harness = false
+required-features = ["sqlite", "runtime-tokio"]
+
 #
 # MySQL
 #
