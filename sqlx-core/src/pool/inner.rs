@@ -297,7 +297,7 @@ impl<DB: Database> PoolInner<DB> {
                         let connect_deadline = acquire_started_at + self.options.acquire_timeout + connect_timeout;
                         let pool = (*self).clone();
 
-                        let (tx, rx) = futures_intrusive::channel::oneshot_channel();
+                        let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
 
                         crate::rt::spawn(async move {
                             let result = pool.connect(connect_deadline, guard).await;
@@ -307,7 +307,7 @@ impl<DB: Database> PoolInner<DB> {
                             // and we return the connection to the pool.
                             match tx.send(result) {
                                 Ok(()) => {}
-                                Err(result) => {
+                                Err(futures_intrusive::channel::ChannelSendError(result)) => {
                                     // acquire() was cancelled, return connection to idle queue
                                     if let Ok(live) = result {
                                         pool.release(live);
@@ -316,7 +316,7 @@ impl<DB: Database> PoolInner<DB> {
                             }
                         });
 
-                        return rx.receive().await.map_err(|_| Error::PoolTimedOut)?;
+                        return rx.receive().await.ok_or(Error::PoolTimedOut)?;
                     } else {
                         return self.connect(deadline, guard).await;
                     }
