@@ -96,11 +96,7 @@ fn bench_pool_checkout(c: &mut Criterion) {
 
 fn bench_ping(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let conn = RefCell::new(
-        runtime
-            .block_on(SqliteConnection::connect(DB_URL))
-            .unwrap(),
-    );
+    let conn = RefCell::new(runtime.block_on(SqliteConnection::connect(DB_URL)).unwrap());
 
     c.bench_function("ping", |b| {
         b.to_async(&runtime).iter(|| do_ping(&conn));
