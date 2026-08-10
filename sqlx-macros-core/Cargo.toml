@@ -80,6 +80,9 @@ syn = { version = "2.0.87", default-features = false, features = ["full", "deriv
 quote = { version = "1.0.35", default-features = false }
 url = { version = "2.2.2" }
 
+[dev-dependencies]
+serde_json = { version = "1.0.142", features = ["preserve_order"] }
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ['cfg(sqlx_macros_unstable)', 'cfg(procmacro2_semver_exempt)']

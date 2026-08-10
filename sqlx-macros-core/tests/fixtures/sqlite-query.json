@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "describe": {
+    "columns": [
+      {
+        "name": "value",
+        "ordinal": 0,
+        "origin": "Expression",
+        "type_info": "Integer"
+      }
+    ],
+    "nullable": [
+      false
+    ],
+    "parameters": {
+      "Right": 0
+    }
+  },
+  "hash": "b8ccac726e885e4bae2a0596e87cc88c5113c16e87c3bdec2ffb0e09e49cb29e",
+  "query": "SELECT 1 AS value"
+}
