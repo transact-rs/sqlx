@@ -2,9 +2,15 @@ use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::io::{PortalId, StatementId};
 use crate::logger::QueryLogger;
-use crate::message::{self, BackendMessageFormat, Bind, Close, CommandComplete, DataRow, ParameterDescription, Parse, ParseComplete, ReceivedMessage, RowDescription};
+use crate::message::{
+    self, BackendMessageFormat, Bind, Close, CommandComplete, DataRow, ParameterDescription, Parse,
+    ParseComplete, RowDescription,
+};
 use crate::statement::PgStatementMetadata;
-use crate::{statement::PgStatement, PgArguments, PgConnection, PgDatabaseError, PgQueryResult, PgRow, PgTypeInfo, PgValueFormat, Postgres};
+use crate::{
+    statement::PgStatement, PgArguments, PgConnection, PgDatabaseError, PgQueryResult, PgRow,
+    PgTypeInfo, PgValueFormat, Postgres,
+};
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_core::Stream;
@@ -13,7 +19,6 @@ use sqlx_core::arguments::Arguments;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
 use std::{pin::pin, sync::Arc};
-use sqlx_core::connection::Connection;
 
 async fn prepare(
     conn: &mut PgConnection,
@@ -196,7 +201,7 @@ impl PgConnection {
         sql: &str,
         arguments: Option<&mut PgArguments>,
         persistent: bool,
-        metadata_opt: Option<Arc<PgStatementMetadata>>
+        metadata_opt: Option<Arc<PgStatementMetadata>>,
     ) -> Result<(PgValueFormat, Arc<PgStatementMetadata>), Error> {
         let metadata: Arc<PgStatementMetadata>;
 
@@ -297,12 +302,9 @@ impl PgConnection {
         // before we continue, wait until we are "ready" to accept more queries
         self.wait_until_ready().await?;
 
-        let (mut format, mut metadata) = self.try_get_or_prepare(
-            sql,
-            arguments.as_mut(),
-            persistent,
-            metadata_opt.clone()
-        ).await?;
+        let (mut format, mut metadata) = self
+            .try_get_or_prepare(sql, arguments.as_mut(), persistent, metadata_opt.clone())
+            .await?;
 
         let mut message = match self.inner.stream.recv().await {
             Ok(msg) => msg,
@@ -311,26 +313,29 @@ impl PgConnection {
                     // Save transaction mode. It will be lost after invalidating
                     let is_in_tx = self.in_transaction();
 
-                    self.invalidate_cached_statement(sql, clear_backend_cache).await?;
+                    self.invalidate_cached_statement(sql, clear_backend_cache)
+                        .await?;
 
                     // If we were in transaction mode we can't retry statement,
                     //    so we can immediately return err
                     if is_in_tx {
-                        return Err(err)
+                        return Err(err);
                     }
 
                     // Otherwise we can retry statement in hope everything is ok.
-                    (format, metadata) = self.try_get_or_prepare(
-                        sql,
-                        // It should be safe to retry `patch` on the same arguments
-                        arguments.as_mut(),
-                        persistent,
-                        metadata_opt.clone()
-                    ).await?;
+                    (format, metadata) = self
+                        .try_get_or_prepare(
+                            sql,
+                            // It should be safe to retry `patch` on the same arguments
+                            arguments.as_mut(),
+                            persistent,
+                            metadata_opt.clone(),
+                        )
+                        .await?;
 
                     self.inner.stream.recv().await?
                 } else {
-                    return Err(err)
+                    return Err(err);
                 }
             }
         };
@@ -536,14 +541,11 @@ impl<'c> Executor<'c> for &'c mut PgConnection {
 //                      transaction pooling mode
 // - `Some(true)`  - if we should invalidate both backend and frontend caches
 fn check_stale_plan(error: &Error) -> Option<bool> {
-    let Some(db_err) = error.as_database_error() else {
-        return None;
-    };
-    let Some(pg) = db_err.try_downcast_ref::<PgDatabaseError>() else {
-        return None;
-    };
+    let error = error
+        .as_database_error()?
+        .try_downcast_ref::<PgDatabaseError>()?;
 
-    match (pg.code(), pg.routine()) {
+    match (error.code(), error.routine()) {
         // "cached plan must not change result type"
         ("0A000", Some("RevalidateCachedQuery")) => Some(true),
         // DISCARD ALL / DEALLOCATE / pgbouncer
@@ -551,4 +553,3 @@ fn check_stale_plan(error: &Error) -> Option<bool> {
         _ => None,
     }
 }
-

@@ -147,15 +147,21 @@ impl PgConnection {
         }
     }
 
-    pub(crate) async fn invalidate_cached_statement(&mut self, sql: &str, backend: bool) -> Result<(), Error> {
+    pub(crate) async fn invalidate_cached_statement(
+        &mut self,
+        sql: &str,
+        backend: bool,
+    ) -> Result<(), Error> {
         self.wait_until_ready().await?;
 
         let Some((statement_id, _)) = self.inner.cache_statement.remove(sql) else {
-            return Ok(())
+            return Ok(());
         };
 
         if backend {
-            self.inner.stream.write_msg(Close::Statement(statement_id))?;
+            self.inner
+                .stream
+                .write_msg(Close::Statement(statement_id))?;
             self.write_sync();
             self.inner.stream.flush().await?;
 
