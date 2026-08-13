@@ -376,6 +376,7 @@ impl ConnectionWorker {
             .await?
     }
 
+    #[allow(clippy::type_complexity)]
     #[tracing::instrument(
         target = "sqlx::query",
         name = "sqlite.execute",
