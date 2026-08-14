@@ -1032,6 +1032,68 @@ from (values (null)) vals(val)
     assert_eq!(describe.nullable(0), Some(true));
     assert_eq!(describe.nullable(1), Some(true));
 
+    // a left join the planner commutes into a `Join Type: Right` node
+    // language=PostgreSQL
+    let describe = conn
+        .describe(
+            "select tweet.text, tweet_reply.text
+    from tweet
+    left join tweet_reply on tweet_reply.tweet_id = tweet.id"
+                .into_sql_str(),
+        )
+        .await?;
+
+    // tweet.text is on the preserved half, so it must stay NOT NULL
+    assert_eq!(describe.nullable(0), Some(false));
+    assert_eq!(describe.nullable(1), Some(true));
+
+    // two chained left joins, which nest two `Right` nodes
+    // language=PostgreSQL
+    let describe = conn
+        .describe(
+            "select tweet.text, reply1.text, reply2.text
+    from tweet
+    left join tweet_reply reply1 on reply1.tweet_id = tweet.id
+    left join tweet_reply reply2 on reply2.tweet_id = tweet.id"
+                .into_sql_str(),
+        )
+        .await?;
+
+    assert_eq!(describe.nullable(0), Some(false));
+    assert_eq!(describe.nullable(1), Some(true));
+    assert_eq!(describe.nullable(2), Some(true));
+
+    // a join below a node that is not a join
+    // language=PostgreSQL
+    let describe = conn
+        .describe(
+            "select tweet.text, tweet_reply.text
+    from tweet
+    left join tweet_reply on tweet_reply.tweet_id = tweet.id
+    limit 5"
+                .into_sql_str(),
+        )
+        .await?;
+
+    assert_eq!(describe.nullable(0), Some(false));
+    assert_eq!(describe.nullable(1), Some(true));
+
+    // the same query with `order by`. The planner gives it the opposite join type from the
+    // `limit` case, so the two cases together cover a `Left` node and a `Right` node.
+    // language=PostgreSQL
+    let describe = conn
+        .describe(
+            "select tweet.text, tweet_reply.text
+    from tweet
+    left join tweet_reply on tweet_reply.tweet_id = tweet.id
+    order by tweet.id"
+                .into_sql_str(),
+        )
+        .await?;
+
+    assert_eq!(describe.nullable(0), Some(false));
+    assert_eq!(describe.nullable(1), Some(true));
+
     Ok(())
 }
 
