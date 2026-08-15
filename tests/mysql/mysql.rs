@@ -527,6 +527,142 @@ async fn test_cancelled_mid_read_leaves_connection_usable() -> anyhow::Result<()
     Ok(())
 }
 
+// A prepare cancelled before its response is read must leave the
+// connection usable, and every prepared statement closed or cached.
+#[cfg(feature = "_rt-tokio")]
+#[tokio::test]
+async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result<()> {
+    use futures_util::FutureExt;
+    use std::time::Duration;
+
+    setup_if_needed();
+
+    let mut conn = MySqlConnection::connect(&env::var("DATABASE_URL")?).await?;
+
+    conn.execute("DROP TABLE IF EXISTS sqlx_test_cancel_probe_prepared")
+        .await?;
+    conn.execute(
+        "CREATE TABLE sqlx_test_cancel_probe_prepared (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            filler MEDIUMTEXT NOT NULL
+        )",
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO sqlx_test_cancel_probe_prepared (filler) VALUES (REPEAT('x', 100000))",
+    )
+    .await?;
+    for _ in 0..5 {
+        conn.execute(
+            "INSERT INTO sqlx_test_cancel_probe_prepared (filler) \
+             SELECT filler FROM sqlx_test_cancel_probe_prepared",
+        )
+        .await?;
+    }
+
+    let query = "SELECT id, filler FROM sqlx_test_cancel_probe_prepared";
+
+    let (prepared_before, closed_before) = stmt_prepare_close_counts(&mut conn).await?;
+
+    // Polled once, a fetch sends COM_STMT_PREPARE and is dropped, leaving
+    // the response to the drain. The statements cover columns only,
+    // parameters and columns, parameters only, and neither.
+    let shapes = [
+        (query, false),
+        (
+            "SELECT id FROM sqlx_test_cancel_probe_prepared WHERE id > ?",
+            true,
+        ),
+        ("DO ?", true),
+        ("DO 1", false),
+    ];
+
+    for persistent in [false, true] {
+        for (sql, with_param) in shapes {
+            for i in 0..100 {
+                let mut polled = sqlx::query(sql).persistent(persistent);
+
+                if with_param {
+                    polled = polled.bind(0);
+                }
+
+                if let Some(rows) = polled.fetch_all(&mut conn).now_or_never() {
+                    rows?;
+                }
+
+                tokio::time::timeout(Duration::from_secs(30), conn.ping())
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "connection wedged after dropped prepare \
+                             ({sql:?}, persistent({persistent}), iteration {i})"
+                        )
+                    })?
+                    .with_context(|| format!("{sql:?}, persistent({persistent}), iteration {i}"))?;
+            }
+        }
+    }
+
+    // Mostly cancels inside binary row reads; the loop above covers the
+    // prepare drain.
+    for i in 0u64..300 {
+        // A 0 to 3 ms race, as above.
+        let cancel_after = Duration::from_micros((i % 23) * 90);
+
+        tokio::select! {
+            rows = sqlx::query(query).persistent(false).fetch_all(&mut conn) => {
+                rows?;
+            }
+            _ = tokio::time::sleep(cancel_after) => {}
+        }
+
+        tokio::time::timeout(Duration::from_secs(30), conn.ping())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("connection wedged after cancelled prepare/execute (iteration {i})")
+            })?
+            .with_context(|| format!("iteration {i}"))?;
+    }
+
+    // Every statement the server prepared was closed or sits in the cache.
+    let (prepared_after, closed_after) = stmt_prepare_close_counts(&mut conn).await?;
+    let prepared = prepared_after - prepared_before;
+    let closed = closed_after - closed_before;
+    let cached = conn.cached_statements_size() as u64;
+    assert_eq!(
+        closed + cached,
+        prepared,
+        "{prepared} prepared, {closed} closed, {cached} cached"
+    );
+
+    conn.execute("DROP TABLE sqlx_test_cancel_probe_prepared")
+        .await?;
+    conn.close().await?;
+
+    Ok(())
+}
+
+// The session's Com_stmt_prepare and Com_stmt_close counts.
+#[cfg(feature = "_rt-tokio")]
+async fn stmt_prepare_close_counts(conn: &mut MySqlConnection) -> anyhow::Result<(u64, u64)> {
+    let rows = conn
+        .fetch_all(
+            "SHOW SESSION STATUS WHERE Variable_name IN ('Com_stmt_prepare', 'Com_stmt_close')",
+        )
+        .await?;
+
+    let counter = |name: &str| -> anyhow::Result<u64> {
+        let row = rows
+            .iter()
+            .find(|row| row.get::<&str, _>(0).eq_ignore_ascii_case(name))
+            .with_context(|| format!("{name} is missing from SHOW SESSION STATUS"))?;
+
+        Ok(row.try_get::<&str, _>(1)?.parse()?)
+    };
+
+    Ok((counter("Com_stmt_prepare")?, counter("Com_stmt_close")?))
+}
+
 #[sqlx_macros::test]
 async fn it_can_work_with_transactions() -> anyhow::Result<()> {
     let mut conn = new::<MySql>().await?;

@@ -1,5 +1,5 @@
 use super::MySqlStream;
-use crate::connection::stream::Waiting;
+use crate::connection::stream::{PrepareProgress, Waiting};
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::ext::ustr::UStr;
@@ -32,6 +32,13 @@ impl MySqlConnection {
     ) -> Result<(u32, MySqlStatementMetadata), Error> {
         // https://dev.mysql.com/doc/internals/en/com-stmt-prepare.html
         // https://dev.mysql.com/doc/internals/en/com-stmt-prepare-response.html#packet-COM_STMT_PREPARE_OK
+
+        // Queued before the request, so the drain can finish and close a
+        // response a cancelled prepare left behind.
+        self.inner
+            .stream
+            .waiting
+            .push_back(Waiting::Prepare(PrepareProgress::Header));
 
         self.inner
             .stream
@@ -110,7 +117,6 @@ impl MySqlConnection {
         let mut logger = QueryLogger::new(sql, self.inner.log_settings.clone());
 
         self.inner.stream.wait_until_ready().await?;
-        self.inner.stream.waiting.push_back(Waiting::Result);
 
         Ok(try_stream! {
         let sql = logger.sql().as_str();
@@ -136,6 +142,10 @@ impl MySqlConnection {
                         );
                     }
 
+                    // Queued only once the request is sent, so a cancelled
+                    // prepare or a failed parameter-count check leaves none.
+                    self.inner.stream.waiting.push_back(Waiting::Result);
+
                     // https://dev.mysql.com/doc/internals/en/com-stmt-execute.html
                     self.inner.stream
                         .send_packet(StatementExecute {
@@ -151,6 +161,11 @@ impl MySqlConnection {
                         .await?;
 
                     if arguments.types.len() != metadata.parameters {
+                        // Nothing else holds the id; the next command
+                        // flushes the close.
+                        self.inner.stream.sequence_id = 0;
+                        self.inner.stream.write_packet(StmtClose { statement: id })?;
+
                         return Err(
                             err_protocol!(
                                 "prepared statement expected {} parameters but {} parameters were provided",
@@ -159,6 +174,8 @@ impl MySqlConnection {
                             )
                         );
                     }
+
+                    self.inner.stream.waiting.push_back(Waiting::Result);
 
                     // https://dev.mysql.com/doc/internals/en/com-stmt-execute.html
                     self.inner.stream
@@ -173,6 +190,8 @@ impl MySqlConnection {
                     MySqlValueFormat::Binary
                 }
             } else {
+                self.inner.stream.waiting.push_back(Waiting::Result);
+
                 // https://dev.mysql.com/doc/internals/en/com-query.html
                 self.inner.stream.send_packet(Query(sql)).await?;
 

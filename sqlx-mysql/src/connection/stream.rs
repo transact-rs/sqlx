@@ -8,6 +8,7 @@ use crate::io::MySqlBufExt;
 use crate::io::{ProtocolDecode, ProtocolEncode};
 use crate::net::{BufferedSocket, Socket};
 use crate::protocol::response::{EofPacket, ErrPacket, OkPacket, Status};
+use crate::protocol::statement::{PrepareOk, StmtClose};
 use crate::protocol::{Capabilities, Packet};
 use crate::{MySqlConnectOptions, MySqlDatabaseError};
 
@@ -28,6 +29,21 @@ pub(crate) enum Waiting {
 
     // waiting for a row within a result set
     Row,
+
+    // waiting for (the rest of) a COM_STMT_PREPARE response
+    Prepare(PrepareProgress),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PrepareProgress {
+    // the stmt-prepare-ok header has not been read yet
+    Header,
+
+    // the header was read; this many definition and EOF packets follow
+    Tail {
+        statement_id: u32,
+        packets_left: u32,
+    },
 }
 
 impl<S: Socket> MySqlStream<S> {
@@ -68,6 +84,19 @@ impl<S: Socket> MySqlStream<S> {
         }
 
         while !self.waiting.is_empty() {
+            while matches!(self.waiting.front(), Some(Waiting::Prepare(_))) {
+                // The rest of a response a cancelled prepare left behind.
+                let (_, prepared) = self.recv_packet_tracked().await?;
+
+                // Close the statement in the poll that completed it, so a
+                // cancellation cannot lose the id.
+                if let Some(statement) = prepared {
+                    self.sequence_id = 0;
+                    self.write_packet(StmtClose { statement })?;
+                    self.socket.flush().await?;
+                }
+            }
+
             while self.waiting.front() == Some(&Waiting::Row) {
                 let packet = self.recv_packet().await?;
 
@@ -163,6 +192,14 @@ impl<S: Socket> MySqlStream<S> {
     // receive the next packet from the database server
     // may block (async) on more data from the server
     pub(crate) async fn recv_packet(&mut self) -> Result<Packet<Bytes>, Error> {
+        let (packet, _) = self.recv_packet_tracked().await?;
+
+        Ok(packet)
+    }
+
+    /// Like `recv_packet`, plus the statement id of a COM_STMT_PREPARE
+    /// response this packet completed.
+    async fn recv_packet_tracked(&mut self) -> Result<(Packet<Bytes>, Option<u32>), Error> {
         let payload = self.recv_packet_part().await?;
         let payload = if payload.len() < 0xFF_FF_FF {
             payload
@@ -195,7 +232,53 @@ impl<S: Socket> MySqlStream<S> {
             );
         }
 
-        Ok(Packet(payload))
+        let prepared = self.note_prepare_response_packet(&payload)?;
+
+        Ok((Packet(payload), prepared))
+    }
+
+    /// Counts the packets of a pending COM_STMT_PREPARE response and returns
+    /// its statement id once complete. Only stmt-prepare-ok says how many
+    /// packets follow, so every read path counts here.
+    fn note_prepare_response_packet(&mut self, payload: &Bytes) -> Result<Option<u32>, Error> {
+        let capabilities = self.capabilities;
+
+        let Some(Waiting::Prepare(progress)) = self.waiting.front_mut() else {
+            return Ok(None);
+        };
+
+        let (statement_id, packets_left) = match *progress {
+            PrepareProgress::Header => {
+                let ok = PrepareOk::decode_with(payload.clone(), capabilities)?;
+
+                let eof_packets = if capabilities.contains(Capabilities::DEPRECATE_EOF) {
+                    0
+                } else {
+                    u32::from(ok.params > 0) + u32::from(ok.columns > 0)
+                };
+
+                let packets_left = u32::from(ok.params) + u32::from(ok.columns) + eof_packets;
+
+                (ok.statement_id, packets_left)
+            }
+            PrepareProgress::Tail {
+                statement_id,
+                packets_left,
+            } => (statement_id, packets_left - 1),
+        };
+
+        if packets_left == 0 {
+            self.waiting.pop_front();
+
+            return Ok(Some(statement_id));
+        }
+
+        *progress = PrepareProgress::Tail {
+            statement_id,
+            packets_left,
+        };
+
+        Ok(None)
     }
 
     pub(crate) async fn recv<'de, T>(&mut self) -> Result<T, Error>
