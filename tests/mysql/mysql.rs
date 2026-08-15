@@ -468,6 +468,65 @@ async fn test_issue_622() -> anyhow::Result<()> {
     Ok(())
 }
 
+// A query cancelled mid-read must leave the connection usable.
+// Tokio only, since the test cancels through `tokio::select!`.
+#[cfg(feature = "_rt-tokio")]
+#[tokio::test]
+async fn test_cancelled_mid_read_leaves_connection_usable() -> anyhow::Result<()> {
+    use std::time::Duration;
+
+    setup_if_needed();
+
+    let mut conn = MySqlConnection::connect(&env::var("DATABASE_URL")?).await?;
+
+    // Rows large enough to span several socket reads, so reads await
+    // mid-packet. Built by doubling to keep the SQL short.
+    conn.execute("DROP TABLE IF EXISTS sqlx_test_cancel_probe")
+        .await?;
+    conn.execute(
+        "CREATE TABLE sqlx_test_cancel_probe (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            filler MEDIUMTEXT NOT NULL
+        )",
+    )
+    .await?;
+    conn.execute("INSERT INTO sqlx_test_cancel_probe (filler) VALUES (REPEAT('x', 100000))")
+        .await?;
+    for _ in 0..5 {
+        conn.execute(
+            "INSERT INTO sqlx_test_cancel_probe (filler) \
+             SELECT filler FROM sqlx_test_cancel_probe",
+        )
+        .await?;
+    }
+
+    let query = "SELECT id, filler FROM sqlx_test_cancel_probe";
+
+    for i in 0u64..300 {
+        // Tokio rounds sleeps up to whole milliseconds: a 0 to 3 ms race.
+        let cancel_after = Duration::from_micros((i % 23) * 90);
+
+        tokio::select! {
+            rows = conn.fetch_all(query) => {
+                rows?;
+            }
+            _ = tokio::time::sleep(cancel_after) => {}
+        }
+
+        // `ping` drains what the cancelled read left; a misaligned stream
+        // fails or hangs here.
+        tokio::time::timeout(Duration::from_secs(30), conn.ping())
+            .await
+            .map_err(|_| anyhow::anyhow!("connection wedged after cancelled read (iteration {i})"))?
+            .with_context(|| format!("iteration {i}"))?;
+    }
+
+    conn.execute("DROP TABLE sqlx_test_cancel_probe").await?;
+    conn.close().await?;
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_can_work_with_transactions() -> anyhow::Result<()> {
     let mut conn = new::<MySql>().await?;

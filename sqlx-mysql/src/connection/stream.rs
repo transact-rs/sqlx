@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
-use std::ops::{Deref, DerefMut};
+use std::ops::{ControlFlow, Deref, DerefMut};
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
 use crate::error::Error;
 use crate::io::MySqlBufExt;
@@ -123,16 +123,37 @@ impl<S: Socket> MySqlStream<S> {
         // https://dev.mysql.com/doc/dev/mysql-server/8.0.12/page_protocol_basic_packets.html
         // https://mariadb.com/kb/en/library/0-packet/#standard-packet
 
-        let mut header: Bytes = self.socket.read(4).await?;
+        // One `try_read` takes header and payload, so a cancelled read leaves
+        // the stream at a part boundary. Payloads of 0xFFFFFF bytes or more
+        // span several parts.
+        const HEADER_LEN: usize = 4;
 
-        // cannot overflow
-        #[allow(clippy::cast_possible_truncation)]
-        let packet_size = header.get_uint_le(3) as usize;
-        let sequence_id = header.get_u8();
+        let (sequence_id, payload) = self
+            .socket
+            .try_read(|buf| {
+                if buf.len() < HEADER_LEN {
+                    return Ok(ControlFlow::Continue(HEADER_LEN));
+                }
+
+                // cannot overflow
+                #[allow(clippy::cast_possible_truncation)]
+                let packet_size = u32::from_le_bytes([buf[0], buf[1], buf[2], 0]) as usize;
+
+                let frame_len = HEADER_LEN + packet_size;
+
+                if buf.len() < frame_len {
+                    return Ok(ControlFlow::Continue(frame_len));
+                }
+
+                let mut frame = buf.split_to(frame_len);
+                let sequence_id = frame[3];
+                let payload = frame.split_off(HEADER_LEN).freeze();
+
+                Ok(ControlFlow::Break((sequence_id, payload)))
+            })
+            .await?;
 
         self.sequence_id = sequence_id.wrapping_add(1);
-
-        let payload: Bytes = self.socket.read(packet_size).await?;
 
         // TODO: packet compression
 
