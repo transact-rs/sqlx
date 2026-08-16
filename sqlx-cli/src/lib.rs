@@ -220,13 +220,23 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
             check,
             all,
             workspace,
+            per_crate,
             mut connect_opts,
             args,
             config,
         } => {
             let config = config.load_config().await?;
             connect_opts.populate_db_url(&config)?;
-            prepare::run(&config, check, all, workspace, connect_opts, args).await?
+            prepare::run(
+                &config,
+                check,
+                all,
+                workspace,
+                per_crate,
+                connect_opts,
+                args,
+            )
+            .await?
         }
 
         #[cfg(feature = "completions")]

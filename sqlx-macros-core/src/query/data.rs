@@ -139,6 +139,13 @@ where
     pub(super) fn save_in(&self, dir: &Path) -> crate::Result<()> {
         use std::io::ErrorKind;
 
+        // With `cargo sqlx prepare --per-crate`, the save directory is chosen per package,
+        // so it may not exist yet for a crate that `sqlx-cli` didn't know about
+        // (e.g. a dependency outside the workspace).
+        if let Err(err) = fs::create_dir_all(dir) {
+            return Err(format!("failed to create sqlx offline path {dir:?}: {err:?}").into());
+        }
+
         let path = dir.join(format!("query-{}.json", self.hash));
 
         if let Err(err) = fs::remove_file(&path) {
