@@ -1,3 +1,4 @@
+use crate::config::migrate::UnrecognizedSqlFiles;
 use crate::error::BoxDynError;
 use crate::migrate::{migration, Migration, MigrationType};
 use crate::sql_str::{AssertSqlSafe, SqlSafeStr};
@@ -17,7 +18,8 @@ use std::path::{Path, PathBuf};
 /// greater than zero, and `<DESCRIPTION>` is a string.
 ///
 /// Files that don't end in `.sql` are silently ignored. A `.sql` file that doesn't match this
-/// format is an error, since it is almost certainly a migration that was named incorrectly.
+/// format is an error by default, since it is usually a migration that was named incorrectly;
+/// see [`ResolveConfig::unrecognized_sql_files`] to warn or ignore instead.
 ///
 /// You can create a new empty migration script using sqlx-cli:
 /// `sqlx migrate add <DESCRIPTION>`.
@@ -88,6 +90,7 @@ pub struct ResolveError {
 #[derive(Debug, Default)]
 pub struct ResolveConfig {
     ignored_chars: BTreeSet<char>,
+    unrecognized_sql_files: UnrecognizedSqlFiles,
 }
 
 impl ResolveConfig {
@@ -95,6 +98,7 @@ impl ResolveConfig {
     pub fn new() -> Self {
         ResolveConfig {
             ignored_chars: BTreeSet::new(),
+            unrecognized_sql_files: UnrecognizedSqlFiles::default(),
         }
     }
 
@@ -135,6 +139,16 @@ impl ResolveConfig {
     /// **Use at your own risk.**
     pub fn ignore_chars(&mut self, chars: impl IntoIterator<Item = char>) -> &mut Self {
         self.ignored_chars.extend(chars);
+        self
+    }
+
+    /// Set what to do with a `.sql` file whose name does not parse as
+    /// `<VERSION>_<DESCRIPTION>.sql`.
+    ///
+    /// Defaults to [`UnrecognizedSqlFiles::Error`]. Files that don't end in `.sql` are ignored
+    /// regardless of this setting.
+    pub fn unrecognized_sql_files(&mut self, behavior: UnrecognizedSqlFiles) -> &mut Self {
+        self.unrecognized_sql_files = behavior;
         self
     }
 
@@ -205,16 +219,29 @@ pub fn resolve_blocking_with_config(
         let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
 
         if parts.len() != 2 || !parts[1].ends_with(".sql") {
+            // A `.sql` file that doesn't parse is usually a migration that was named
+            // incorrectly, so erroring is more useful than skipping it without a word.
+            // Projects that keep other SQL scripts here can opt out.
             if file_name.ends_with(".sql") {
-                // A `.sql` file that doesn't parse is almost certainly a migration that was
-                // named incorrectly, so erroring is more useful than silently skipping it.
-                return Err(ResolveError {
-                    message: format!(
-                        "error parsing migration filename {file_name:?}; \
-                         expected the format `<VERSION>_<DESCRIPTION>.sql` (e.g. `01_foo.sql`)"
-                    ),
-                    source: None,
-                });
+                match config.unrecognized_sql_files {
+                    UnrecognizedSqlFiles::Error => {
+                        return Err(ResolveError {
+                            message: format!(
+                                "error parsing migration filename {file_name:?}; \
+                                 expected the format `<VERSION>_<DESCRIPTION>.sql` \
+                                 (e.g. `01_foo.sql`)"
+                            ),
+                            source: None,
+                        });
+                    }
+                    UnrecognizedSqlFiles::Warn => {
+                        tracing::warn!(
+                            "skipping {file_name:?}: not of the format \
+                             `<VERSION>_<DESCRIPTION>.sql` (e.g. `01_foo.sql`)"
+                        );
+                    }
+                    UnrecognizedSqlFiles::Ignore => {}
+                }
             }
 
             // not of the format: <VERSION>_<DESCRIPTION>.<REVERSIBLE_DIRECTION>.sql; ignore
@@ -322,6 +349,24 @@ fn resolve_errors_on_sql_file_without_version_prefix() {
         error.to_string().contains("schema.sql"),
         "error should name the offending file, got: {error}"
     );
+}
+
+#[test]
+fn resolve_can_opt_out_of_erroring_on_unparseable_sql_file() {
+    for behavior in [UnrecognizedSqlFiles::Warn, UnrecognizedSqlFiles::Ignore] {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("schema.sql"), "create table foo();").unwrap();
+        fs::write(dir.path().join("1_foo.sql"), "create table foo();").unwrap();
+
+        let mut config = ResolveConfig::new();
+        config.unrecognized_sql_files(behavior);
+
+        let migrations = resolve_blocking_with_config(dir.path(), &config)
+            .unwrap_or_else(|e| panic!("expected {behavior:?} to skip `schema.sql`, got: {e}"));
+
+        assert_eq!(migrations.len(), 1);
+        assert_eq!(migrations[0].0.version, 1);
+    }
 }
 
 #[test]
