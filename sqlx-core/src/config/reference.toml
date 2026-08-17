@@ -216,6 +216,20 @@ migrations-dir = "foo/migrations"
 # where it is known as a byte-order mark (BOM): https://en.wikipedia.org/wiki/Byte_order_mark
 ignored-chars = [" ", "\t", "\r", "\n", "\uFEFF"]
 
+# Error on a `.sql` file in the migrations directory whose name does not parse as
+# `<VERSION>_<DESCRIPTION>.sql`. This is the default.
+#
+# Such a file is usually a migration that was named incorrectly, and would otherwise be skipped
+# without any indication that it did not run.
+# unrecognized-sql-files = "error"
+
+# Log a warning and skip the file instead. Use this if you deliberately keep other SQL scripts
+# alongside your migrations.
+unrecognized-sql-files = "warn"
+
+# Skip the file without any output (the behavior before this option existed).
+# unrecognized-sql-files = "ignore"
+
 # Set default options for new migrations.
 [migrate.defaults]
 # Specify reversible migrations by default (for `sqlx migrate create`).
