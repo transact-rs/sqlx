@@ -14,10 +14,19 @@ pub struct Metadata {
     workspace_root: Arc<Mutex<Option<PathBuf>>>,
 }
 
+#[cfg_attr(test, derive(Debug))]
 pub struct MacrosEnv {
     pub database_url: Option<String>,
     pub offline_dir: Option<PathBuf>,
     pub offline: Option<bool>,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("error reading dotenv file {path:?}")]
+struct DotenvError {
+    path: PathBuf,
+    #[source]
+    error: dotenvy::Error,
 }
 
 impl Metadata {
@@ -98,14 +107,22 @@ fn load_env(
     config: &Config,
     builder: &mut MtimeCacheBuilder,
 ) -> crate::Result<Arc<MacrosEnv>> {
-    #[derive(thiserror::Error, Debug)]
-    #[error("error reading dotenv file {path:?}")]
-    struct DotenvError {
-        path: PathBuf,
-        #[source]
-        error: dotenvy::Error,
-    }
+    let from_env = MacrosEnv {
+        database_url: crate::env_opt(config.common.database_url_var())?,
+        offline_dir: crate::env_opt("SQLX_OFFLINE_DIR")?.map(PathBuf::from),
+        offline: crate::env_opt("SQLX_OFFLINE")?.map(|val| is_truthy_bool(&val)),
+    };
 
+    load_env_from_sources(manifest_dir, workspace_root, config, builder, from_env)
+}
+
+fn load_env_from_sources(
+    manifest_dir: &Path,
+    workspace_root: &Path,
+    config: &Config,
+    builder: &mut MtimeCacheBuilder,
+    from_env: MacrosEnv,
+) -> crate::Result<Arc<MacrosEnv>> {
     let mut from_dotenv = MacrosEnv {
         database_url: None,
         offline_dir: None,
@@ -139,43 +156,334 @@ fn load_env(
                 builder.add_path(dir.to_path_buf());
                 continue;
             }
+            Err(dotenvy::Error::Io(_))
+                if has_query_source_without_dotenv(&from_env, &from_dotenv) =>
+            {
+                builder.add_path(path.clone());
+                continue;
+            }
             Err(e) => {
                 builder.add_path(path.clone());
                 return Err(DotenvError { path, error: e }.into());
             }
         };
 
-        for res in dotenv {
-            let (name, val) = res.map_err(|e| DotenvError {
-                path: path.clone(),
-                error: e,
-            })?;
-
-            match &*name {
-                "SQLX_OFFLINE_DIR" => from_dotenv.offline_dir = Some(val.into()),
-                "SQLX_OFFLINE" => from_dotenv.offline = Some(is_truthy_bool(&val)),
-                _ if name == config.common.database_url_var() => {
-                    from_dotenv.database_url = Some(val)
-                }
-                _ => continue,
-            }
-        }
+        read_dotenv(&path, dotenv, config, &from_env, &mut from_dotenv)?;
     }
 
     Ok(Arc::new(MacrosEnv {
         // Make set variables take precedent
-        database_url: crate::env_opt(config.common.database_url_var())?
-            .or(from_dotenv.database_url),
-        offline_dir: crate::env_opt("SQLX_OFFLINE_DIR")?
-            .map(PathBuf::from)
-            .or(from_dotenv.offline_dir),
-        offline: crate::env_opt("SQLX_OFFLINE")?
-            .map(|val| is_truthy_bool(&val))
-            .or(from_dotenv.offline),
+        database_url: from_env.database_url.or(from_dotenv.database_url),
+        offline_dir: from_env.offline_dir.or(from_dotenv.offline_dir),
+        offline: from_env.offline.or(from_dotenv.offline),
     }))
+}
+
+fn read_dotenv(
+    path: &Path,
+    dotenv: impl Iterator<Item = dotenvy::Result<(String, String)>>,
+    config: &Config,
+    from_env: &MacrosEnv,
+    from_dotenv: &mut MacrosEnv,
+) -> crate::Result<()> {
+    let ignore_io_error = has_query_source_without_dotenv(from_env, from_dotenv);
+
+    for res in dotenv {
+        let (name, val) = match res {
+            Ok(pair) => pair,
+            Err(dotenvy::Error::Io(_)) if ignore_io_error => {
+                break;
+            }
+            Err(error) => {
+                return Err(DotenvError {
+                    path: path.to_path_buf(),
+                    error,
+                }
+                .into());
+            }
+        };
+
+        match &*name {
+            "SQLX_OFFLINE_DIR" => from_dotenv.offline_dir = Some(val.into()),
+            "SQLX_OFFLINE" => from_dotenv.offline = Some(is_truthy_bool(&val)),
+            _ if name == config.common.database_url_var() => from_dotenv.database_url = Some(val),
+            _ => continue,
+        }
+    }
+
+    Ok(())
+}
+
+fn has_query_source_without_dotenv(from_env: &MacrosEnv, from_dotenv: &MacrosEnv) -> bool {
+    let offline = from_env.offline.or(from_dotenv.offline);
+    let database_url = from_env
+        .database_url
+        .as_deref()
+        .or(from_dotenv.database_url.as_deref());
+
+    offline == Some(true) || database_url.is_some_and(|url| !url.is_empty())
 }
 
 /// Returns `true` if `val` is `"true"`,
 fn is_truthy_bool(val: &str) -> bool {
     val.eq_ignore_ascii_case("true") || val == "1"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Read;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_DIR_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct ReadThenError(Option<&'static [u8]>);
+
+    impl Read for ReadThenError {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let Some(bytes) = self.0.take() else {
+                return Err(io::Error::other("test read failure"));
+            };
+
+            buf[..bytes.len()].copy_from_slice(bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let id = TEMP_DIR_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "sqlx-macros-core-env-test-{}-{id}",
+                std::process::id()
+            ));
+
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    fn load_test_env(
+        manifest_dir: &Path,
+        workspace_root: &Path,
+        from_env: MacrosEnv,
+    ) -> crate::Result<Arc<MacrosEnv>> {
+        MtimeCache::new().get_or_try_init(|builder| {
+            load_env_from_sources(
+                manifest_dir,
+                workspace_root,
+                &Config::default(),
+                builder,
+                from_env,
+            )
+        })
+    }
+
+    fn empty_env() -> MacrosEnv {
+        MacrosEnv {
+            database_url: None,
+            offline_dir: None,
+            offline: None,
+        }
+    }
+
+    #[test]
+    fn database_url_allows_unreadable_parent_dotenv() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::create_dir(workspace.path().join(".env")).unwrap();
+
+        let env = load_test_env(
+            &manifest_dir,
+            workspace.path(),
+            MacrosEnv {
+                database_url: Some("postgres://from-environment".into()),
+                ..empty_env()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            env.database_url.as_deref(),
+            Some("postgres://from-environment")
+        );
+        assert_eq!(env.offline, None);
+    }
+
+    #[test]
+    fn process_environment_takes_precedence_over_dotenv() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::write(
+            manifest_dir.join(".env"),
+            "DATABASE_URL=postgres://from-dotenv\nSQLX_OFFLINE=true\n",
+        )
+        .unwrap();
+
+        let env = load_test_env(
+            &manifest_dir,
+            workspace.path(),
+            MacrosEnv {
+                database_url: Some("postgres://from-environment".into()),
+                offline_dir: None,
+                offline: Some(false),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            env.database_url.as_deref(),
+            Some("postgres://from-environment")
+        );
+        assert_eq!(env.offline, Some(false));
+    }
+
+    #[test]
+    fn dotenv_offline_is_used_with_database_url_from_environment() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::write(manifest_dir.join(".env"), "SQLX_OFFLINE=true\n").unwrap();
+
+        let env = load_test_env(
+            &manifest_dir,
+            workspace.path(),
+            MacrosEnv {
+                database_url: Some("postgres://from-environment".into()),
+                ..empty_env()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            env.database_url.as_deref(),
+            Some("postgres://from-environment")
+        );
+        assert_eq!(env.offline, Some(true));
+    }
+
+    #[test]
+    fn offline_environment_allows_unreadable_parent_dotenv() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::create_dir(workspace.path().join(".env")).unwrap();
+
+        let env = load_test_env(
+            &manifest_dir,
+            workspace.path(),
+            MacrosEnv {
+                offline: Some(true),
+                ..empty_env()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(env.database_url, None);
+        assert_eq!(env.offline, Some(true));
+    }
+
+    #[test]
+    fn local_database_url_allows_unreadable_parent_dotenv() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::write(
+            manifest_dir.join(".env"),
+            "DATABASE_URL=postgres://from-dotenv\n",
+        )
+        .unwrap();
+        fs::create_dir(workspace.path().join(".env")).unwrap();
+
+        let env = load_test_env(&manifest_dir, workspace.path(), empty_env()).unwrap();
+
+        assert_eq!(env.database_url.as_deref(), Some("postgres://from-dotenv"));
+        assert_eq!(env.offline, None);
+    }
+
+    #[test]
+    fn missing_environment_does_not_hide_dotenv_io_error() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::create_dir(workspace.path().join(".env")).unwrap();
+
+        let error = load_test_env(&manifest_dir, workspace.path(), empty_env())
+            .expect_err("loading an unusable dotenv should fail without environment values");
+
+        assert!(error.to_string().contains("error reading dotenv file"));
+    }
+
+    #[test]
+    fn malformed_dotenv_is_not_hidden_by_database_url() {
+        let workspace = TestDir::new();
+        let manifest_dir = workspace.path().join("crate");
+        fs::create_dir(&manifest_dir).unwrap();
+        fs::write(manifest_dir.join(".env"), "INVALID LINE\n").unwrap();
+
+        let error = load_test_env(
+            &manifest_dir,
+            workspace.path(),
+            MacrosEnv {
+                database_url: Some("postgres://from-environment".into()),
+                ..empty_env()
+            },
+        )
+        .expect_err("a malformed dotenv should still be reported");
+
+        assert!(error.to_string().contains("error reading dotenv file"));
+    }
+
+    #[test]
+    fn dotenv_io_error_after_database_url_is_not_hidden() {
+        let from_env = empty_env();
+        let mut from_dotenv = empty_env();
+        let error = read_dotenv(
+            Path::new(".env"),
+            dotenvy::from_read_iter(ReadThenError(Some(b"DATABASE_URL=sqlite://test.db\n"))),
+            &Config::default(),
+            &from_env,
+            &mut from_dotenv,
+        )
+        .expect_err("an I/O error in a partially read dotenv should be reported");
+
+        assert_eq!(
+            from_dotenv.database_url.as_deref(),
+            Some("sqlite://test.db")
+        );
+        assert!(error.to_string().contains("error reading dotenv file"));
+    }
+
+    #[test]
+    fn existing_query_source_allows_later_dotenv_io_error() {
+        let from_env = MacrosEnv {
+            database_url: Some("sqlite://test.db".into()),
+            ..empty_env()
+        };
+        let mut from_dotenv = empty_env();
+
+        read_dotenv(
+            Path::new(".env"),
+            dotenvy::from_read_iter(ReadThenError(None)),
+            &Config::default(),
+            &from_env,
+            &mut from_dotenv,
+        )
+        .expect("a later dotenv I/O error should not hide an existing query source");
+    }
 }
