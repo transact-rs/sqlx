@@ -263,19 +263,20 @@ impl StatementHandle {
                 return Err(SqliteError::new(self.db_handle()).into());
             }
 
-            let datatype = CStr::from_ptr(datatype);
+            // `sqlite3_table_column_metadata()` sets the declared type to NULL for a column
+            // declared without one, e.g. `CREATE TABLE foo (bar PRIMARY KEY)`. Such a column
+            // has no type name to compare against, and is by definition not declared
+            // `INTEGER`, so it cannot be a rowid alias.
+            let is_integer = !datatype.is_null()
+                && CStr::from_ptr(datatype)
+                    .to_bytes()
+                    .eq_ignore_ascii_case("integer".as_bytes());
 
-            Ok(
-                if primary_key != 0
-                    && datatype
-                        .to_bytes()
-                        .eq_ignore_ascii_case("integer".as_bytes())
-                {
-                    None
-                } else {
-                    Some(not_null == 0)
-                },
-            )
+            Ok(if primary_key != 0 && is_integer {
+                None
+            } else {
+                Some(not_null == 0)
+            })
         }
     }
 
