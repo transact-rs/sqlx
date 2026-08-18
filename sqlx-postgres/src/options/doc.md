@@ -60,6 +60,7 @@ postgresql://user@localhost
 postgresql://user:secret@localhost
 postgresql://user:correct%20horse%20battery%20staple@localhost
 postgresql://localhost?dbname=mydb&user=postgres&password=postgres
+postgresql:///mydb
 ```
 
 See also [Note: Unix Domain Sockets](#note-unix-domain-sockets) below.
@@ -106,8 +107,9 @@ This behavior is _only_ implemented for the environment variables, not the URL p
 Note: passing the SSL private key via environment variable may be a security risk.
 
 # Note: Unix Domain Sockets
-If you want to connect to Postgres over a Unix domain socket, you can pass the path
-to the _directory_ containing the socket as the `host` parameter.
+If you want to connect to Postgres over a Unix domain socket, you can either pass the path
+to the _directory_ containing the socket as the `host` parameter, or leave the host part of the URL empty.
+When the host part is omitted, the standard Unix socket directory is used.
 
 The final path to the socket will be `{host}/.s.PGSQL.{port}` as is standard for Postgres.
 
