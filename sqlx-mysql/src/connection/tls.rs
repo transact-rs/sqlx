@@ -63,6 +63,7 @@ pub(super) async fn maybe_upgrade<S: Socket>(
         root_cert_path: options.ssl_ca.as_ref(),
         client_cert_path: options.ssl_client_cert.as_ref(),
         client_key_path: options.ssl_client_key.as_ref(),
+        alpn_protocols: None,
     };
 
     // Request TLS upgrade

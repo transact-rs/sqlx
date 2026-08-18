@@ -54,6 +54,10 @@ pub async fn handshake<S: Socket>(
         builder.add_root_certificate(native_tls::Certificate::from_pem(&data).map_err(Error::tls)?);
     }
 
+    if let Some(protocols) = config.alpn_protocols {
+        builder.request_alpns(&protocols);
+    }
+
     // authentication using user's key-file and its associated certificate
     if let (Some(cert_path), Some(key_path)) = (config.client_cert_path, config.client_key_path) {
         let cert_path = cert_path.data().await?;

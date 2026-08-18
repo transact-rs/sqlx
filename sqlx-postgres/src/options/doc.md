@@ -33,6 +33,7 @@ if a parameter is not passed in via URL, it is populated by reading
 | `port`             | `PGPORT`             | `5432`                                                      |
 | `dbname`           | `PGDATABASE`         | Unset; defaults to the username server-side.                |
 | `sslmode`          | `PGSSLMODE`          | `prefer`. See [`PgSslMode`] for details.                    |
+| `sslnegotiation`   | `PGSSLNEGOTIATION`   | `postgres`. See [`PgSslNegotiation`] for details.           |
 | `sslrootcert`      | `PGSSLROOTCERT`      | Unset. See [Note: SSL](#note-ssl).                          |
 | `sslcert`          | `PGSSLCERT`          | Unset. See [Note: SSL](#note-ssl).                          |
 | `sslkey`           | `PGSSLKEY`           | Unset. See [Note: SSL](#note-ssl).                          |

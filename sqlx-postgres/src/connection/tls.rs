@@ -3,7 +3,7 @@ use crate::net::tls::{self, TlsConfig};
 use crate::net::{Socket, SocketIntoBox, WithSocket};
 
 use crate::message::SslRequest;
-use crate::{PgConnectOptions, PgSslMode};
+use crate::{PgConnectOptions, PgSslMode, PgSslNegotiation};
 
 pub struct MaybeUpgradeTls<'a>(pub &'a PgConnectOptions);
 
@@ -19,28 +19,52 @@ async fn maybe_upgrade<S: Socket>(
     mut socket: S,
     options: &PgConnectOptions,
 ) -> Result<Box<dyn Socket>, Error> {
-    // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
-    match options.ssl_mode {
-        // FIXME: Implement ALLOW
-        PgSslMode::Allow | PgSslMode::Disable => return Ok(Box::new(socket)),
+    // https://www.postgresql.org/docs/17/libpq-connect.html#LIBPQ-CONNECT-SSLNEGOTIATION
+    match options.ssl_negotiation {
+        PgSslNegotiation::Postgres => {
+            // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
+            match options.ssl_mode {
+                // FIXME: Implement ALLOW
+                PgSslMode::Allow | PgSslMode::Disable => return Ok(Box::new(socket)),
 
-        PgSslMode::Prefer => {
-            if !tls::available() {
-                return Ok(Box::new(socket));
-            }
+                PgSslMode::Prefer => {
+                    if !tls::available() {
+                        return Ok(Box::new(socket));
+                    }
 
-            // try upgrade, but its okay if we fail
-            if !request_upgrade(&mut socket, options).await? {
-                return Ok(Box::new(socket));
+                    // try upgrade, but its okay if we fail
+                    if !request_upgrade(&mut socket, options).await? {
+                        return Ok(Box::new(socket));
+                    }
+                }
+
+                PgSslMode::Require | PgSslMode::VerifyFull | PgSslMode::VerifyCa => {
+                    tls::error_if_unavailable()?;
+
+                    if !request_upgrade(&mut socket, options).await? {
+                        // upgrade failed, die
+                        return Err(Error::Tls("server does not support TLS".into()));
+                    }
+                }
             }
         }
+        PgSslNegotiation::Direct => {
+            // Direct TLS negotiation without PostgreSQL handshake
+            match options.ssl_mode {
+                PgSslMode::Disable | PgSslMode::Allow | PgSslMode::Prefer => {
+                    return Err(Error::Tls(
+                        format!(
+                            "SSL mode {:?} is incompatible with direct SSL negotiation",
+                            options.ssl_mode
+                        )
+                        .into(),
+                    ));
+                }
 
-        PgSslMode::Require | PgSslMode::VerifyFull | PgSslMode::VerifyCa => {
-            tls::error_if_unavailable()?;
-
-            if !request_upgrade(&mut socket, options).await? {
-                // upgrade failed, die
-                return Err(Error::Tls("server does not support TLS".into()));
+                PgSslMode::Require | PgSslMode::VerifyFull | PgSslMode::VerifyCa => {
+                    tls::error_if_unavailable()?;
+                    // No need to request an upgrade. We go straight to TLS handshake.
+                }
             }
         }
     }
@@ -58,6 +82,7 @@ async fn maybe_upgrade<S: Socket>(
         root_cert_path: options.ssl_root_cert.as_ref(),
         client_cert_path: options.ssl_client_cert.as_ref(),
         client_key_path: options.ssl_client_key.as_ref(),
+        alpn_protocols: Some(vec!["postgresql"]),
     };
 
     tls::handshake(socket, config, SocketIntoBox).await

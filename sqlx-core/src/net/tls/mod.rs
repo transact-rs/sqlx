@@ -64,6 +64,7 @@ pub struct TlsConfig<'a> {
     pub root_cert_path: Option<&'a CertificateInput>,
     pub client_cert_path: Option<&'a CertificateInput>,
     pub client_key_path: Option<&'a CertificateInput>,
+    pub alpn_protocols: Option<Vec<&'a str>>,
 }
 
 pub async fn handshake<S, Ws>(
