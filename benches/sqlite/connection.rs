@@ -47,20 +47,22 @@ async fn do_ping(conn: &RefCell<SqliteConnection>) {
 
 async fn do_query_small(conn: &RefCell<SqliteConnection>) {
     let mut guard = conn.borrow_mut();
-    let _: (i64, String, Vec<u8>, i64, f64) =
+    let row: (i64, String, Vec<u8>, i64, f64) =
         sqlx::query_as("SELECT id, name, data, val1, val2 FROM bench_data WHERE id = 1")
             .fetch_one(&mut *guard)
             .await
             .unwrap();
+    std::hint::black_box(row);
 }
 
 async fn do_query_large(conn: &RefCell<SqliteConnection>) {
     let mut guard = conn.borrow_mut();
-    let _: Vec<(i64, String, Vec<u8>, i64, f64)> =
+    let rows: Vec<(i64, String, Vec<u8>, i64, f64)> =
         sqlx::query_as("SELECT id, name, data, val1, val2 FROM bench_data")
             .fetch_all(&mut *guard)
             .await
             .unwrap();
+    std::hint::black_box(rows);
 }
 
 async fn do_pool_checkout(pool: &sqlx::SqlitePool) {
@@ -72,8 +74,17 @@ async fn do_pool_checkout(pool: &sqlx::SqlitePool) {
 fn bench_new_connection(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     c.bench_function("new_connection", |b| {
-        b.to_async(&runtime).iter(|| async {
-            drop(SqliteConnection::connect(DB_URL).await.unwrap());
+        // Time only `connect`; close gracefully outside the measured section so we
+        // don't abandon sockets/handles across thousands of iterations.
+        b.to_async(&runtime).iter_custom(|iters| async move {
+            let mut total = std::time::Duration::ZERO;
+            for _ in 0..iters {
+                let start = std::time::Instant::now();
+                let conn = SqliteConnection::connect(DB_URL).await.unwrap();
+                total += start.elapsed();
+                conn.close().await.unwrap();
+            }
+            total
         });
     });
 }
@@ -85,6 +96,9 @@ fn bench_pool_checkout(c: &mut Criterion) {
             SqlitePoolOptions::new()
                 .min_connections(1)
                 .max_connections(1)
+                // Otherwise every `acquire()` pings the connection first, so this
+                // would measure `ping` rather than the pool checkout fast path.
+                .test_before_acquire(false)
                 .connect(DB_URL),
         )
         .unwrap();
