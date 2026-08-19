@@ -96,8 +96,12 @@ fn bench_pool_checkout(c: &mut Criterion) {
             SqlitePoolOptions::new()
                 .min_connections(1)
                 .max_connections(1)
-                // Otherwise every `acquire()` pings the connection first, so this
-                // would measure `ping` rather than the pool checkout fast path.
+                // Disable the on-acquire ping (`test_before_acquire` defaults to
+                // `true`); otherwise each iteration pays *two* round-trips: a ping
+                // on acquire and a ping on release. Note the pool still does a
+                // mandatory on-release ping when the guard is dropped, so this
+                // measures a full borrow+return cycle, not a purely in-process
+                // checkout.
                 .test_before_acquire(false)
                 .connect(DB_URL),
         )
