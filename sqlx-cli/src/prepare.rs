@@ -74,7 +74,9 @@ async fn prepare(ctx: &PrepareCtx<'_>) -> anyhow::Result<()> {
     }
 
     let prepare_dir = ctx.prepare_dir()?;
-    run_prepare_step(ctx, &prepare_dir)?;
+    let cache_dir = ctx.metadata.target_directory().join("sqlx-prepare");
+    run_prepare_step(ctx, &cache_dir)?;
+    sync_query_data(&cache_dir, &prepare_dir)?;
 
     // Warn if no queries were generated. Glob since the directory may contain unrelated files.
     if glob_query_files(prepare_dir)?.is_empty() {
@@ -199,6 +201,58 @@ fn run_prepare_step(ctx: &PrepareCtx, cache_dir: &Path) -> anyhow::Result<()> {
     };
     if !check_status.success() {
         bail!("`cargo check` failed with status: {}", check_status);
+    }
+
+    Ok(())
+}
+
+fn sync_query_data(cache_dir: &Path, prepare_dir: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(prepare_dir).context(format!(
+        "Failed to create query cache directory: {:?}",
+        prepare_dir
+    ))?;
+
+    let prepare_filenames: HashSet<String> = glob_query_files(prepare_dir)?
+        .into_iter()
+        .filter_map(|path| path.file_name().map(|f| f.to_string_lossy().into_owned()))
+        .collect();
+    let cache_filenames: HashSet<String> = glob_query_files(cache_dir)?
+        .into_iter()
+        .filter_map(|path| path.file_name().map(|f| f.to_string_lossy().into_owned()))
+        .collect();
+
+    for stale_filename in prepare_filenames.difference(&cache_filenames) {
+        let stale_file = prepare_dir.join(stale_filename);
+        fs::remove_file(&stale_file)
+            .with_context(|| format!("Failed to delete query file: {}", stale_file.display()))?;
+    }
+
+    for filename in cache_filenames {
+        let cache_file = cache_dir.join(&filename);
+        let prepare_file = prepare_dir.join(&filename);
+
+        let should_copy = match fs::read(&prepare_file) {
+            Ok(prepare_bytes) => {
+                let cache_json = load_json_file(&cache_file)?;
+                let prepare_json: serde_json::Value = serde_json::from_slice(&prepare_bytes)?;
+                prepare_json != cache_json
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("failed to load file: {}", prepare_file.display()))
+            }
+        };
+
+        if should_copy {
+            fs::copy(&cache_file, &prepare_file).with_context(|| {
+                format!(
+                    "Failed to copy query file from {} to {}",
+                    cache_file.display(),
+                    prepare_file.display()
+                )
+            })?;
+        }
     }
 
     Ok(())
