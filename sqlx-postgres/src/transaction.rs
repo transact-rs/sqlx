@@ -82,7 +82,14 @@ struct Rollback<'c> {
 
 impl Drop for Rollback<'_> {
     fn drop(&mut self) {
-        if !self.defuse {
+        if self.defuse {
+            return;
+        }
+        if self.conn.inner.transaction_depth == 0 {
+            self.conn
+                .queue_simple_query("ROLLBACK")
+                .expect("BUG: ROLLBACK somehow too large for protocol");
+        } else {
             PgTransactionManager::start_rollback(self.conn)
         }
     }
