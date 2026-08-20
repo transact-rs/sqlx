@@ -67,12 +67,12 @@ async fn prepare(
     // indicates that the SQL query string is now successfully parsed and has semantic validity
     conn.inner.stream.recv_expect::<ParseComplete>().await?;
 
-    let metadata = if let Some(metadata) = metadata {
+    let (metadata, ran_catalog_query) = if let Some(metadata) = metadata {
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
 
         // we already have metadata
-        metadata
+        (metadata, false)
     } else {
         let parameters = recv_desc_params(conn).await?;
 
@@ -81,7 +81,7 @@ async fn prepare(
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
 
-        let metadata = conn
+        let (metadata, ran_catalog_query) = conn
             .resolve_statement_metadata::<true>(Some(parameters), row_desc, resolve_column_origin)
             .await?;
 
@@ -89,8 +89,23 @@ async fn prepare(
         // continuing
         conn.wait_until_ready().await?;
 
-        metadata
+        (metadata, ran_catalog_query)
     };
+
+    // Resolving custom-type OIDs above goes through the simple query protocol, which
+    // destroys the unnamed prepared statement. Re-parse it so the Bind that follows can
+    // reference it; named (persistent) statements are unaffected. See #4305.
+    if !persistent && ran_catalog_query {
+        conn.inner.stream.write_msg(Parse {
+            param_types: &param_types,
+            query: sql,
+            statement: id,
+        })?;
+        conn.write_sync();
+        conn.inner.stream.flush().await?;
+        conn.inner.stream.recv_expect::<ParseComplete>().await?;
+        conn.recv_ready_for_query().await?;
+    }
 
     Ok((id, metadata))
 }
@@ -335,7 +350,7 @@ impl PgConnection {
 
                     // indicates that a *new* set of rows are about to be returned
                     BackendMessageFormat::RowDescription => {
-                        let new_metadata = self.resolve_statement_metadata::<false>(
+                        let (new_metadata, _) = self.resolve_statement_metadata::<false>(
                             None,
                             Some(message.decode()?),
                             false,
