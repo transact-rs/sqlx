@@ -31,6 +31,26 @@ impl PrepareCtx<'_> {
             Ok(manifest_dir(&self.cargo)?.join(".sqlx"))
         }
     }
+
+    /// Arguments passed to the `cargo check` invocation that prepares query metadata.
+    ///
+    /// `--workspace` on `sqlx prepare` controls both the location of the generated `.sqlx`
+    /// directory and which workspace packages are recompiled. It must also select all workspace
+    /// packages for the Cargo invocation; otherwise a workspace root which is itself a package
+    /// only checks that root package by default.
+    fn cargo_check_args(&self) -> Vec<String> {
+        cargo_check_args(self.workspace, &self.cargo_args)
+    }
+}
+
+fn cargo_check_args(workspace: bool, cargo_args: &[String]) -> Vec<String> {
+    let mut args = cargo_args.to_vec();
+
+    if workspace && !args.iter().any(|arg| arg == "--workspace") {
+        args.push("--workspace".to_owned());
+    }
+
+    args
 }
 
 pub async fn run(
@@ -179,7 +199,7 @@ fn run_prepare_step(ctx: &PrepareCtx, cache_dir: &Path) -> anyhow::Result<()> {
         let mut check_command = Command::new(&ctx.cargo);
         check_command
             .arg("check")
-            .args(&ctx.cargo_args)
+            .args(ctx.cargo_check_args())
             .env("SQLX_TMP", tmp_dir)
             .env("SQLX_OFFLINE", "false")
             .env("SQLX_OFFLINE_DIR", cache_dir);
@@ -371,6 +391,22 @@ async fn check_backend(config: &Config, opts: &ConnectOpts) -> anyhow::Result<()
 mod tests {
     use super::*;
     use std::assert_eq;
+
+    #[test]
+    fn workspace_prepare_selects_all_workspace_packages() {
+        assert_eq!(
+            cargo_check_args(true, &["--all-targets".into(), "--all-features".into()]),
+            ["--all-targets", "--all-features", "--workspace"]
+        );
+    }
+
+    #[test]
+    fn workspace_prepare_does_not_duplicate_workspace_argument() {
+        assert_eq!(
+            cargo_check_args(true, &["--workspace".into()]),
+            ["--workspace"]
+        );
+    }
 
     #[test]
     fn minimal_project_recompile_action_works() -> anyhow::Result<()> {
