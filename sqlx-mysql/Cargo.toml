@@ -16,6 +16,8 @@ any = ["sqlx-core/any"]
 offline = ["sqlx-core/offline", "serde/derive", "bitflags/serde"]
 migrate = ["sqlx-core/migrate", "dep:crc"]
 rsa = ["dep:rand", "dep:rsa"]
+_rt-tokio = ["sqlx-core/_rt-tokio", "dep:tokio"]
+_rt-async-io = ["sqlx-core/_rt-async-io", "dep:futures-io"]
 
 # Type Integration features
 bigdecimal = ["dep:bigdecimal", "sqlx-core/bigdecimal"]
@@ -60,6 +62,9 @@ dotenvy.workspace = true
 thiserror.workspace = true
 
 serde = { version = "1.0.219", optional = true }
+
+tokio = { workspace = true, optional = true }
+futures-io = { version = "0.3.32", optional = true }
 
 [dev-dependencies]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
