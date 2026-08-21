@@ -21,11 +21,11 @@ json = ["serde", "serde_json"]
 
 # for conditional compilation
 _rt-async-global-executor = ["async-global-executor", "_rt-async-io", "_rt-async-task"]
-_rt-async-io = ["async-io", "async-fs"] # see note at async-fs declaration
+_rt-async-io = ["async-io", "async-fs", "socket2"] # see note at async-fs declaration
 _rt-async-std = ["async-std", "_rt-async-io"]
 _rt-async-task = ["async-task"]
 _rt-smol = ["smol", "_rt-async-io", "_rt-async-task"]
-_rt-tokio = ["tokio", "tokio-stream"]
+_rt-tokio = ["tokio", "tokio-stream", "socket2"]
 
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
@@ -105,8 +105,15 @@ hashbrown = "0.16.0"
 
 thiserror.workspace = true
 
+# Only used to apply TCP keepalive to a connection's socket, so it is pulled in by the
+# runtime features and only for targets that have `setsockopt`. `tokio` 1.47 and later
+# already depend on socket2 0.6 through their `net` feature, so with a current `tokio`
+# this adds no crate to the graph.
+[target.'cfg(any(unix, windows))'.dependencies]
+socket2 = { version = "0.6", features = ["all"], optional = true }
+
 [dev-dependencies]
-tokio = { version = "1.25.0", features = ["rt"] }
+tokio = { version = "1.27.0", features = ["rt"] }
 
 [dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622

@@ -94,6 +94,11 @@ pub use sqlx_core::rt::test_block_on;
 #[cfg(feature = "any")]
 pub mod any;
 
+/// Types for configuring the network connection to a database server.
+pub mod net {
+    pub use sqlx_core::net::TcpKeepalive;
+}
+
 #[cfg(feature = "macros")]
 mod macros;
 
