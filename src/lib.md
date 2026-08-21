@@ -5,18 +5,17 @@ Have a question? [Check our FAQ] or [open a discussion].
 
 ### Runtime Support
 
-SQLx supports both the [Tokio] and [async-std] runtimes.
+SQLx supports the [async-global-executor], [async-std], [smol], and [Tokio] runtimes.
 
-You choose which runtime SQLx uses by default by enabling one of the following features:
+Choose the runtime SQLx uses by enabling one of the following features:
 
+* `runtime-async-global-executor`
 * `runtime-async-std`
+* `runtime-smol`
 * `runtime-tokio`
 
-If more than one runtime feature is enabled, the Tokio runtime is used if a Tokio context exists on the current
-thread, i.e. [`tokio::runtime::Handle::try_current()`] returns `Ok`; `async-std` is used otherwise.
-
-Note that while SQLx no longer produces a compile error if zero or multiple runtime features are enabled,
-which is useful for libraries building on top of it,
+Applications should generally enable exactly one runtime feature. SQLx does not produce a compile error if zero or
+multiple runtime features are enabled, which is useful for libraries building on top of it, but
 **the use of nearly any async function in the API will panic without at least one runtime feature enabled**.
 
 The chief exception is the SQLite driver, which is runtime-agnostic, including its integration with the query macros.
@@ -57,7 +56,8 @@ will return an error.
 [Check our FAQ]: https://www.github.com/launchbadge/sqlx/tree/main/FAQ.md
 [open a discussion]: https://github.com/launchbadge/sqlx/discussions/new?category=q-a
 [Tokio]: https://www.tokio.rs
-[async-std]: https://www.async.rs
-[`tokio::runtime::Handle::try_current()`]: https://docs.rs/tokio/latest/tokio/runtime/struct.Handle.html#method.try_current
+[async-global-executor]: https://github.com/async-rs/async-global-executor
+[async-std]: https://github.com/async-rs/async-std
+[smol]: https://github.com/smol-rs/smol
 [`native-tls`]: https://docs.rs/native-tls/latest/native_tls/
 [rustls]: https://docs.rs/rustls/latest/rustls/
