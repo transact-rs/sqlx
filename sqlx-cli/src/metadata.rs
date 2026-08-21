@@ -15,16 +15,23 @@ use cargo_metadata::{
 /// The minimal amount of package information we care about
 ///
 /// The package's `name` is used to `cargo clean -p` specific crates while the `src_paths` are
-/// are used to trigger recompiles of packages within the workspace
+/// are used to trigger recompiles of packages within the workspace. The `manifest_dir` is where
+/// a per-crate `.sqlx` directory belongs.
 #[derive(Debug)]
 pub struct Package {
     name: MetadataPackageName,
+    manifest_dir: PathBuf,
     src_paths: Vec<PathBuf>,
 }
 
 impl Package {
     pub fn name(&self) -> &str {
         self.name.as_str()
+    }
+
+    /// The directory containing this package's `Cargo.toml`.
+    pub fn manifest_dir(&self) -> &Path {
+        &self.manifest_dir
     }
 
     pub fn src_paths(&self) -> &[PathBuf] {
@@ -35,13 +42,21 @@ impl Package {
 impl From<&MetadataPackage> for Package {
     fn from(package: &MetadataPackage) -> Self {
         let name = package.name.clone();
+        let manifest_dir = package
+            .manifest_path
+            .parent()
+            .map_or_else(PathBuf::new, |dir| dir.as_std_path().to_path_buf());
         let src_paths = package
             .targets
             .iter()
             .map(|target| target.src_path.clone().into_std_path_buf())
             .collect();
 
-        Self { name, src_paths }
+        Self {
+            name,
+            manifest_dir,
+            src_paths,
+        }
     }
 }
 

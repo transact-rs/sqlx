@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use proc_macro2::TokenStream;
 use syn::Type;
@@ -13,7 +13,6 @@ use crate::query::data::{hash_string, DynQueryData, QueryData};
 use crate::query::input::RecordType;
 use crate::query::metadata::MacrosEnv;
 use either::Either;
-use metadata::Metadata;
 use sqlx_core::config::Config;
 use url::Url;
 
@@ -78,6 +77,9 @@ pub fn expand_input<'a>(
 
     let metadata_env = metadata.env()?;
 
+    // Where newly-described queries get saved, and the first place we look for cached ones.
+    let save_dir = metadata::save_dir(&metadata_env)?;
+
     let data_source = match &*metadata_env {
         MacrosEnv {
             offline: None | Some(false),
@@ -86,24 +88,20 @@ pub fn expand_input<'a>(
         }
         // Allow `DATABASE_URL=''`
         if !db_url.is_empty() => QueryDataSource::live(db_url)?,
-        MacrosEnv {
-            offline,
-            offline_dir,
-            ..
-        } => {
+        MacrosEnv { offline, .. } => {
             // Try load the cached query metadata file.
             let filename = format!("query-{}.json", hash_string(&input.sql));
 
             // Check SQLX_OFFLINE_DIR, then local .sqlx, then workspace .sqlx.
             let dirs = [
-                |_: &Metadata, offline_dir: Option<&Path>| offline_dir.map(PathBuf::from),
-                |meta: &Metadata, _: Option<&Path>| Some(meta.manifest_dir.join(".sqlx")),
-                |meta: &Metadata, _: Option<&Path>| Some(meta.workspace_root().join(".sqlx")),
+                save_dir.clone(),
+                Some(metadata.manifest_dir.join(".sqlx")),
+                Some(metadata.workspace_root().join(".sqlx")),
             ];
 
             let Some(data_file_path) = dirs
-                .iter()
-                .filter_map(|path| path(&metadata, offline_dir.as_deref()))
+                .into_iter()
+                .flatten()
                 .map(|path| path.join(&filename))
                 .find(|path| path.exists())
             else {
@@ -122,12 +120,7 @@ pub fn expand_input<'a>(
 
     for driver in drivers {
         if data_source.matches_driver(driver) {
-            return (driver.expand)(
-                &metadata.config,
-                input,
-                data_source,
-                metadata_env.offline_dir.as_deref(),
-            );
+            return (driver.expand)(&metadata.config, input, data_source, save_dir.as_deref());
         }
     }
 
@@ -152,7 +145,7 @@ fn expand_with<DB: DatabaseExt>(
     config: &Config,
     input: QueryMacroInput,
     data_source: QueryDataSource,
-    offline_dir: Option<&Path>,
+    save_dir: Option<&Path>,
 ) -> crate::Result<TokenStream>
 where
     Describe<DB>: DescribeExt,
@@ -162,7 +155,7 @@ where
         QueryDataSource::Cached(dyn_data) => (QueryData::from_dyn_data(dyn_data)?, None),
         QueryDataSource::Live { database_url, .. } => {
             let describe = DB::describe_blocking(&input.sql, database_url, &config.drivers)?;
-            (QueryData::from_describe(&input.sql, describe), offline_dir)
+            (QueryData::from_describe(&input.sql, describe), save_dir)
         }
     };
 

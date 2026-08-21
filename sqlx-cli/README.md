@@ -133,6 +133,19 @@ to generate a single `.sqlx` directory at the root of the workspace.
 cargo sqlx prepare --workspace
 ```
 
+Alternatively, pass `--per-crate` to give every crate in the workspace its own `.sqlx`
+directory next to its `Cargo.toml`, so that changing one crate's queries only touches that
+crate's query data. Note that a query used by two crates is stored once per crate.
+
+```bash
+cargo sqlx prepare --per-crate
+```
+
+The macros look for a query in the crate's own `.sqlx` first and fall back to the one at the
+workspace root, so switching between the two layouts doesn't require any other changes.
+`--per-crate` cannot be combined with `--all`, since crates outside the workspace have no
+crate directory to write to.
+
 Check this directory into version control and an active database connection will 
 no longer be needed to build your project.
 
@@ -142,6 +155,8 @@ no longer be needed to build your project.
 cargo sqlx prepare --check
 # OR
 cargo sqlx prepare --check --workspace
+# OR
+cargo sqlx prepare --check --per-crate
 ```
 
 Exits with a nonzero exit status if the data in `.sqlx` is out of date with the current
