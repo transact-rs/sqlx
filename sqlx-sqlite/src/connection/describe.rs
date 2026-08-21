@@ -9,12 +9,250 @@ use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
 use std::convert::identity;
 
+struct TableColumnInfo {
+    name: String,
+    not_null: bool,
+    dflt_value: Option<String>,
+    type_info: String,
+    pk: bool,
+}
+
+fn is_insert_statement(query: &str) -> bool {
+    query.trim_start().to_uppercase().starts_with("INSERT")
+}
+
+fn extract_insert_info(query: &str) -> Option<(String, Option<Vec<String>>)> {
+    // Parse simple INSERT statements to extract table name and optional column list
+    // Handles: INSERT INTO table (col1, col2) VALUES ...
+    //          INSERT INTO table VALUES ...
+    // Returns: (table_name, Some(columns) or None for all columns)
+
+    let trimmed = query.trim_start();
+    let upper = trimmed.to_uppercase();
+
+    if !upper.starts_with("INSERT INTO") {
+        return None;
+    }
+
+    // Find table name after INSERT INTO
+    let after_insert = upper.strip_prefix("INSERT INTO")?.trim_start();
+
+    // Extract table name (handle backticks, quotes, brackets)
+    let mut table_end = 0;
+    let mut in_quote = false;
+    let mut quote_char = ' ';
+    let chars: Vec<char> = after_insert.chars().collect();
+
+    for (i, &ch) in chars.iter().enumerate() {
+        if !in_quote && (ch == '`' || ch == '"' || ch == '[') {
+            in_quote = true;
+            quote_char = if ch == '[' { ']' } else { ch };
+            continue;
+        }
+        if in_quote && ch == quote_char {
+            in_quote = false;
+            table_end = i + 1;
+            continue;
+        }
+        if !in_quote && (ch == ' ' || ch == '(') {
+            table_end = i;
+            break;
+        }
+        if !in_quote && (ch.is_whitespace() || ch == '(') {
+            table_end = i;
+            break;
+        }
+    }
+
+    if table_end == 0 {
+        table_end = after_insert.len();
+    }
+
+    let table_name_raw = after_insert[..table_end].trim();
+    let table_name = table_name_raw
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('[')
+        .trim_matches(']')
+        .to_string();
+
+    // Look for column list: TABLE (col1, col2)
+    let remaining = after_insert[table_end..].trim_start();
+
+    if remaining.starts_with('(') {
+        // Find the matching closing paren
+        let mut paren_depth = 0;
+        let mut col_end = 0;
+        for (i, ch) in remaining.chars().enumerate() {
+            match ch {
+                '(' => paren_depth += 1,
+                ')' => {
+                    paren_depth -= 1;
+                    if paren_depth == 0 {
+                        col_end = i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if col_end > 1 {
+            let potential_cols = &remaining[1..col_end];
+
+            if potential_cols.contains(',') || !potential_cols.trim().is_empty() {
+                // This looks like a column list
+                let columns = potential_cols
+                    .split(',')
+                    .map(|c| {
+                        c.trim()
+                            .trim_matches('`')
+                            .trim_matches('"')
+                            .trim_matches('[')
+                            .trim_matches(']')
+                            .to_string()
+                    })
+                    .filter(|c| !c.is_empty())
+                    .collect::<Vec<_>>();
+
+                if !columns.is_empty() {
+                    return Some((table_name, Some(columns)));
+                }
+            }
+        }
+    }
+
+    // No columns specified - all columns are implied
+    Some((table_name, None))
+}
+
+fn get_table_columns(
+    conn: &mut ConnectionState,
+    table_name: &str,
+) -> Result<Vec<TableColumnInfo>, Error> {
+    // PRAGMA table_info returns: cid, name, type, notnull, dflt_value, pk
+    // Column indices: 0=cid, 1=name, 2=type, 3=notnull, 4=dflt_value, 5=pk
+    let pragma_query = format!("PRAGMA table_info(\"{}\")", table_name);
+
+    let mut statement = match VirtualStatement::new(&pragma_query, false) {
+        Ok(stmt) => stmt,
+        Err(_) => return Ok(Vec::new()), // Skip validation if we can't prepare the PRAGMA
+    };
+
+    let mut columns = Vec::new();
+
+    while let Some(stmt) = statement.prepare_next(&mut conn.handle)? {
+        // Step through results
+        while stmt.handle.step()? {
+            // Get column name - safe since column_text can't fail if step succeeded
+            let name = match stmt.handle.column_text(1) {
+                Ok(n) => n.to_string(),
+                Err(_) => continue,
+            };
+
+            // Get type info
+            let type_info = match stmt.handle.column_text(2) {
+                Ok(t) => t.to_string().to_uppercase(),
+                Err(_) => String::new(),
+            };
+
+            // Get notnull flag
+            let not_null = stmt.handle.column_int(3) != 0;
+
+            // Get default value (SQLite returns empty string for no default)
+            let dflt_value = match stmt.handle.column_text(4) {
+                Ok(v) => {
+                    let s = v.to_string();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s)
+                    }
+                }
+                Err(_) => None,
+            };
+
+            // Get primary key flag (column 5)
+            let pk = stmt.handle.column_int(5) != 0;
+
+            columns.push(TableColumnInfo {
+                name,
+                not_null,
+                dflt_value,
+                type_info,
+                pk,
+            });
+        }
+    }
+
+    Ok(columns)
+}
+
+fn validate_insert_statement(conn: &mut ConnectionState, query: &str) -> Result<(), Error> {
+    // Extract table name and specified columns from INSERT
+    let (table_name, specified_cols_opt) = match extract_insert_info(query) {
+        Some(info) => info,
+        None => return Ok(()), // Skip validation for queries we can't parse
+    };
+
+    // Get table schema
+    let all_columns = match get_table_columns(conn, &table_name) {
+        Ok(cols) => cols,
+        Err(_) => return Ok(()), // Table doesn't exist or error querying schema - skip validation
+    };
+
+    // Find NOT NULL columns without defaults, excluding INTEGER PRIMARY KEY (auto-increment)
+    let required_cols = all_columns
+        .iter()
+        .filter(|col| {
+            col.not_null && col.dflt_value.is_none() && !(col.pk && col.type_info.contains("INT"))
+        })
+        .collect::<Vec<_>>();
+
+    // If specific columns were listed, validate they include all required columns
+    if let Some(ref specified_cols) = specified_cols_opt {
+        let specified_upper = specified_cols
+            .iter()
+            .map(|c| c.to_uppercase())
+            .collect::<Vec<_>>();
+
+        let missing = required_cols
+            .iter()
+            .filter(|col| !specified_upper.contains(&col.name.to_uppercase()))
+            .collect::<Vec<_>>();
+
+        if !missing.is_empty() {
+            let missing_names = missing
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(Error::Configuration(
+                format!(
+                    "INSERT into {} missing NOT NULL column(s) without defaults: {}",
+                    table_name, missing_names
+                )
+                .into(),
+            ));
+        }
+    }
+    // If no specific columns listed, VALUES (...) implies all columns in table order
+    // SQLite will validate this at runtime, so we skip compile-time validation here
+
+    Ok(())
+}
+
 pub(crate) fn describe(
     conn: &mut ConnectionState,
     query: SqlStr,
 ) -> Result<Describe<Sqlite>, Error> {
     // describing a statement from SQLite can be involved
     // each SQLx statement is comprised of multiple SQL statements
+
+    // Validate INSERT statements for NOT NULL constraint completeness
+    if is_insert_statement(query.as_str()) {
+        validate_insert_statement(conn, query.as_str())?;
+    }
 
     let mut statement = VirtualStatement::new(query.as_str(), false)?;
 
