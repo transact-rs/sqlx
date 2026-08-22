@@ -541,6 +541,14 @@ impl<DB: Database> Pool<DB> {
         self.0.num_idle()
     }
 
+    /// Returns the number of connections currently checked out from the pool.
+    ///
+    /// This is an instantaneous snapshot. The value may change immediately as
+    /// tasks acquire or release connections.
+    pub fn num_acquired(&self) -> u32 {
+        self.0.num_acquired()
+    }
+
     /// Gets a clone of the connection options for this pool
     pub fn connect_options(&self) -> Arc<<DB::Connection as Connection>::Options> {
         self.0
@@ -581,6 +589,7 @@ impl<DB: Database> fmt::Debug for Pool<DB> {
         fmt.debug_struct("Pool")
             .field("size", &self.0.size())
             .field("num_idle", &self.0.num_idle())
+            .field("num_acquired", &self.0.num_acquired())
             .field("is_closed", &self.0.is_closed())
             .field("options", &self.0.options)
             .finish()

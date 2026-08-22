@@ -56,6 +56,7 @@ async fn it_encrypts() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     // Create another connection without key, query should fail
     let mut conn = SqliteConnectOptions::from_str(&url)?.connect().await?;
@@ -66,6 +67,8 @@ async fn it_encrypts() -> anyhow::Result<()> {
         })
         .await
         .is_err());
+
+    conn.close().await?;
 
     Ok(())
 }
@@ -81,6 +84,7 @@ async fn it_can_store_and_read_encrypted_data() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     // Create another connection with valid key
     let mut conn = SqliteConnectOptions::from_str(&url)?
@@ -96,6 +100,8 @@ async fn it_can_store_and_read_encrypted_data() -> anyhow::Result<()> {
 
     assert!(result.len() > 0);
 
+    conn.close().await?;
+
     Ok(())
 }
 
@@ -110,6 +116,7 @@ async fn it_fails_if_password_is_incorrect() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     // Connection with invalid key should not allow to execute queries
     let mut conn = SqliteConnectOptions::from_str(&url)?
@@ -123,6 +130,8 @@ async fn it_fails_if_password_is_incorrect() -> anyhow::Result<()> {
         })
         .await
         .is_err());
+
+    conn.close().await?;
 
     Ok(())
 }
@@ -148,6 +157,7 @@ async fn it_honors_order_of_encryption_pragmas() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     let mut conn = SqliteConnectOptions::from_str(&url)?
         .pragma("dummy", "pragma")
@@ -166,6 +176,8 @@ async fn it_honors_order_of_encryption_pragmas() -> anyhow::Result<()> {
         .await?;
 
     assert!(result.len() > 0);
+
+    conn.close().await?;
 
     Ok(())
 }
@@ -186,6 +198,7 @@ async fn it_allows_to_rekey_the_db() -> anyhow::Result<()> {
     query("PRAGMA rekey = new_password;")
         .execute(&mut conn)
         .await?;
+    conn.close().await?;
 
     let mut conn = SqliteConnectOptions::from_str(&url)?
         .pragma("dummy", "pragma")
@@ -200,6 +213,8 @@ async fn it_allows_to_rekey_the_db() -> anyhow::Result<()> {
         .await?;
 
     assert!(result.len() > 0);
+
+    conn.close().await?;
 
     Ok(())
 }
