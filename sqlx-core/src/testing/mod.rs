@@ -13,6 +13,9 @@ use crate::migrate::{Migrate, Migrator};
 use crate::pool::{Pool, PoolConnection, PoolOptions};
 
 mod fixtures;
+mod pool;
+
+pub use pool::{TestMasterConnection, TestMasterPool};
 
 pub trait TestSupport: Database {
     /// Get parameters to construct a `Pool` suitable for testing.
@@ -66,6 +69,7 @@ pub struct TestArgs {
     pub test_path: &'static str,
     pub migrator: Option<&'static Migrator>,
     pub fixtures: &'static [TestFixture],
+    pub max_connections: u32,
 }
 
 pub trait TestFn {
@@ -158,6 +162,7 @@ impl TestArgs {
             test_path,
             migrator: None,
             fixtures: &[],
+            max_connections: 5,
         }
     }
 
@@ -167,6 +172,10 @@ impl TestArgs {
 
     pub fn fixtures(&mut self, fixtures: &'static [TestFixture]) {
         self.fixtures = fixtures;
+    }
+
+    pub fn max_connections(&mut self, max_connections: u32) {
+        self.max_connections = max_connections;
     }
 }
 

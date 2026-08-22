@@ -234,7 +234,7 @@ async fn test_connection_maintenance() -> anyhow::Result<()> {
     assert_eq!(pool.size(), 5);
     assert_eq!(pool.num_idle(), 0);
     for mut conn in conns {
-        conn.return_to_pool().await;
+        conn.release().await;
     }
 
     assert_eq!(pool.size(), 5);

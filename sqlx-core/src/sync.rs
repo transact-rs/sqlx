@@ -1,4 +1,5 @@
 use cfg_if::cfg_if;
+use std::future::Future;
 
 // For types with identical signatures that don't require runtime support,
 // we can just arbitrarily pick one to use based on what's enabled.
@@ -202,5 +203,72 @@ impl AsyncSemaphoreReleaser<'_> {
                 crate::rt::missing_rt(());
             }
         }
+    }
+}
+
+pub struct AsyncOnceCell<T> {
+    #[cfg(feature = "_rt-tokio")]
+    inner: tokio::sync::OnceCell<T>,
+
+    #[cfg(all(feature = "_rt-async-io", not(feature = "_rt-tokio")))]
+    inner: async_lock::OnceCell<T>,
+
+    #[cfg(not(any(feature = "_rt-async-std", feature = "_rt-tokio")))]
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T> AsyncOnceCell<T> {
+    pub fn new() -> Self {
+        cfg_if! {
+            if #[cfg(feature = "_rt-tokio")] {
+                Self { inner: tokio::sync::OnceCell::new() }
+            } else if #[cfg(feature = "_rt-async-io")] {
+                Self { inner: async_lock::OnceCell::new() }
+            } else {
+                Self { phantom: std::marker::PhantomData }
+            }
+        }
+    }
+
+    pub const fn const_new() -> Self {
+        cfg_if! {
+            if #[cfg(feature = "_rt-tokio")] {
+                Self { inner: tokio::sync::OnceCell::const_new() }
+            } else if #[cfg(feature = "_rt-async-io")] {
+                Self { inner: async_lock::OnceCell::new() }
+            } else {
+                Self { phantom: std::marker::PhantomData }
+            }
+        }
+    }
+
+    pub async fn get_or_try_init<F, Fut, E>(&self, f: F) -> Result<&T, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+    {
+        cfg_if! {
+            if #[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))] {
+                self.inner.get_or_try_init(f).await
+            } else {
+                crate::rt::missing_rt(f)
+            }
+        }
+    }
+
+    pub fn get(&self) -> Option<&T> {
+        cfg_if! {
+            if #[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))] {
+                self.inner.get()
+            } else {
+                crate::rt::missing_rt(())
+            }
+        }
+    }
+}
+
+impl<T> Default for AsyncOnceCell<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
