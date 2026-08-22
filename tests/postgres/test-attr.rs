@@ -199,3 +199,25 @@ macro_rules! macro_using_test {
     };
 }
 macro_using_test!("tests/postgres/migrations");
+
+// Verifies that `?sqlx-advisory-locking=false` in DATABASE_URL is respected.
+//
+// This test is #[ignore] because it cannot safely run concurrently with locked tests on
+// the same Postgres server. The advisory lock guards a DDL race that only manifests under
+// concurrency on standard PostgreSQL. The feature is intended for databases like CockroachDB
+// that serialize DDL and don't support advisory locks.
+//
+// To run: DATABASE_URL="postgres://...?sqlx-advisory-locking=false" cargo test -- --ignored it_works_without_locking
+#[sqlx::test(migrations = false)]
+#[ignore]
+async fn it_works_without_locking(pool: PgPool) -> sqlx::Result<()> {
+    let mut conn = pool.acquire().await?;
+
+    let db_name: String = sqlx::query_scalar("SELECT current_database()")
+        .fetch_one(&mut *conn)
+        .await?;
+
+    assert!(db_name.starts_with("_sqlx_test"), "dbname: {db_name:?}");
+
+    Ok(())
+}

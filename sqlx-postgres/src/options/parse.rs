@@ -104,6 +104,10 @@ impl PgConnectOptions {
                     }
                 }
 
+                "sqlx-advisory-locking" => {
+                    options = options.advisory_locking(value.parse().map_err(Error::config)?);
+                }
+
                 _ => tracing::warn!(%key, %value, "ignoring unrecognized connect parameter"),
             }
         }
@@ -339,4 +343,26 @@ fn built_url_can_be_parsed() {
     let parsed = PgConnectOptions::from_str(opts.build_url().as_ref());
 
     assert!(parsed.is_ok());
+}
+
+#[test]
+fn it_parses_advisory_locking_correctly() {
+    let url = "postgres://localhost?sqlx-advisory-locking=false";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+    assert!(!opts.advisory_locking);
+
+    let url = "postgres://localhost?sqlx-advisory-locking=true";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+    assert!(opts.advisory_locking);
+
+    // Works after other parameters
+    let url = "postgres://localhost?application_name=myapp&sqlx-advisory-locking=false";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+    assert!(!opts.advisory_locking);
+    assert_eq!(opts.application_name.as_deref(), Some("myapp"));
+
+    // Default is true
+    let url = "postgres://localhost";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+    assert!(opts.advisory_locking);
 }

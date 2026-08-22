@@ -178,6 +178,7 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
             .clone()
             .database(&db_name),
         db_name,
+        locking: true,
     })
 }
 
