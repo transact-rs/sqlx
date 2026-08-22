@@ -24,9 +24,26 @@ impl ConnectOptions for MySqlConnectOptions {
     {
         let mut conn = MySqlConnection::establish(self).await?;
 
-        // After the connection is established, we initialize by configuring a few
-        // connection parameters
+        self.configure_session(&mut conn).await?;
 
+        Ok(conn)
+    }
+
+    fn log_statements(mut self, level: LevelFilter) -> Self {
+        self.log_settings.log_statements(level);
+        self
+    }
+
+    fn log_slow_statements(mut self, level: LevelFilter, duration: Duration) -> Self {
+        self.log_settings.log_slow_statements(level, duration);
+        self
+    }
+}
+
+impl MySqlConnectOptions {
+    /// After the connection is established, initialize by configuring
+    /// connection parameters (sql_mode, time_zone, charset).
+    pub(crate) async fn configure_session(&self, conn: &mut MySqlConnection) -> Result<(), Error> {
         // https://mariadb.com/kb/en/sql-mode/
 
         // PIPES_AS_CONCAT - Allows using the pipe character (ASCII 124) as string concatenation operator.
@@ -88,16 +105,6 @@ impl ConnectOptions for MySqlConnectOptions {
                 .await?;
         }
 
-        Ok(conn)
-    }
-
-    fn log_statements(mut self, level: LevelFilter) -> Self {
-        self.log_settings.log_statements(level);
-        self
-    }
-
-    fn log_slow_statements(mut self, level: LevelFilter, duration: Duration) -> Self {
-        self.log_settings.log_slow_statements(level, duration);
-        self
+        Ok(())
     }
 }

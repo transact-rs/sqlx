@@ -7,6 +7,7 @@ use crate::io::StatementId;
 use crate::message::{
     Authentication, BackendKeyData, BackendMessageFormat, Password, ReadyForQuery, Startup,
 };
+use crate::net::Socket;
 use crate::{PgConnectOptions, PgConnection};
 
 use super::PgConnectionInner;
@@ -16,9 +17,22 @@ use super::PgConnectionInner;
 
 impl PgConnection {
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
-        // Upgrade to TLS if we were asked to and the server supports it
-        let mut stream = PgStream::connect(options).await?;
+        let stream = PgStream::connect(options).await?;
+        Self::establish_with_stream(stream, options).await
+    }
 
+    pub(crate) async fn establish_with_socket<S: Socket>(
+        socket: S,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error> {
+        let stream = PgStream::connect_socket(socket, options).await?;
+        Self::establish_with_stream(stream, options).await
+    }
+
+    async fn establish_with_stream(
+        mut stream: PgStream,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error> {
         // To begin a session, a frontend opens a connection to the server
         // and sends a startup message.
 
