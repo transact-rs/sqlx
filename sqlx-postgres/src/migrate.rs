@@ -17,6 +17,12 @@ use crate::query_as::query_as;
 use crate::query_scalar::query_scalar;
 use crate::{PgConnectOptions, PgConnection, Postgres};
 
+/// The default name of the migrations table, as an unqualified identifier.
+///
+/// If the user has picked a different name, or qualified this one, they have taken
+/// responsibility for how it resolves and [`check_migrations_table_resolution()`] is skipped.
+const DEFAULT_MIGRATIONS_TABLE: &str = "_sqlx_migrations";
+
 fn parse_for_maintenance(url: &str) -> Result<(PgConnectOptions, String), Error> {
     let mut options = PgConnectOptions::from_str(url)?;
 
@@ -124,6 +130,10 @@ impl Migrate for PgConnection {
         table_name: &'e str,
     ) -> BoxFuture<'e, Result<(), MigrateError>> {
         Box::pin(async move {
+            if table_name == DEFAULT_MIGRATIONS_TABLE {
+                check_migrations_table_resolution(self, table_name).await?;
+            }
+
             // language=SQL
             self.execute(AssertSqlSafe(format!(
                 r#"
@@ -309,6 +319,63 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             .await?;
             Ok(())
         })
+    }
+}
+
+/// Check that an unqualified reference to `table_name` still resolves where it was created.
+///
+/// An unqualified name is resolved through `search_path`, which contains `"$user"` by default.
+/// A schema is ignored while it does not exist, so a migration that creates a schema named after
+/// the connecting role makes that schema shadow `public` for every later session. The migrations
+/// table then resolves to the new, empty schema, and every migration is applied a second time.
+///
+/// Returns [`MigrateError::AmbiguousMigrationsTable`] if `table_name` exists somewhere in the
+/// search path but not in the schema an unqualified reference resolves to first, since SQLx
+/// cannot tell which of those tables describes the current context.
+async fn check_migrations_table_resolution(
+    conn: &mut PgConnection,
+    table_name: &str,
+) -> Result<(), MigrateError> {
+    // `current_schemas()` returns the effective search path in priority order, with entries that
+    // name no existing schema omitted, which is exactly what object resolution searches.
+    // language=SQL
+    let search_path: Vec<String> = query_scalar("SELECT current_schemas(false)::text[]")
+        .fetch_one(&mut *conn)
+        .await?;
+
+    // With an empty search path, nothing can shadow anything, and the `CREATE TABLE` that
+    // follows reports the missing target schema itself.
+    let Some(default_schema) = search_path.first() else {
+        return Ok(());
+    };
+
+    // language=SQL
+    let found_in: Vec<String> =
+        query_scalar("SELECT schemaname::text FROM pg_catalog.pg_tables WHERE tablename = $1")
+            .bind(table_name)
+            .fetch_all(&mut *conn)
+            .await?;
+
+    // Keep search path order so that the first entry is the one an unqualified name resolves to.
+    let mut found_in_search_path = search_path
+        .iter()
+        .filter(|schema| found_in.contains(schema));
+
+    match found_in_search_path.next() {
+        // The table does not exist yet, so it is about to be created in `default_schema` and
+        // will resolve there. A later move is caught on the next run.
+        None => Ok(()),
+        // The table already resolves to `default_schema`.
+        Some(schema) if schema == default_schema => Ok(()),
+        // The table exists, but an unqualified reference no longer points at it.
+        Some(schema) => Err(MigrateError::AmbiguousMigrationsTable {
+            table_name: table_name.to_owned(),
+            default_schema: default_schema.clone(),
+            other_schemas: std::iter::once(schema)
+                .chain(found_in_search_path)
+                .cloned()
+                .collect(),
+        }),
     }
 }
 

@@ -1,8 +1,9 @@
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{MigrateError, Migration, MigrationType, Migrator};
 use sqlx::pool::PoolConnection;
-use sqlx::postgres::{PgConnection, Postgres};
+use sqlx::postgres::{PgConnection, PgPool, Postgres};
 use sqlx::Executor;
 use sqlx::Row;
+use sqlx::{AssertSqlSafe, ConnectOptions, Connection, SqlSafeStr};
 use std::path::Path;
 
 #[sqlx::test(migrations = false)]
@@ -126,6 +127,111 @@ async fn no_tx(mut conn: PoolConnection<Postgres>) -> anyhow::Result<()> {
         .get(0);
 
     assert_eq!(res, "test_db");
+
+    Ok(())
+}
+
+/// A migration that creates a schema named after the connecting role makes that schema shadow
+/// `public` in the default search path of every session that starts afterwards. An unqualified
+/// reference to `_sqlx_migrations` then resolves to the new, empty schema.
+///
+/// The migrator must report the ambiguity instead of creating a second migrations table and
+/// applying every migration a second time.
+#[sqlx::test(migrations = false)]
+async fn migrations_table_shadowed_by_role_schema(pool: PgPool) -> anyhow::Result<()> {
+    let connect_options = pool.connect_options();
+
+    let role: String = sqlx::query_scalar("SELECT current_user")
+        .fetch_one(&pool)
+        .await?;
+
+    let migrator = Migrator::with_migrations(vec![
+        Migration::new(
+            1,
+            "create role schema".into(),
+            MigrationType::Simple,
+            AssertSqlSafe(format!(r#"CREATE SCHEMA "{role}""#)).into_sql_str(),
+            false,
+        ),
+        Migration::new(
+            2,
+            "add table".into(),
+            MigrationType::Simple,
+            AssertSqlSafe(format!(
+                r#"CREATE TABLE "{role}".migrations_shadowed_test (id INT PRIMARY KEY)"#
+            ))
+            .into_sql_str(),
+            false,
+        ),
+    ]);
+
+    // The schema only shadows `public` for sessions that start after it exists,
+    // so each run needs its own connection.
+    let mut conn = connect_options.connect().await?;
+    migrator.run(&mut conn).await?;
+    conn.close().await?;
+
+    let mut conn = connect_options.connect().await?;
+    let error = migrator
+        .run(&mut conn)
+        .await
+        .expect_err("second run did not detect the shadowed migrations table");
+    conn.close().await?;
+
+    assert!(
+        matches!(error, MigrateError::AmbiguousMigrationsTable { .. }),
+        "unexpected error: {error:?}"
+    );
+
+    // The second run must not have left an empty migrations table behind in the new schema.
+    let tracking_tables: Vec<String> = sqlx::query_scalar(
+        "SELECT schemaname::text FROM pg_catalog.pg_tables \
+         WHERE tablename = '_sqlx_migrations' ORDER BY schemaname",
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    assert_eq!(tracking_tables, ["public"]);
+
+    Ok(())
+}
+
+/// An explicitly chosen table name is the user's responsibility, so the shadowing check is
+/// skipped for it and migrations keep running against the name as written.
+#[sqlx::test(migrations = false)]
+async fn qualified_migrations_table_ignores_role_schema(pool: PgPool) -> anyhow::Result<()> {
+    let connect_options = pool.connect_options();
+
+    let role: String = sqlx::query_scalar("SELECT current_user")
+        .fetch_one(&pool)
+        .await?;
+
+    let mut migrator = Migrator::with_migrations(vec![Migration::new(
+        1,
+        "create role schema".into(),
+        MigrationType::Simple,
+        AssertSqlSafe(format!(r#"CREATE SCHEMA "{role}""#)).into_sql_str(),
+        false,
+    )]);
+    migrator.dangerous_set_table_name("public._sqlx_migrations");
+
+    let mut conn = connect_options.connect().await?;
+    migrator.run(&mut conn).await?;
+    conn.close().await?;
+
+    // A qualified name cannot move, so the second run is a no-op.
+    let mut conn = connect_options.connect().await?;
+    migrator.run(&mut conn).await?;
+    conn.close().await?;
+
+    let tracking_tables: Vec<String> = sqlx::query_scalar(
+        "SELECT schemaname::text FROM pg_catalog.pg_tables \
+         WHERE tablename = '_sqlx_migrations' ORDER BY schemaname",
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    assert_eq!(tracking_tables, ["public"]);
 
     Ok(())
 }
