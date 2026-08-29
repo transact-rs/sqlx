@@ -1,3 +1,4 @@
+use crate::connection::oauth;
 use crate::connection::stream::PgStream;
 use crate::error::Error;
 use crate::message::{Authentication, AuthenticationSasl, SaslInitialResponse, SaslResponse};
@@ -24,6 +25,7 @@ pub(crate) async fn authenticate(
 ) -> Result<(), Error> {
     let mut has_sasl = false;
     let mut has_sasl_plus = false;
+    let mut has_oauth = false;
     let mut unknown = Vec::new();
 
     for mechanism in data.mechanisms() {
@@ -36,9 +38,27 @@ pub(crate) async fn authenticate(
                 has_sasl_plus = true;
             }
 
+            oauth::MECHANISM => {
+                has_oauth = true;
+            }
+
             _ => {
                 unknown.push(mechanism.to_owned());
             }
+        }
+    }
+
+    // PostgreSQL's `oauth` HBA method (added in 18) advertises OAUTHBEARER and nothing else.
+    if has_oauth {
+        if let Some(token) = &options.oauth_token {
+            return oauth::authenticate(stream, token).await;
+        }
+
+        if !has_sasl && !has_sasl_plus {
+            return Err(err_protocol!(
+                "server requested OAUTHBEARER authentication, but no OAuth token is \
+                 configured; see `PgConnectOptions::oauth_token_provider`"
+            ));
         }
     }
 
@@ -74,8 +94,8 @@ pub(crate) async fn authenticate(
 
     stream
         .send(SaslInitialResponse {
+            mechanism: "SCRAM-SHA-256",
             response: &client_first_message,
-            plus: false,
         })
         .await?;
 

@@ -1,15 +1,19 @@
 use std::borrow::Cow;
 use std::env::var;
 use std::fmt::{self, Display, Write};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+pub use oauth::PgOAuthToken;
+use sqlx_core::error::BoxDynError;
 use sqlx_core::net::tls::TlsConnector;
 pub use ssl_mode::PgSslMode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
 
 mod connect;
+mod oauth;
 mod parse;
 mod pgpass;
 mod ssl_mode;
@@ -29,6 +33,7 @@ pub struct PgConnectOptions {
     pub(crate) log_settings: LogSettings,
     pub(crate) extra_float_digits: Option<Cow<'static, str>>,
     pub(crate) options: Option<String>,
+    pub(crate) oauth_token: Option<PgOAuthToken>,
 }
 
 impl Default for PgConnectOptions {
@@ -108,6 +113,7 @@ impl PgConnectOptions {
             extra_float_digits: Some("2".into()),
             log_settings: Default::default(),
             options: var("PGOPTIONS").ok(),
+            oauth_token: None,
         }
     }
 
@@ -121,6 +127,62 @@ impl PgConnectOptions {
             );
         }
 
+        self
+    }
+
+    /// Authenticate with a fixed OAuth 2.0 bearer token, for PostgreSQL's `oauth`
+    /// authentication method.
+    ///
+    /// Prefer [`oauth_token_provider`][Self::oauth_token_provider] where the token can expire:
+    /// a token set here is used for every connection attempt, including reconnections made by a
+    /// pool long after the token was minted.
+    ///
+    /// The token is used only when the server requests SASL `OAUTHBEARER`; it is never sent to a
+    /// server asking for a password.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// # fn f(token: String) -> PgConnectOptions {
+    /// PgConnectOptions::new().oauth_token(token)
+    /// # }
+    /// ```
+    pub fn oauth_token(mut self, token: impl Into<String>) -> Self {
+        self.oauth_token = Some(PgOAuthToken::new(token));
+        self
+    }
+
+    /// Obtain an OAuth 2.0 bearer token once per connection attempt, for PostgreSQL's `oauth`
+    /// authentication method.
+    ///
+    /// SQLx does not talk to an identity provider. `provider` is called immediately before the
+    /// SASL exchange and should return a currently valid token; how it is acquired, cached and
+    /// refreshed is the application's choice.
+    ///
+    /// The token is used only when the server requests SASL `OAUTHBEARER`; it is never sent to a
+    /// server asking for a password.
+    ///
+    /// Note that there is deliberately no connection-string equivalent of this option: a URL
+    /// ends up in shell history, in `ps` output and in logs, which is no place for a bearer
+    /// token.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new().oauth_token_provider(|| async {
+    ///     // Called for each connection attempt, so an expired token can be refreshed.
+    ///     let token = std::env::var("EXAMPLE_OAUTH_TOKEN")?;
+    ///     Ok(token)
+    /// });
+    /// ```
+    pub fn oauth_token_provider<F, Fut>(mut self, provider: F) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<String, BoxDynError>> + Send + 'static,
+    {
+        self.oauth_token = Some(PgOAuthToken::from_provider(provider));
         self
     }
 
