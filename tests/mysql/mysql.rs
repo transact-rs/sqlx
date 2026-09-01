@@ -727,3 +727,55 @@ async fn any_blob_conversions() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn test_client_found_rows() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let url = url::Url::parse(&env::var("DATABASE_URL")?)?;
+
+    // CLIENT_AFFECTED_ROWS unspecified = true by default.
+    let mut conn = MySqlConnectOptions::from_url(&url)?.connect().await?;
+    let mut tx = conn.begin().await?;
+
+    tx.execute(sqlx::query(
+        "CREATE TEMPORARY TABLE found_rows_testing (id INT PRIMARY KEY, field INT NOT NULL)",
+    ))
+    .await?;
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 20) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 2);
+
+    tx.rollback().await?;
+
+    // Explicitly unset CLIENT_AFFECTED_ROWS.
+    let mut conn = MySqlConnectOptions::from_url(&url)?
+        .found_rows(false)
+        .connect()
+        .await?;
+    let mut tx = conn.begin().await?;
+
+    tx.execute(sqlx::query(
+        "CREATE TEMPORARY TABLE found_rows_testing (id INT PRIMARY KEY, field INT NOT NULL)",
+    ))
+    .await?;
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 0);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 20) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 2);
+
+    tx.rollback().await?;
+
+    Ok(())
+}

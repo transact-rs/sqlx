@@ -188,9 +188,9 @@ pub async fn connect_tcp<Ws: WithSocket>(
 ) -> crate::Result<Ws::Output> {
     #[cfg(feature = "_rt-tokio")]
     if crate::rt::rt_tokio::available() {
-        return Ok(with_socket
-            .with_socket(tokio::net::TcpStream::connect((host, port)).await?)
-            .await);
+        let socket = tokio::net::TcpStream::connect((host, port)).await?;
+        socket.set_nodelay(true)?;
+        return Ok(with_socket.with_socket(socket).await);
     }
 
     cfg_if! {
@@ -206,7 +206,7 @@ pub async fn connect_tcp<Ws: WithSocket>(
 ///
 /// If `host` is a hostname, attempt to connect to each address it resolves to.
 ///
-/// This implements the same behavior as [`tokio::net::TcpStream::connect()`].
+/// This implements the same behavior as [`tokio::net::TcpStream::connect()`] and additionally sets the `TCP_NODELAY` flag.
 #[cfg(feature = "_rt-async-io")]
 async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socket> {
     use async_io::Async;
@@ -216,7 +216,9 @@ async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socke
     let host = host.trim_matches(&['[', ']'][..]);
 
     if let Ok(addr) = host.parse::<IpAddr>() {
-        return Ok(Async::<TcpStream>::connect((addr, port)).await?);
+        let socket = Async::<TcpStream>::connect((addr, port)).await?;
+        socket.get_ref().set_nodelay(true)?;
+        return Ok(socket);
     }
 
     let host = host.to_string();
@@ -232,7 +234,10 @@ async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socke
     // Loop through all the Socket Addresses that the hostname resolves to
     for socket_addr in addresses {
         match Async::<TcpStream>::connect(socket_addr).await {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => {
+                stream.get_ref().set_nodelay(true)?;
+                return Ok(stream);
+            }
             Err(e) => last_err = Some(e),
         }
     }

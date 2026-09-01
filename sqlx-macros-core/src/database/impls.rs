@@ -3,11 +3,13 @@ macro_rules! impl_database_ext {
         $database:path,
         row: $row:path,
         $(describe-blocking: $describe:path,)?
+        $(prepare-connection: $prepare:path,)?
     ) => {
         impl $crate::database::DatabaseExt for $database {
             const DATABASE_PATH: &'static str = stringify!($database);
             const ROW_PATH: &'static str = stringify!($row);
             impl_describe_blocking!($database, $($describe)?);
+            impl_prepare_describe_connection!($database, $($prepare)?);
         }
     }
 }
@@ -38,6 +40,19 @@ macro_rules! impl_describe_blocking {
     };
 }
 
+macro_rules! impl_prepare_describe_connection {
+    ($database:path $(,)?) => {
+        // No override: use the `DatabaseExt::prepare_describe_connection` default (no-op).
+    };
+    ($database:path, $prepare:path) => {
+        async fn prepare_describe_connection(
+            conn: &mut <Self as sqlx_core::database::Database>::Connection,
+        ) -> sqlx_core::Result<()> {
+            $prepare(conn).await
+        }
+    };
+}
+
 // The paths below will also be emitted from the macros, so they need to match the final facade.
 mod sqlx {
     #[cfg(feature = "mysql")]
@@ -61,6 +76,7 @@ impl_database_ext! {
 impl_database_ext! {
     sqlx::postgres::Postgres,
     row: sqlx::postgres::PgRow,
+    prepare-connection: sqlx::postgres::PgConnection::force_generic_plan_for_describe,
 }
 
 #[cfg(feature = "_sqlite")]

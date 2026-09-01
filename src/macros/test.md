@@ -41,6 +41,38 @@ This feature is activated by changing the signature of your test function. The f
 
 Where `DB` is a supported `Database` type and `Ret` is `()` or `Result<_, _>`.
 
+##### Concurrent Tests and Connection Limits
+
+Each `#[sqlx::test]` gets its own database and pool, but all tests in the same process still share the
+database server's connection limit. If many tests run in parallel and fail with `PoolTimedOut`, reduce
+the test runner's concurrency, increase the server's connection limit, or reduce the per-test pool size.
+
+To reduce the per-test pool size, use the `PoolOptions` signature and create the pool explicitly:
+
+```rust,no_run
+# #[cfg(all(feature = "migrate", feature = "postgres"))]
+# mod example {
+use sqlx::{pool::PoolOptions, postgres::PgConnectOptions, Postgres};
+
+#[sqlx::test]
+async fn basic_test(
+    pool_options: PoolOptions<Postgres>,
+    connect_options: PgConnectOptions,
+) -> sqlx::Result<()> {
+    let pool = pool_options
+        .max_connections(1)
+        .connect_with(connect_options)
+        .await?;
+
+    sqlx::query("SELECT 1").execute(&pool).await?;
+
+    Ok(())
+}
+# }
+```
+
+You can also limit Rust's built-in test runner with `cargo test -- --test-threads <N>`.
+
 ##### Supported Databases
 
 Most of these will require you to set `DATABASE_URL` as an environment variable

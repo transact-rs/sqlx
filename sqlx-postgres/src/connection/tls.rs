@@ -20,7 +20,7 @@ async fn maybe_upgrade<S: Socket>(
     options: &PgConnectOptions,
 ) -> Result<Box<dyn Socket>, Error> {
     // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
-    match options.ssl_mode {
+    match options.ssl_options.ssl_mode {
         // FIXME: Implement ALLOW
         PgSslMode::Allow | PgSslMode::Disable => return Ok(Box::new(socket)),
 
@@ -45,22 +45,31 @@ async fn maybe_upgrade<S: Socket>(
         }
     }
 
-    let accept_invalid_certs = !matches!(
-        options.ssl_mode,
-        PgSslMode::VerifyCa | PgSslMode::VerifyFull
-    );
-    let accept_invalid_hostnames = !matches!(options.ssl_mode, PgSslMode::VerifyFull);
+    let connector = if let Some(c) = options.ssl_options.cached_connector.get() {
+        c
+    } else {
+        let accept_invalid_certs = !matches!(
+            options.ssl_options.ssl_mode,
+            PgSslMode::VerifyCa | PgSslMode::VerifyFull
+        );
+        let accept_invalid_hostnames =
+            !matches!(options.ssl_options.ssl_mode, PgSslMode::VerifyFull);
 
-    let config = TlsConfig {
-        accept_invalid_certs,
-        accept_invalid_hostnames,
-        hostname: &options.host,
-        root_cert_path: options.ssl_root_cert.as_ref(),
-        client_cert_path: options.ssl_client_cert.as_ref(),
-        client_key_path: options.ssl_client_key.as_ref(),
+        let config = TlsConfig {
+            accept_invalid_certs,
+            accept_invalid_hostnames,
+            root_cert_path: options.ssl_options.ssl_root_cert.as_ref(),
+            client_cert_path: options.ssl_options.ssl_client_cert.as_ref(),
+            client_key_path: options.ssl_options.ssl_client_key.as_ref(),
+        };
+        let connector = tls::connector(config).await?;
+        options
+            .ssl_options
+            .cached_connector
+            .get_or_init(|| connector)
     };
 
-    tls::handshake(socket, config, SocketIntoBox).await
+    tls::handshake(socket, &options.host, connector, SocketIntoBox).await
 }
 
 async fn request_upgrade(

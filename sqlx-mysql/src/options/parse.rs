@@ -103,7 +103,7 @@ impl MySqlConnectOptions {
             url.set_path(database);
         }
 
-        let ssl_mode = match self.ssl_mode {
+        let ssl_mode = match self.ssl_options.ssl_mode {
             MySqlSslMode::Disabled => "DISABLED",
             MySqlSslMode::Preferred => "PREFERRED",
             MySqlSslMode::Required => "REQUIRED",
@@ -112,7 +112,7 @@ impl MySqlConnectOptions {
         };
         url.query_pairs_mut().append_pair("ssl-mode", ssl_mode);
 
-        if let Some(ssl_ca) = &self.ssl_ca {
+        if let Some(ssl_ca) = &self.ssl_options.ssl_ca {
             url.query_pairs_mut()
                 .append_pair("ssl-ca", &ssl_ca.to_string());
         }
@@ -123,12 +123,12 @@ impl MySqlConnectOptions {
             url.query_pairs_mut().append_pair("charset", collation);
         }
 
-        if let Some(ssl_client_cert) = &self.ssl_client_cert {
+        if let Some(ssl_client_cert) = &self.ssl_options.ssl_client_cert {
             url.query_pairs_mut()
                 .append_pair("ssl-cert", &ssl_client_cert.to_string());
         }
 
-        if let Some(ssl_client_key) = &self.ssl_client_key {
+        if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
             url.query_pairs_mut()
                 .append_pair("ssl-key", &ssl_client_key.to_string());
         }

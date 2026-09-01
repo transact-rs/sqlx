@@ -136,7 +136,7 @@ impl PgConnectOptions {
             url.set_path(database);
         }
 
-        let ssl_mode = match self.ssl_mode {
+        let ssl_mode = match self.ssl_options.ssl_mode {
             PgSslMode::Allow => "allow",
             PgSslMode::Disable => "disable",
             PgSslMode::Prefer => "prefer",
@@ -146,17 +146,17 @@ impl PgConnectOptions {
         };
         url.query_pairs_mut().append_pair("sslmode", ssl_mode);
 
-        if let Some(ssl_root_cert) = &self.ssl_root_cert {
+        if let Some(ssl_root_cert) = &self.ssl_options.ssl_root_cert {
             url.query_pairs_mut()
                 .append_pair("sslrootcert", &ssl_root_cert.to_string());
         }
 
-        if let Some(ssl_client_cert) = &self.ssl_client_cert {
+        if let Some(ssl_client_cert) = &self.ssl_options.ssl_client_cert {
             url.query_pairs_mut()
                 .append_pair("sslcert", &ssl_client_cert.to_string());
         }
 
-        if let Some(ssl_client_key) = &self.ssl_client_key {
+        if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
             url.query_pairs_mut()
                 .append_pair("sslkey", &ssl_client_key.to_string());
         }
