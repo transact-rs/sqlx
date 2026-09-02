@@ -76,7 +76,7 @@ SQLx is an async, pure Rust<sub>†</sub> SQL crate featuring compile-time check
 
 -   **Pure Rust**. The Postgres and MySQL/MariaDB drivers are written in pure Rust using **zero** unsafe<sub>††</sub> code.
 
--   **Runtime Agnostic**. Works on different runtimes ([`async-std`] / [`tokio`] / [`actix`]) and TLS backends ([`native-tls`], [`rustls`]).
+-   **Runtime Agnostic**. Works on different runtimes ([`async-global-executor`], [`async-std`], [`smol`], [`tokio`]) and TLS backends ([`native-tls`], [`rustls`]).
 
 <small><small>
 
@@ -119,11 +119,12 @@ The SQLite driver directly invokes the SQLite3 API via `libsqlite3-sys`, which r
 
 ## Install
 
-SQLx is compatible with the [`async-std`], [`tokio`], and [`actix`] runtimes; and, the [`native-tls`] and [`rustls`] TLS backends. When adding the dependency, you must choose a runtime feature that is `runtime` + `tls`.
+SQLx is compatible with the [`async-global-executor`], [`async-std`], [`smol`], and [`tokio`] runtimes; and, the [`native-tls`] and [`rustls`] TLS backends. When adding the dependency, you must choose a runtime feature that is `runtime` + `tls`.
 
+[`async-global-executor`]: https://github.com/async-rs/async-global-executor
 [`async-std`]: https://github.com/async-rs/async-std
+[`smol`]: https://github.com/smol-rs/smol
 [`tokio`]: https://github.com/tokio-rs/tokio
-[`actix`]: https://github.com/actix/actix-net
 [`native-tls`]: https://crates.io/crates/native-tls
 [`rustls`]: https://crates.io/crates/rustls
 
@@ -131,6 +132,12 @@ SQLx is compatible with the [`async-std`], [`tokio`], and [`actix`] runtimes; an
 # Cargo.toml
 [dependencies]
 # PICK ONE OF THE FOLLOWING:
+
+# async-global-executor (no TLS)
+sqlx = { version = "0.9", features = [ "runtime-async-global-executor" ] }
+
+# smol (no TLS)
+sqlx = { version = "0.9", features = [ "runtime-smol" ] }
 
 # tokio (no TLS)
 sqlx = { version = "0.9", features = [ "runtime-tokio" ] }
@@ -142,17 +149,6 @@ sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-ring-webpki"
 sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-ring-native-roots" ] }
 # tokio + rustls with aws-lc-rs
 sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-aws-lc-rs" ] }
-
-# async-std (no TLS)
-sqlx = { version = "0.9", features = [ "runtime-async-std" ] }
-# async-std + native-tls
-sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-native-tls" ] }
-# async-std + rustls with ring and WebPKI CA certificates
-sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-ring-webpki" ] }
-# async-std + rustls with ring and platform's native CA certificates
-sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-ring-native-roots" ] }
-# async-std + rustls with aws-lc-rs
-sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-aws-lc-rs" ] }
 ```
 
 #### Cargo Feature Flags
@@ -163,7 +159,11 @@ or separately.
 For forward compatibility, you should use the separate runtime and TLS features as the combination features may
 be removed in the future.
 
+-   `runtime-async-global-executor`: Use the `async-global-executor` runtime without enabling a TLS backend.
+
 -   `runtime-async-std`: Use the `async-std` runtime without enabling a TLS backend.
+
+-   `runtime-smol`: Use the `smol` runtime without enabling a TLS backend.
 
 -   `runtime-tokio`: Use the `tokio` runtime without enabling a TLS backend.
 
@@ -253,9 +253,7 @@ use sqlx::postgres::PgPoolOptions;
 // use sqlx::mysql::MySqlPoolOptions;
 // etc.
 
-#[async_std::main] // Requires the `attributes` feature of `async-std`
-// or #[tokio::main]
-// or #[actix_web::main]
+#[tokio::main]
 async fn main() -> Result<(), sqlx::Error> {
     // Create a connection pool
     //  for MySQL/MariaDB, use MySqlPoolOptions::new()

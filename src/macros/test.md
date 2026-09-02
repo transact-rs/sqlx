@@ -1,9 +1,15 @@
 Mark an `async fn` as a test with SQLx support.
 
-The test will automatically be executed in the async runtime according to the chosen
-`runtime-{async-std, tokio}` feature. If more than one runtime feature is enabled, `runtime-tokio` is preferred.
+`#[sqlx::test]` requires one of SQLx's runtime features:
 
-By default, this behaves identically to `#[tokio::test]`<sup>1</sup> or `#[async_std::test]`:
+* `runtime-async-global-executor`
+* `runtime-async-std`
+* `runtime-smol`
+* `runtime-tokio`
+
+Applications should generally enable exactly one runtime feature.
+
+By default, this runs the async test to completion<sup>1</sup>:
 
 ```rust
 # // Note if reading these examples directly in `test.md`:
@@ -18,7 +24,7 @@ async fn test_async_fn() {
 
 However, several advanced features are also supported as shown in the next section.
 
-<sup>1</sup>`#[sqlx::test]` does not recognize any of the control arguments supported by `#[tokio::test]`
+<sup>1</sup>When `runtime-tokio` is selected, `#[sqlx::test]` does not recognize any of the control arguments supported by `#[tokio::test]`
 as that would have complicated the implementation. If your use case requires any of those, feel free to open an issue.
 
 ### Automatic Test Database Management (requires `migrate` feature)
