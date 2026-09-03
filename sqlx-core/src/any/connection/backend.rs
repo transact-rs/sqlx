@@ -76,6 +76,13 @@ pub trait AnyConnectionBackend: std::any::Any + Debug + Send + 'static {
     /// [`Connection::shrink_buffers()`]: method@crate::connection::Connection::shrink_buffers
     fn shrink_buffers(&mut self);
 
+    /// Forward to [`Connection::buffer_stats()`].
+    ///
+    /// [`Connection::buffer_stats()`]: method@crate::connection::Connection::buffer_stats
+    fn buffer_stats(&self) -> Option<crate::net::BufferStats> {
+        None
+    }
+
     #[doc(hidden)]
     fn flush(&mut self) -> BoxFuture<'_, crate::Result<()>>;
 

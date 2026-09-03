@@ -159,6 +159,17 @@ pub trait Connection: Send {
     /// allow the buffers to shrink.
     fn shrink_buffers(&mut self);
 
+    /// Returns statistics about the connection's internal buffer allocation.
+    ///
+    /// This can be used to monitor memory usage per connection. The default buffer
+    /// capacity is 8KB for both read and write buffers, but they may grow to
+    /// accommodate large queries or result sets.
+    ///
+    /// Returns `None` for databases that don't use buffered sockets (like SQLite).
+    fn buffer_stats(&self) -> Option<crate::net::BufferStats> {
+        None
+    }
+
     #[doc(hidden)]
     fn flush(&mut self) -> impl Future<Output = Result<(), Error>> + Send + '_;
 

@@ -326,4 +326,41 @@ impl ReadBuffer {
             self.available = BytesMut::with_capacity(DEFAULT_BUF_SIZE);
         }
     }
+
+    /// Returns the current allocated capacity of this buffer in bytes.
+    pub fn capacity(&self) -> usize {
+        self.read.capacity() + self.available.capacity()
+    }
+}
+
+/// Statistics about connection buffer allocation.
+///
+/// This can be used to monitor memory usage per connection for observability purposes.
+/// The default buffer capacity is 8KB for both read and write buffers, but they may grow
+/// to accommodate large queries or result sets.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BufferStats {
+    /// Allocated capacity of the write buffer in bytes.
+    pub write_buffer_capacity: usize,
+    /// Allocated capacity of the read buffer in bytes.
+    pub read_buffer_capacity: usize,
+}
+
+impl WriteBuffer {
+    /// Returns the current allocated capacity of this buffer in bytes.
+    pub fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+}
+
+impl<S: Socket> BufferedSocket<S> {
+    /// Returns statistics about the current buffer allocation.
+    ///
+    /// This can be useful for monitoring memory usage per connection.
+    pub fn buffer_stats(&self) -> BufferStats {
+        BufferStats {
+            write_buffer_capacity: self.write_buf.capacity(),
+            read_buffer_capacity: self.read_buf.capacity(),
+        }
+    }
 }

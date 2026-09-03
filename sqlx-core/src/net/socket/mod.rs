@@ -4,7 +4,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
-pub use buffered::{BufferedSocket, WriteBuffer};
+pub use buffered::{BufferStats, BufferedSocket, WriteBuffer};
 use bytes::BufMut;
 use cfg_if::cfg_if;
 
