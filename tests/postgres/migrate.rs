@@ -33,8 +33,19 @@ async fn reversible(mut conn: PoolConnection<Postgres>) -> anyhow::Result<()> {
 
     let migrator = Migrator::new(Path::new("tests/postgres/migrations_reversible")).await?;
 
+    // run only until first reversible migration
+    migrator
+        .run_through_version(&mut conn, 20220721124650)
+        .await?;
+
+    let latest_version = migrator.latest_version();
+    assert_eq!(latest_version, 20220721125033);
+
     // run migration
     migrator.run(&mut conn).await?;
+
+    let latest_applied_version = migrator.latest_applied_version(&mut conn).await?.unwrap();
+    assert_eq!(latest_applied_version, latest_version);
 
     // check outcome
     let res: i64 = conn
