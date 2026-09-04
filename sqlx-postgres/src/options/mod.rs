@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::env::var;
+use std::ffi::OsStr;
 use std::fmt::{self, Display, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -22,6 +23,7 @@ pub struct PgConnectOptions {
     pub(crate) socket: Option<PathBuf>,
     pub(crate) username: String,
     pub(crate) password: Option<String>,
+    pub(crate) passfile_paths: Vec<PathBuf>,
     pub(crate) database: Option<String>,
     pub(crate) ssl_options: SslOptions,
     pub(crate) statement_cache_capacity: usize,
@@ -89,6 +91,7 @@ impl PgConnectOptions {
             socket: None,
             username,
             password: var("PGPASSWORD").ok(),
+            passfile_paths: vec![],
             database,
             ssl_options: SslOptions {
                 ssl_root_cert: var("PGSSLROOTCERT").ok().map(CertificateInput::from),
@@ -118,6 +121,7 @@ impl PgConnectOptions {
                 self.port,
                 &self.username,
                 self.database.as_deref(),
+                &self.passfile_paths,
             );
         }
 
@@ -199,6 +203,23 @@ impl PgConnectOptions {
     /// ```
     pub fn password(mut self, password: &str) -> Self {
         self.password = Some(password.to_owned());
+        self
+    }
+
+    /// Sets the paths to try when looking for the pgpass file.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new()
+    ///     .passfile_paths(&["/non/default/pgpass"]);
+    /// ```
+    pub fn passfile_paths<P>(mut self, paths: impl IntoIterator<Item = P>) -> Self
+    where
+        P: Into<PathBuf> + AsRef<OsStr>,
+    {
+        self.passfile_paths = paths.into_iter().map(Into::into).collect();
         self
     }
 
