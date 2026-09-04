@@ -103,6 +103,14 @@ pub struct SqliteConfig {
     /// unsafe-load-extensions = ["uuid", "vsv"]
     /// ```
     pub unsafe_load_extensions: Vec<SqliteExtension>,
+
+    /// Specifies whether the driver should load the `REGEXP` function at build time.
+    ///
+    /// The `regexp` feature-flag must be enabled.
+    ///
+    /// # Note: Does not configure runtime regexp registering.
+    /// The function must be registered separately using `SqliteConnectOptions::with_regexp()`.
+    pub register_regexp: Option<bool>,
 }
 
 /// Extension for the SQLite database driver.

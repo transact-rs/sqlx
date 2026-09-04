@@ -49,6 +49,13 @@ unsafe-load-extensions = [
 	{ path = "vsv_renamed", entrypoint = "sqlite3_vsv_init" },
 ]
 
+# Automatically registers the regexp function over the sqlite database at build time if the corresponding feature flag is enabled.
+#
+# Must be specified separately at run-time using `SqliteConnectionOptions::with_regexp()`.
+#
+# Defaults to false.
+register-regexp = false
+
 # Configure external drivers in macros and sqlx-cli.
 #
 # These keys are only validated when the external driver tries to parse them,
