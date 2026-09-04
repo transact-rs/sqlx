@@ -80,5 +80,13 @@ _sqlite = []
 assert_cmd = "2.1.1"
 tempfile = "3.10.1"
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.'cfg(target_os = "windows")']
+pkg-fmt = "zip"
+
 [lints]
 workspace = true
