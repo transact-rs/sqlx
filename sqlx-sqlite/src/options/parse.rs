@@ -126,7 +126,12 @@ impl SqliteConnectOptions {
             .add(b'?')
             .add(b'`')
             .add(b'{')
-            .add(b'}');
+            .add(b'}')
+            // Not part of the WHATWG path-percent-encode-set, but a raw `:` right after
+            // `sqlite://` gets parsed as a host:port separator instead of part of the path,
+            // which breaks in-memory filenames like `:memory:` or `file:sqlx-in-memory-0`
+            // (see `from_db_and_params`) with `EmptyHost`/`InvalidPort` errors.
+            .add(b':');
 
         let filename_encoded = percent_encode(
             self.filename.as_os_str().as_encoded_bytes(),
@@ -226,6 +231,34 @@ fn it_returns_the_parsed_url() -> Result<(), Error> {
 
     let expected_url = Url::parse(url).unwrap();
     assert_eq!(options.build_url(), expected_url);
+
+    Ok(())
+}
+
+// https://github.com/launchbadge/sqlx/issues/4327
+#[test]
+fn build_url_does_not_panic_for_in_memory_db() -> Result<(), Error> {
+    // filename is `file:sqlx-in-memory-{seqno}`, which used to make the `url` crate
+    // interpret everything up to the next `/` as a `host:port` authority and choke on
+    // `sqlx-in-memory-0` not being a valid port.
+    let options: SqliteConnectOptions = "sqlite::memory:".parse()?;
+    let url = options.build_url();
+    assert_eq!(
+        url.query_pairs().find(|(k, _)| k == "mode").unwrap().1,
+        "memory"
+    );
+
+    // the plain `:memory:` filename used by `SqliteConnectOptions::default()` hit the same
+    // problem (the leading `:` was parsed as an empty host).
+    let default_url = SqliteConnectOptions::default().build_url();
+    assert_eq!(
+        default_url
+            .query_pairs()
+            .find(|(k, _)| k == "mode")
+            .unwrap()
+            .1,
+        "rw"
+    );
 
     Ok(())
 }
