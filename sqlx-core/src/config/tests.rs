@@ -18,6 +18,9 @@ fn assert_common_config(config: &config::common::Config) {
 }
 
 fn assert_drivers_config(config: &config::drivers::Config) {
+    assert!(!config.mysql.pipes_as_concat);
+    assert!(!config.mysql.no_engine_substitution);
+
     assert_eq!(
         config.sqlite.unsafe_load_extensions,
         vec![

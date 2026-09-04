@@ -22,7 +22,20 @@ database-url-var = "FOO_DATABASE_URL"
 
 # Configure MySQL databases in macros and sqlx-cli.
 [drivers.mysql]
-# No fields implemented yet. This key is only used to validate parsing.
+# Whether to enable the `PIPES_AS_CONCAT` connection setting
+#
+# Defaults to `true`.
+#
+# Some MySql databases such as PlanetScale error out with this connection setting
+# so it needs to be set `false` in such cases.
+pipes-as-concat = false
+# Whether to enable the `NO_ENGINE_SUBSTITUTION` sql_mode setting after connection.
+#
+# Defaults to `true` (`NO_ENGINE_SUBSTITUTION` is passed, forbidding engine substitution.)
+#
+# If not set, if the available storage engine specified by a `CREATE TABLE` is not available,
+# a warning is given and the default storage engine is used instead.
+no-engine-substitution = false
 
 # Configure Postgres databases in macros and sqlx-cli.
 [drivers.postgres]
