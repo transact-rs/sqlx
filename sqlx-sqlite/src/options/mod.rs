@@ -670,6 +670,26 @@ impl SqliteConnectOptions {
             ));
         }
 
+        #[cfg(feature = "regexp")]
+        if config
+            .register_regexp
+            .is_some_and(|register_regexp| register_regexp)
+        {
+            self = self.with_regexp();
+        }
+
+        #[cfg(not(feature = "regexp"))]
+        if config
+            .register_regexp
+            .is_some_and(|register_regexp| register_regexp)
+        {
+            return Err(sqlx_core::Error::Configuration(
+                "sqlx.toml sets drivers.sqlite.register-regexp to true but regexp is not enabled;\
+                    enable the `regexp` feature of SQLx to use sqlite regexp function"
+                    .into(),
+            ));
+        }
+
         Ok(self)
     }
 }
