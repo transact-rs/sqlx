@@ -44,7 +44,6 @@ impl<DB: Database> PoolInner<DB> {
 
         let semaphore_capacity = if let Some(parent) = &options.parent_pool {
             assert!(options.max_connections <= parent.options().max_connections);
-            assert_eq!(options.fair, parent.options().fair);
             // The child pool must steal permits from the parent
             0
         } else {
@@ -54,7 +53,7 @@ impl<DB: Database> PoolInner<DB> {
         let pool = Self {
             connect_options: RwLock::new(Arc::new(connect_options)),
             idle_conns: ArrayQueue::new(capacity),
-            semaphore: AsyncSemaphore::new(options.fair, semaphore_capacity),
+            semaphore: AsyncSemaphore::new(semaphore_capacity),
             size: AtomicU32::new(0),
             num_idle: AtomicUsize::new(0),
             is_closed: AtomicBool::new(false),

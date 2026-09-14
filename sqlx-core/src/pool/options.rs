@@ -82,7 +82,6 @@ pub struct PoolOptions<DB: Database> {
     pub(crate) min_connections: u32,
     pub(crate) max_lifetime: Option<Duration>,
     pub(crate) idle_timeout: Option<Duration>,
-    pub(crate) fair: bool,
 
     pub(crate) parent_pool: Option<Pool<DB>>,
 }
@@ -105,7 +104,6 @@ impl<DB: Database> Clone for PoolOptions<DB> {
             min_connections: self.min_connections,
             max_lifetime: self.max_lifetime,
             idle_timeout: self.idle_timeout,
-            fair: self.fair,
             parent_pool: self.parent_pool.clone(),
         }
     }
@@ -160,7 +158,6 @@ impl<DB: Database> PoolOptions<DB> {
             acquire_timeout: Duration::from_secs(30),
             idle_timeout: Some(Duration::from_secs(10 * 60)),
             max_lifetime: Some(Duration::from_secs(30 * 60)),
-            fair: true,
             parent_pool: None,
         }
     }
@@ -319,24 +316,6 @@ impl<DB: Database> PoolOptions<DB> {
     /// Get whether `test_before_acquire` is currently set.
     pub fn get_test_before_acquire(&self) -> bool {
         self.test_before_acquire
-    }
-
-    /// If set to `true`, calls to `acquire()` are fair and connections  are issued
-    /// in first-come-first-serve order. If `false`, "drive-by" tasks may steal idle connections
-    /// ahead of tasks that have been waiting.
-    ///
-    /// According to `sqlx-bench/benches/pg_pool` this may slightly increase time
-    /// to `acquire()` at low pool contention but at very high contention it helps
-    /// avoid tasks at the head of the waiter queue getting repeatedly preempted by
-    /// these "drive-by" tasks and tasks further back in the queue timing out because
-    /// the queue isn't moving.
-    ///
-    /// Currently only exposed for benchmarking; `fair = true` seems to be the superior option
-    /// in most cases.
-    #[doc(hidden)]
-    pub fn __fair(mut self, fair: bool) -> Self {
-        self.fair = fair;
-        self
     }
 
     /// Perform an asynchronous action after connecting to the database.
@@ -505,8 +484,7 @@ impl<DB: Database> PoolOptions<DB> {
     /// This is currently an internal-only API.
     ///
     /// ### Panics
-    /// If `self.max_connections` is greater than the setting the given pool was created with,
-    /// or `self.fair` differs from the setting the given pool was created with.
+    /// If `self.max_connections` is greater than the setting the given pool was created with.
     #[doc(hidden)]
     pub fn parent(mut self, pool: Pool<DB>) -> Self {
         self.parent_pool = Some(pool);

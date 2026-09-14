@@ -1,10 +1,12 @@
 use sqlx::any::{AnyConnectOptions, AnyPoolOptions};
 use sqlx::Executor;
 use sqlx_core::sql_str::AssertSqlSafe;
+use std::future::Future;
 use std::sync::{
     atomic::{AtomicI32, AtomicUsize, Ordering},
     Arc, Mutex,
 };
+use std::task::{Context, Waker};
 use std::time::Duration;
 
 #[sqlx_macros::test]
@@ -202,6 +204,107 @@ async fn test_pool_callbacks() -> anyhow::Result<()> {
 
     pool.close().await;
 
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn pool_acquires_in_order_after_cancelling_a_waiter() -> anyhow::Result<()> {
+    sqlx::any::install_default_drivers();
+    let pool = AnyPoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+    let mut held = pool.acquire().await?;
+    let mut cancelled = Box::pin(pool.acquire());
+    let mut first = Box::pin(pool.acquire());
+    let mut second = Box::pin(pool.acquire());
+    let mut cx = Context::from_waker(Waker::noop());
+
+    assert!(cancelled.as_mut().poll(&mut cx).is_pending());
+    assert!(first.as_mut().poll(&mut cx).is_pending());
+    assert!(second.as_mut().poll(&mut cx).is_pending());
+    drop(cancelled);
+    held.return_to_pool().await;
+
+    assert!(pool.try_acquire().is_none());
+    assert!(second.as_mut().poll(&mut cx).is_pending());
+    let mut first = first.await?;
+    assert!(pool.try_acquire().is_none());
+    first.return_to_pool().await;
+    let mut second = second.await?;
+    second.execute("SELECT 1").await?;
+    second.return_to_pool().await;
+
+    assert_eq!(pool.size(), 1);
+    assert_eq!(pool.num_idle(), 1);
+    pool.close().await;
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn pool_close_waits_for_all_connections_and_wakes_waiters() -> anyhow::Result<()> {
+    sqlx::any::install_default_drivers();
+    let pool = AnyPoolOptions::new()
+        .max_connections(2)
+        .test_before_acquire(false)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+    let mut first = pool.acquire().await?;
+    let mut second = pool.acquire().await?;
+    let mut waiter = Box::pin(pool.acquire());
+    let mut cx = Context::from_waker(Waker::noop());
+
+    assert!(waiter.as_mut().poll(&mut cx).is_pending());
+    let mut close = Box::pin(pool.close());
+    assert!(close.as_mut().poll(&mut cx).is_pending());
+    assert!(matches!(waiter.await, Err(sqlx::Error::PoolClosed)));
+    first.return_to_pool().await;
+    assert!(close.as_mut().poll(&mut cx).is_pending());
+
+    // Cancelling a partially satisfied close must return its reserved permits.
+    drop(close);
+    let mut close = Box::pin(pool.close());
+    assert!(close.as_mut().poll(&mut cx).is_pending());
+    second.return_to_pool().await;
+    close.await;
+
+    assert!(pool.is_closed());
+    assert_eq!(pool.size(), 0);
+    assert_eq!(pool.num_idle(), 0);
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn child_pool_returns_permits_to_parent_on_drop() -> anyhow::Result<()> {
+    sqlx::any::install_default_drivers();
+    let url = dotenvy::var("DATABASE_URL")?;
+    let parent = AnyPoolOptions::new()
+        .max_connections(2)
+        .test_before_acquire(false)
+        .connect(&url)
+        .await?;
+    let mut held = parent.acquire().await?;
+    let child = AnyPoolOptions::new()
+        .max_connections(1)
+        .test_before_acquire(false)
+        .parent(parent.clone())
+        .connect(&url)
+        .await?;
+    let mut child_conn = child.acquire().await?;
+    let mut waiting_on_parent = Box::pin(parent.acquire());
+    let mut cx = Context::from_waker(Waker::noop());
+
+    assert!(waiting_on_parent.as_mut().poll(&mut cx).is_pending());
+    child_conn.return_to_pool().await;
+    drop(child_conn);
+    assert!(waiting_on_parent.as_mut().poll(&mut cx).is_pending());
+    drop(child);
+    let mut returned = waiting_on_parent.await?;
+    returned.execute("SELECT 1").await?;
+    returned.return_to_pool().await;
+    held.return_to_pool().await;
+    parent.close().await;
     Ok(())
 }
 
