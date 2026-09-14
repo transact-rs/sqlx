@@ -133,7 +133,7 @@ impl PgConnection {
 
     /// Infer nullability for columns of this statement using EXPLAIN VERBOSE.
     ///
-    /// This currently only marks columns that are on the inner half of an outer join
+    /// This currently only marks columns that an outer join can set to `NULL`
     /// and returns `None` for all others.
     async fn nullables_from_explain(
         &mut self,
@@ -177,20 +177,28 @@ impl PgConnection {
         }) = explains.first()
         {
             nullables.resize(outputs.len(), None);
-            visit_plan(plan, outputs, &mut nullables);
+            visit_plan(plan, outputs, &mut nullables, false);
         }
 
         Ok(nullables)
     }
 }
 
-fn visit_plan(plan: &Plan, outputs: &[String], nullables: &mut Vec<Option<bool>>) {
-    if let Some(plan_outputs) = &plan.output {
-        // all outputs of a Full Join must be marked nullable
-        // otherwise, all outputs of the inner half of an outer join must be marked nullable
-        if plan.join_type.as_deref() == Some("Full")
-            || plan.parent_relation.as_deref() == Some("Inner")
-        {
+/// Mark every output of this plan that an outer join can set to `NULL`.
+///
+/// `null_extended` is true when this plan is the null-extended input of an outer join above it.
+/// `visit_plan` visits every child, because a join can sit below any node, such as `Limit`.
+fn visit_plan(
+    plan: &Plan,
+    outputs: &[String],
+    nullables: &mut Vec<Option<bool>>,
+    null_extended: bool,
+) {
+    // all outputs of a Full Join must be marked nullable
+    let null_extended = null_extended || plan.join_type.as_deref() == Some("Full");
+
+    if null_extended {
+        if let Some(plan_outputs) = &plan.output {
             for output in plan_outputs {
                 if let Some(i) = outputs.iter().position(|o| o == output) {
                     // N.B. this may produce false positives but those don't cause runtime errors
@@ -201,10 +209,17 @@ fn visit_plan(plan: &Plan, outputs: &[String], nullables: &mut Vec<Option<bool>>
     }
 
     if let Some(plans) = &plan.plans {
-        if let Some("Left") | Some("Right") = plan.join_type.as_deref() {
-            for plan in plans {
-                visit_plan(plan, outputs, nullables);
-            }
+        for child in plans {
+            let child_null_extended = match plan.join_type.as_deref() {
+                // PostgreSQL defines `JOIN_RIGHT` as the mirror of `JOIN_LEFT`, so the
+                // null-extended input is the Inner child of a Left join and the Outer
+                // child of a Right join. See <https://github.com/launchbadge/sqlx/issues/367>.
+                Some("Left") => child.parent_relation.as_deref() == Some("Inner"),
+                Some("Right") => child.parent_relation.as_deref() == Some("Outer"),
+                _ => false,
+            };
+
+            visit_plan(child, outputs, nullables, child_null_extended);
         }
     }
 }
