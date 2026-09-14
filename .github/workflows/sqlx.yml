@@ -408,6 +408,41 @@ jobs:
           DATABASE_URL: postgres://postgres@localhost:5432/sqlx?sslmode=verify-ca&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
+  postgres-oauth:
+    name: Postgres OAuth
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        runtime: [ async-global-executor, tokio ]
+    needs: check
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      # This image compiles a token validator, without which the server refuses to run an
+      # OAuth exchange at all; see tests/postgres/oauth/Dockerfile.
+      - run: |
+          docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_18_oauth postgres_18_oauth
+          docker exec postgres_18_oauth bash -c "until pg_isready; do sleep 1; done"
+
+      # The OAUTHBEARER tests are ignored by default, because the mechanism is the server's
+      # choice: one asking for a password never asks for a token.
+      - run: >
+          cargo test
+          --no-default-features
+          --test postgres-oauth
+          --features postgres,macros,runtime-${{ matrix.runtime }},tls-none
+          --
+          --include-ignored
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
+          RUSTFLAGS: -D warnings --cfg postgres="18"
+
   postgres-isolated:
     name: Postgres Isolated
     runs-on: ubuntu-24.04

@@ -1,6 +1,8 @@
+use crate::connection::oauth;
 use crate::connection::stream::PgStream;
 use crate::error::Error;
 use crate::message::{Authentication, AuthenticationSasl, SaslInitialResponse, SaslResponse};
+use crate::options::PgOAuthToken;
 use crate::rt;
 use crate::PgConnectOptions;
 use hmac::{Hmac, Mac};
@@ -24,6 +26,7 @@ pub(crate) async fn authenticate(
 ) -> Result<(), Error> {
     let mut has_sasl = false;
     let mut has_sasl_plus = false;
+    let mut has_oauth = false;
     let mut unknown = Vec::new();
 
     for mechanism in data.mechanisms() {
@@ -36,10 +39,25 @@ pub(crate) async fn authenticate(
                 has_sasl_plus = true;
             }
 
+            oauth::MECHANISM => {
+                has_oauth = true;
+            }
+
             _ => {
                 unknown.push(mechanism.to_owned());
             }
         }
+    }
+
+    // PostgreSQL's `oauth` HBA method (added in 18) advertises OAUTHBEARER and nothing else.
+    // The exchange is worth making even with no token to present, because it is how the
+    // caller learns which token the server wants; see `oauth::authenticate`. SCRAM is
+    // preferred where the server offers it as well and there is no token, since a password
+    // may still get the connection in.
+    if has_oauth && (options.oauth_token.is_some() || !(has_sasl || has_sasl_plus)) {
+        let token = options.oauth_token.as_ref().map(PgOAuthToken::expose);
+
+        return oauth::authenticate(stream, token).await;
     }
 
     if !has_sasl_plus && !has_sasl {
@@ -74,8 +92,8 @@ pub(crate) async fn authenticate(
 
     stream
         .send(SaslInitialResponse {
+            mechanism: "SCRAM-SHA-256",
             response: &client_first_message,
-            plus: false,
         })
         .await?;
 

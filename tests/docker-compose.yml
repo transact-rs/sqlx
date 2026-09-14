@@ -204,6 +204,24 @@ services:
     # https://www.postgresql.org/support/versioning/
     #
 
+    # The `oauth` HBA method was added in PostgreSQL 18, and needs a validator module that
+    # this image builds; see postgres/oauth/Dockerfile. Only the OAUTHBEARER tests use it,
+    # and they are ignored by default: see tests/postgres/oauth.rs.
+    postgres_18_oauth:
+        build:
+            context: .
+            dockerfile: postgres/oauth/Dockerfile
+            args:
+                VERSION: 18
+        ports:
+            - 5432
+        environment:
+            POSTGRES_DB: sqlx
+            POSTGRES_USER: postgres
+            POSTGRES_PASSWORD: password
+        command: >
+            -c hba_file=/var/lib/postgresql/pg_hba.conf -c oauth_validator_libraries=sqlx_oauth_validator
+
     postgres_17:
         build:
             context: .

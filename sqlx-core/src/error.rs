@@ -26,6 +26,51 @@ pub type BoxDynError = Box<dyn StdError + 'static + Send + Sync>;
 #[error("unexpected null; try decoding as an `Option`")]
 pub struct UnexpectedNullError;
 
+/// A challenge from a server that requires OAuth 2.0 authentication, carried by
+/// [`Error::OAuth`].
+///
+/// Authentication over the SASL `OAUTHBEARER` mechanism (RFC 7628) presents a bearer token
+/// that the application obtained from an identity provider. SQLx never contacts a provider
+/// itself, so a driver that has no token to present instead asks the server which one it
+/// wants; a server that rejects a token answers the same way. Either way the reply is a JSON
+/// status document naming the issuer's discovery URI and the scope the token must carry:
+///
+/// ```json
+/// {
+///   "status": "invalid_token",
+///   "openid-configuration": "https://issuer.example.com/.well-known/openid-configuration",
+///   "scope": "openid postgres"
+/// }
+/// ```
+///
+/// The document is handed over unparsed, because acting on it means running an OAuth flow
+/// that only the application can run. The connection that produced it is spent: a token
+/// obtained this way is presented by dialing again with the token set on the connect
+/// options. For PostgreSQL that is `PgConnectOptions::oauth_token`, whose documentation
+/// works the sequence through.
+#[derive(Debug, Clone)]
+pub struct OAuthChallenge {
+    document: String,
+}
+
+impl OAuthChallenge {
+    /// The server's status document, verbatim.
+    ///
+    /// This is JSON as described by [RFC 7628 §3.2.2][rfc], although a driver does not
+    /// parse it and so cannot promise it is well-formed.
+    ///
+    /// [rfc]: https://datatracker.ietf.org/doc/html/rfc7628#section-3.2.2
+    pub fn document(&self) -> &str {
+        &self.document
+    }
+}
+
+impl Display for OAuthChallenge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.document)
+    }
+}
+
 /// Represents all the ways a method can fail within SQLx.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -51,6 +96,17 @@ pub enum Error {
     /// Error occurred while attempting to establish a TLS connection.
     #[error("error occurred while attempting to establish a TLS connection: {0}")]
     Tls(#[source] BoxDynError),
+
+    /// The server requires OAuth 2.0 authentication and did not accept the token, if any,
+    /// that the connection presented.
+    ///
+    /// The payload is the server's challenge, which names the issuer to obtain a token from.
+    /// See [`OAuthChallenge`] for what to do with it.
+    #[error(
+        "OAuth 2.0 authentication failed; the server's challenge names the token it \
+             requires: {0}"
+    )]
+    OAuth(OAuthChallenge),
 
     /// Unexpected or invalid data encountered while communicating with the database.
     ///
@@ -164,6 +220,14 @@ impl Error {
     #[inline]
     pub fn config(err: impl StdError + Send + Sync + 'static) -> Self {
         Error::Configuration(err.into())
+    }
+
+    #[doc(hidden)]
+    #[inline]
+    pub fn oauth(document: impl Into<String>) -> Self {
+        Error::OAuth(OAuthChallenge {
+            document: document.into(),
+        })
     }
 
     pub(crate) fn tls(err: impl Into<Box<dyn StdError + Send + Sync + 'static>>) -> Self {
@@ -350,4 +414,32 @@ macro_rules! err_protocol {
             )
         )
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn an_oauth_error_carries_the_challenge_both_ways() {
+        const DOCUMENT: &str = r#"{ "status": "invalid_token", "scope": "openid" }"#;
+
+        let error = Error::oauth(DOCUMENT);
+
+        // Programmatically, for an application running the OAuth flow...
+        let Error::OAuth(challenge) = &error else {
+            panic!("expected an OAuth error, got: {error:?}")
+        };
+        assert_eq!(challenge.document(), DOCUMENT);
+
+        // ...and in the message, for whoever is reading the log.
+        let message = error.to_string();
+
+        assert!(
+            message.starts_with("OAuth 2.0 authentication failed"),
+            "{message}"
+        );
+        assert!(message.ends_with(DOCUMENT), "{message}");
+        assert!(!message.contains('\n'), "{message}");
+    }
 }
