@@ -4,12 +4,13 @@ use super::attributes::{
 };
 use super::rename_all;
 use proc_macro2::{Span, TokenStream};
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::{
     parse_quote, Data, DataEnum, DataStruct, DeriveInput, Expr, Field, Fields, FieldsNamed,
-    Lifetime, LifetimeParam, Stmt, TypeParamBound, Variant,
+    FieldsUnnamed, Lifetime, LifetimeParam, Stmt, TypeParamBound, Variant,
 };
 
 pub fn expand_derive_encode(input: &DeriveInput) -> syn::Result<TokenStream> {
@@ -158,6 +159,17 @@ fn expand_derive_encode_strong_enum(
         let id = &v.ident;
         let attributes = parse_child_attributes(&v.attrs)?;
 
+        if attributes.other {
+            let span = match &v.fields {
+                Fields::Unnamed(FieldsUnnamed { unnamed, .. }) => {
+                    unnamed.first().expect("unreachable").span()
+                }
+                _ => unreachable!(),
+            };
+            value_arms.push(quote_spanned!(span => #ident :: #id (other) => other,));
+            continue;
+        }
+
         if let Some(rename) = attributes.rename {
             value_arms.push(quote!(#ident :: #id => #rename,));
         } else if let Some(pattern) = cattr.rename_all {
@@ -174,7 +186,7 @@ fn expand_derive_encode_strong_enum(
         #[automatically_derived]
         impl<'q, DB: ::sqlx::Database> ::sqlx::encode::Encode<'q, DB> for #ident
         where
-            &'q ::std::primitive::str: ::sqlx::encode::Encode<'q, DB>,
+            for<'a> &'a ::std::primitive::str: ::sqlx::encode::Encode<'a, DB>,
         {
             fn encode_by_ref(
                 &self,
@@ -184,7 +196,7 @@ fn expand_derive_encode_strong_enum(
                     #(#value_arms)*
                 };
 
-                <&::std::primitive::str as ::sqlx::encode::Encode<'q, DB>>::encode(val, buf)
+                <&::std::primitive::str as ::sqlx::encode::Encode<'_, DB>>::encode(val, buf)
             }
 
             fn size_hint(&self) -> ::std::primitive::usize {
@@ -192,7 +204,7 @@ fn expand_derive_encode_strong_enum(
                     #(#value_arms)*
                 };
 
-                <&::std::primitive::str as ::sqlx::encode::Encode<'q, DB>>::size_hint(&val)
+                <&::std::primitive::str as ::sqlx::encode::Encode<'_, DB>>::size_hint(&val)
             }
         }
     ))

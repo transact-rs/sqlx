@@ -1,8 +1,8 @@
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote_spanned;
+use quote::{quote_spanned, ToTokens};
 use syn::{
-    parenthesized, punctuated::Punctuated, token::Comma, Attribute, DeriveInput, Field, LitStr,
-    Meta, Token, Type, Variant,
+    parenthesized, punctuated::Punctuated, token::Comma, Attribute, DeriveInput, Field, Fields,
+    FieldsUnnamed, LitStr, Meta, Token, Type, Variant,
 };
 
 macro_rules! assert_attribute {
@@ -73,6 +73,7 @@ pub struct SqlxChildAttributes {
     pub try_from: Option<Type>,
     pub skip: bool,
     pub json: Option<JsonAttribute>,
+    pub other: bool,
 }
 
 pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContainerAttributes> {
@@ -150,6 +151,7 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
     let mut flatten = false;
     let mut skip: bool = false;
     let mut json = None;
+    let mut other = false;
 
     for attr in input.iter().filter(|a| a.path().is_ident("sqlx")) {
         attr.parse_nested_meta(|meta| {
@@ -177,6 +179,8 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
                 } else {
                     json = Some(JsonAttribute::NonNullable);
                 }
+            } else if meta.path.is_ident("other") {
+                other = true;
             }
 
             Ok(())
@@ -197,6 +201,7 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
         try_from,
         skip,
         json,
+        other,
     })
 }
 
@@ -257,6 +262,12 @@ pub fn check_weak_enum_attributes(
             "unexpected #[sqlx(rename = ..)]",
             variant
         );
+
+        assert_attribute!(
+            !attributes.other,
+            "#[sqlx(other)] is not supported for repr enums yet",
+            variant
+        );
     }
 
     Ok(attributes)
@@ -264,11 +275,42 @@ pub fn check_weak_enum_attributes(
 
 pub fn check_strong_enum_attributes(
     input: &DeriveInput,
-    _variants: &Punctuated<Variant, Comma>,
+    variants: &Punctuated<Variant, Comma>,
 ) -> syn::Result<SqlxContainerAttributes> {
     let attributes = check_enum_attributes(input)?;
 
     assert_attribute!(attributes.repr.is_none(), "unexpected #[repr(..)]", input);
+
+    let mut found_other = false;
+    for variant in variants {
+        let attributes = parse_child_attributes(&variant.attrs)?;
+        if attributes.other {
+            if found_other {
+                fail!(variant, "#[sqlx(other)] may only be applied to one variant");
+            }
+            found_other = true;
+
+            assert_attribute!(
+                attributes.rename.is_none(),
+                "unexpected #[sqlx(rename = ..)]: the #[sqlx(other)] variant matches any value",
+                variant
+            );
+
+            match &variant.fields {
+                Fields::Unnamed(FieldsUnnamed { unnamed, .. }) if unnamed.len() == 1 => (),
+                _ => fail!(
+                    {
+                        if matches!(&variant.fields, &Fields::Unit) {
+                            variant.into_token_stream()
+                        } else {
+                            variant.fields.clone().into_token_stream()
+                        }
+                    },
+                    "#[sqlx(other)] requires exactly one unnamed field, e.g. `Other(String)`"
+                ),
+            }
+        }
+    }
 
     Ok(attributes)
 }
@@ -301,6 +343,8 @@ pub fn check_struct_attributes(
             "unexpected #[sqlx(rename = ..)]",
             field
         );
+
+        assert_attribute!(!attributes.other, "unexpected #[sqlx(other)]", field)
     }
 
     Ok(attributes)
