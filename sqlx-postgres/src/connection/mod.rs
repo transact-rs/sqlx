@@ -85,6 +85,36 @@ pub(crate) struct TableData {
 }
 
 impl PgConnection {
+    /// Connect to a PostgreSQL database using a pre-connected socket.
+    ///
+    /// This allows using custom transport layers such as vsock, QUIC,
+    /// or any type that implements [`sqlx_core::net::Socket`].
+    ///
+    /// The provided socket will go through TLS upgrade negotiation based on the
+    /// SSL mode configured in `options`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sqlx::postgres::{PgConnectOptions, PgConnection};
+    ///
+    /// # async fn example() -> sqlx::Result<()> {
+    /// let socket: tokio::net::TcpStream = todo!();
+    /// let options = PgConnectOptions::new()
+    ///     .username("postgres")
+    ///     .database("mydb");
+    ///
+    /// let _conn = PgConnection::connect_socket(socket, &options).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn connect_socket<S: sqlx_core::net::Socket>(
+        socket: S,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error> {
+        Self::establish_with_socket(socket, options).await
+    }
+
     /// the version number of the server in `libpq` format
     pub fn server_version_num(&self) -> Option<u32> {
         self.inner.stream.server_version_num

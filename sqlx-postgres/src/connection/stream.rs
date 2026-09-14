@@ -57,6 +57,22 @@ impl PgStream {
         })
     }
 
+    pub(super) async fn connect_socket<S: Socket>(
+        socket: S,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error> {
+        let socket = net::connect_socket(socket, MaybeUpgradeTls(options)).await?;
+
+        let socket = socket?;
+
+        Ok(Self {
+            inner: BufferedSocket::new(socket),
+            notifications: None,
+            parameter_statuses: BTreeMap::default(),
+            server_version_num: None,
+        })
+    }
+
     #[inline(always)]
     pub(crate) fn write_msg(&mut self, message: impl FrontendMessage) -> Result<(), Error> {
         self.write(EncodeMessage(message))

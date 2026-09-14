@@ -202,6 +202,20 @@ pub async fn connect_tcp<Ws: WithSocket>(
     }
 }
 
+/// Connect using a pre-connected socket that implements [`Socket`].
+///
+/// This allows using custom transport layers (e.g., vsock, QUIC, or any
+/// `AsyncRead + AsyncWrite` type) with SQLx database connections.
+///
+/// The socket will be passed through the `with_socket` handler, which
+/// typically performs TLS upgrade negotiation.
+pub async fn connect_socket<S: Socket, Ws: WithSocket>(
+    socket: S,
+    with_socket: Ws,
+) -> crate::Result<Ws::Output> {
+    Ok(with_socket.with_socket(socket).await)
+}
+
 /// Open a TCP socket to `host` and `port`.
 ///
 /// If `host` is a hostname, attempt to connect to each address it resolves to.

@@ -52,6 +52,38 @@ pub(crate) struct MySqlConnectionInner {
 }
 
 impl MySqlConnection {
+    /// Connect to a MySQL database using a pre-connected socket.
+    ///
+    /// This allows using custom transport layers such as vsock, QUIC,
+    /// or any type that implements [`sqlx_core::net::Socket`].
+    ///
+    /// The provided socket will go through TLS upgrade negotiation based on the
+    /// SSL mode configured in `options`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use sqlx::mysql::{MySqlConnectOptions, MySqlConnection};
+    ///
+    /// # async fn example() -> sqlx::Result<()> {
+    /// let socket: tokio::net::TcpStream = todo!();
+    /// let options = MySqlConnectOptions::new()
+    ///     .username("root")
+    ///     .database("mydb");
+    ///
+    /// let _conn = MySqlConnection::connect_socket(socket, &options).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn connect_socket<S: sqlx_core::net::Socket>(
+        socket: S,
+        options: &MySqlConnectOptions,
+    ) -> Result<Self, Error> {
+        let mut conn = Self::establish_with_socket(socket, options).await?;
+        options.configure_session(&mut conn).await?;
+        Ok(conn)
+    }
+
     pub(crate) fn in_transaction(&self) -> bool {
         self.inner
             .status_flags
