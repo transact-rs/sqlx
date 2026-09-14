@@ -730,6 +730,38 @@ async fn test_flatten() -> anyhow::Result<()> {
 
 #[cfg(feature = "macros")]
 #[sqlx_macros::test]
+pub async fn test_ordinal() -> anyhow::Result<()> {
+    #[derive(Debug, sqlx::FromRow)]
+    struct AccountOrdinal {
+        #[sqlx(ordinal = 1)]
+        id: i32,
+        #[sqlx(ordinal = 0)]
+        name: String,
+        #[sqlx(ordinal = 3)]
+        balance: Option<i32>,
+        #[sqlx(ordinal = 2)]
+        active: bool,
+    }
+
+    let mut conn = new::<Postgres>().await?;
+
+    let account: AccountOrdinal = sqlx::query_as(
+        r#"SELECT * from (VALUES ('foo', 1, true, 10000)) accounts("col_0", "col_1", "col_2", "col_3")"#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+    println!("{account:?}");
+
+    assert_eq!(1, account.id);
+    assert_eq!("foo", account.name);
+    assert_eq!(Some(10000), account.balance);
+    assert_eq!(true, account.active);
+
+    Ok(())
+}
+
+#[cfg(feature = "macros")]
+#[sqlx_macros::test]
 async fn test_skip() -> anyhow::Result<()> {
     #[derive(Debug, Default, sqlx::FromRow)]
     struct AccountDefault {

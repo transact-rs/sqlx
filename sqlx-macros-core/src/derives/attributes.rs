@@ -1,8 +1,8 @@
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote_spanned;
 use syn::{
-    parenthesized, punctuated::Punctuated, token::Comma, Attribute, DeriveInput, Field, LitStr,
-    Meta, Token, Type, Variant,
+    parenthesized, punctuated::Punctuated, token::Comma, Attribute, DeriveInput, Field, LitInt,
+    LitStr, Meta, Token, Type, Variant,
 };
 
 macro_rules! assert_attribute {
@@ -73,6 +73,7 @@ pub struct SqlxChildAttributes {
     pub try_from: Option<Type>,
     pub skip: bool,
     pub json: Option<JsonAttribute>,
+    pub ordinal: Option<usize>,
 }
 
 pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContainerAttributes> {
@@ -150,6 +151,7 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
     let mut flatten = false;
     let mut skip: bool = false;
     let mut json = None;
+    let mut ordinal = None;
 
     for attr in input.iter().filter(|a| a.path().is_ident("sqlx")) {
         attr.parse_nested_meta(|meta| {
@@ -177,6 +179,11 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
                 } else {
                     json = Some(JsonAttribute::NonNullable);
                 }
+            } else if meta.path.is_ident("ordinal") {
+                meta.input.parse::<Token![=]>()?;
+                let val: LitInt = meta.input.parse()?;
+                let ord = val.base10_parse::<usize>()?;
+                try_set!(ordinal, ord, val);
             }
 
             Ok(())
@@ -197,6 +204,7 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
         try_from,
         skip,
         json,
+        ordinal,
     })
 }
 
