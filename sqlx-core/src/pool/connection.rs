@@ -15,6 +15,12 @@ use crate::pool::options::PoolConnectionMetadata;
 
 const CLOSE_ON_DROP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Upper bound on the on-release `ping()` used to test a connection before it is
+/// returned to the pool. This runs in a drop-spawned task, so it must never block
+/// indefinitely (e.g. on a silently-dropped TCP flow) or it would leak the pool
+/// permit held by that task.
+const RETURN_TO_POOL_PING_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A connection managed by a [`Pool`][crate::pool::Pool].
 ///
 /// Will be returned to the pool on-drop.
@@ -311,19 +317,38 @@ impl<DB: Database> Floating<DB, Live<DB>> {
         // returned to the pool; also of course, if it was dropped due to an error
         // this is simply a band-aid as SQLx-next connections should be able
         // to recover from cancellations
-        if let Err(error) = self.raw.ping().await {
-            tracing::warn!(
-                %error,
-                "error occurred while testing the connection on-release",
-            );
+        //
+        // The ping is bounded by a timeout: this runs in the drop-spawned
+        // return-to-pool task, and on a connection whose peer has silently gone
+        // away (e.g. a NAT/firewall dropped the flow) `ping()` can send its
+        // request successfully and then wait forever for a response that never
+        // comes. An unbounded wait here strands this task's `DecrementSizeGuard`,
+        // leaking the pool permit permanently; enough such leaks exhaust the pool.
+        // Follow the `close_on_drop` path (see `take_and_close`) and cap the wait.
+        match crate::rt::timeout(RETURN_TO_POOL_PING_TIMEOUT, self.raw.ping()).await {
+            Ok(Ok(())) => {
+                // if the connection is still viable, release it to the pool
+                self.release();
+                true
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    %error,
+                    "error occurred while testing the connection on-release",
+                );
 
-            // Connection is broken, don't try to gracefully close.
-            self.close_hard().await;
-            false
-        } else {
-            // if the connection is still viable, release it to the pool
-            self.release();
-            true
+                // Connection is broken, don't try to gracefully close.
+                self.close_hard().await;
+                false
+            }
+            Err(_) => {
+                tracing::warn!("timed out testing the connection on-release; discarding it");
+
+                // Connection is unresponsive; discard it. `close_hard` only shuts
+                // the socket down locally, so it does not risk blocking as well.
+                self.close_hard().await;
+                false
+            }
         }
     }
 
