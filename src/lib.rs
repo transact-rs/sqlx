@@ -62,7 +62,8 @@ pub use sqlx_postgres::{
 #[cfg_attr(docsrs, doc(cfg(feature = "_sqlite")))]
 #[doc(inline)]
 pub use sqlx_sqlite::{
-    self as sqlite, Sqlite, SqliteConnection, SqliteExecutor, SqlitePool, SqliteTransaction,
+    self as sqlite, Sqlite, SqliteConnection, SqliteExecutor, SqlitePool, SqliteRwPool,
+    SqliteRwPoolOptions, SqliteTransaction,
 };
 
 #[cfg(feature = "any")]

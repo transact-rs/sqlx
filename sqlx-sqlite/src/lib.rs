@@ -133,6 +133,9 @@ mod migrate;
 #[cfg(feature = "migrate")]
 mod testing;
 
+mod rw_pool;
+pub use rw_pool::{SqliteRwPool, SqliteRwPoolOptions};
+
 /// An alias for [`Pool`][crate::pool::Pool], specialized for SQLite.
 pub type SqlitePool = crate::pool::Pool<Sqlite>;
 
