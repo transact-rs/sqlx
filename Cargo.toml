@@ -220,7 +220,7 @@ version = "2.0"
 default-features = false
 
 [workspace.dependencies.tokio]
-version = "1.25.0"
+version = "1.27.0"
 features = ["time", "net", "sync", "fs", "io-util", "rt"]
 default-features = false
 
@@ -238,7 +238,7 @@ time_ = { version = "0.3.47", package = "time" }
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc"] }
 env_logger = "0.11"
 async-std = { workspace = true, features = ["attributes"] }
-tokio = { version = "1.25.0", features = ["full"] }
+tokio = { version = "1.27.0", features = ["full"] }
 dotenvy = "0.15.7"
 trybuild = "1.0.53"
 sqlx-test = { path = "./sqlx-test" }

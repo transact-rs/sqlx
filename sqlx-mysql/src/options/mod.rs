@@ -7,6 +7,7 @@ mod connect;
 mod parse;
 mod ssl_mode;
 
+use crate::net::TcpKeepalive;
 use crate::{connection::LogSettings, net::tls::CertificateInput};
 use sqlx_core::net::tls::TlsConnector;
 pub use ssl_mode::MySqlSslMode;
@@ -82,6 +83,7 @@ pub struct MySqlConnectOptions {
     pub(crate) timezone: Option<String>,
     pub(crate) set_names: bool,
     pub(crate) found_rows: bool,
+    pub(crate) tcp_keepalive: Option<TcpKeepalive>,
 }
 
 impl Default for MySqlConnectOptions {
@@ -119,6 +121,7 @@ impl MySqlConnectOptions {
                 cached_connector: Arc::new(OnceLock::new()),
             },
             statement_cache_capacity: 100,
+            tcp_keepalive: None,
             log_settings: Default::default(),
             pipes_as_concat: true,
             enable_cleartext_plugin: false,
@@ -307,6 +310,37 @@ impl MySqlConnectOptions {
     pub fn ssl_client_key_from_pem(mut self, key: impl AsRef<[u8]>) -> Self {
         self.ssl_options_mut().ssl_client_key =
             Some(CertificateInput::Inline(key.as_ref().to_vec()));
+        self
+    }
+
+    /// Configure TCP keepalive on the connection's socket.
+    ///
+    /// Disabled by default, matching the socket default; pass `None` to disable it
+    /// again. Enable it when connections are long-lived and the server may disappear
+    /// without closing the socket (a failover, a killed container, a dropped NAT
+    /// mapping): without keepalive, a connection blocked reading a response that will
+    /// never arrive waits forever. See [`TcpKeepalive`] for the parameters and their
+    /// platform support.
+    ///
+    /// Unlike Postgres, there is no connection-URL form of this setting (MySQL clients
+    /// have no convention for one), so it cannot be set through `AnyConnectOptions` or
+    /// `sqlx-cli`, which only carry a URL.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_core::net::TcpKeepalive;
+    /// # use sqlx_mysql::MySqlConnectOptions;
+    /// let options = MySqlConnectOptions::new().tcp_keepalive(
+    ///     TcpKeepalive::new()
+    ///         .with_idle(Duration::from_secs(30))
+    ///         .with_interval(Duration::from_secs(10))
+    ///         .with_retries(3),
+    /// );
+    /// ```
+    pub fn tcp_keepalive(mut self, keepalive: impl Into<Option<TcpKeepalive>>) -> Self {
+        self.tcp_keepalive = keepalive.into();
         self
     }
 
