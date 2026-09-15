@@ -71,6 +71,7 @@ pub struct MySqlConnectOptions {
     pub(crate) username: String,
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
+    pub(crate) tls_server_name: Option<String>,
     pub(crate) ssl_options: SslOptions,
     pub(crate) statement_cache_capacity: usize,
     pub(crate) charset: String,
@@ -111,6 +112,7 @@ impl MySqlConnectOptions {
             database: None,
             charset: String::from("utf8mb4"),
             collation: None,
+            tls_server_name: None,
             ssl_options: SslOptions {
                 ssl_mode: MySqlSslMode::Preferred,
                 ssl_ca: None,
@@ -135,6 +137,23 @@ impl MySqlConnectOptions {
     /// is to connect to localhost.
     pub fn host(mut self, host: &str) -> Self {
         host.clone_into(&mut self.host);
+        self
+    }
+
+    /// Overrides the TLS server name used for SNI and hostname verification.
+    ///
+    /// By default, the host from `MySqlConnectOptions` is used.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_mysql::MySqlConnectOptions;
+    /// let _options = MySqlConnectOptions::new()
+    ///     .host("haproxy.example.com")
+    ///     .tls_server_name("mysql.example.com");
+    /// ```
+    pub fn tls_server_name(mut self, server_name: &str) -> Self {
+        self.tls_server_name = Some(server_name.to_owned());
         self
     }
 
@@ -558,5 +577,16 @@ impl MySqlConnectOptions {
     /// ```
     pub fn get_collation(&self) -> Option<&str> {
         self.collation.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MySqlConnectOptions;
+
+    #[test]
+    fn tls_server_name_is_stored() {
+        let opts = MySqlConnectOptions::new().tls_server_name("sni.example.com");
+        assert_eq!(opts.tls_server_name.as_deref(), Some("sni.example.com"));
     }
 }
