@@ -83,6 +83,7 @@ pub struct PoolOptions<DB: Database> {
     pub(crate) max_lifetime: Option<Duration>,
     pub(crate) idle_timeout: Option<Duration>,
     pub(crate) fair: bool,
+    pub(crate) connect_timeout: Option<Duration>,
 
     pub(crate) parent_pool: Option<Pool<DB>>,
 }
@@ -106,6 +107,7 @@ impl<DB: Database> Clone for PoolOptions<DB> {
             max_lifetime: self.max_lifetime,
             idle_timeout: self.idle_timeout,
             fair: self.fair,
+            connect_timeout: self.connect_timeout,
             parent_pool: self.parent_pool.clone(),
         }
     }
@@ -161,6 +163,7 @@ impl<DB: Database> PoolOptions<DB> {
             idle_timeout: Some(Duration::from_secs(10 * 60)),
             max_lifetime: Some(Duration::from_secs(30 * 60)),
             fair: true,
+            connect_timeout: None,
             parent_pool: None,
         }
     }
@@ -305,6 +308,30 @@ impl<DB: Database> PoolOptions<DB> {
     /// Get the maximum idle duration for individual connections.
     pub fn get_idle_timeout(&self) -> Option<Duration> {
         self.idle_timeout
+    }
+
+    /// Set a separate timeout for establishing new connections.
+    ///
+    /// When set, this timeout is used specifically for the connection establishment phase
+    /// of [`Pool::acquire()`], separate from [`acquire_timeout`][Self::acquire_timeout].
+    /// This allows the connection to have its own timeout that doesn't share the budget
+    /// with semaphore acquisition and idle connection checks.
+    ///
+    /// If not set, the connection establishment uses the remaining time from `acquire_timeout`.
+    ///
+    /// This is useful when:
+    /// * You want a longer timeout for establishing connections than for acquiring from the pool.
+    /// * You want connection attempts to survive cancellation of the `acquire()` future.
+    ///   When `acquire()` is cancelled, the spawned connection task continues in the background.
+    ///   If it succeeds, the connection is returned to the pool's idle queue.
+    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = Some(timeout);
+        self
+    }
+
+    /// Get the connect timeout, if set.
+    pub fn get_connect_timeout(&self) -> Option<Duration> {
+        self.connect_timeout
     }
 
     /// If true, the health of a connection will be verified by a call to [`Connection::ping`]
@@ -587,9 +614,10 @@ impl<DB: Database> Debug for PoolOptions<DB> {
         f.debug_struct("PoolOptions")
             .field("max_connections", &self.max_connections)
             .field("min_connections", &self.min_connections)
-            .field("connect_timeout", &self.acquire_timeout)
+            .field("acquire_timeout", &self.acquire_timeout)
             .field("max_lifetime", &self.max_lifetime)
             .field("idle_timeout", &self.idle_timeout)
+            .field("connect_timeout", &self.connect_timeout)
             .field("test_before_acquire", &self.test_before_acquire)
             .finish()
     }
