@@ -14,6 +14,7 @@ use super::inner::{is_beyond_max_lifetime, DecrementSizeGuard, PoolInner};
 use crate::pool::options::PoolConnectionMetadata;
 
 const CLOSE_ON_DROP_TIMEOUT: Duration = Duration::from_secs(5);
+const RETURN_TO_POOL_PING_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A connection managed by a [`Pool`][crate::pool::Pool].
 ///
@@ -311,19 +312,32 @@ impl<DB: Database> Floating<DB, Live<DB>> {
         // returned to the pool; also of course, if it was dropped due to an error
         // this is simply a band-aid as SQLx-next connections should be able
         // to recover from cancellations
-        if let Err(error) = self.raw.ping().await {
-            tracing::warn!(
-                %error,
-                "error occurred while testing the connection on-release",
-            );
+        match crate::rt::timeout(RETURN_TO_POOL_PING_TIMEOUT, self.raw.ping()).await {
+            Ok(Ok(())) => {
+                // if the connection is still viable, release it to the pool
+                self.release();
+                true
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(
+                    %error,
+                    "error occurred while testing the connection on-release",
+                );
 
-            // Connection is broken, don't try to gracefully close.
-            self.close_hard().await;
-            false
-        } else {
-            // if the connection is still viable, release it to the pool
-            self.release();
-            true
+                // Connection is broken, don't try to gracefully close.
+                self.close_hard().await;
+                false
+            }
+            Err(_) => {
+                tracing::warn!(
+                    timeout = ?RETURN_TO_POOL_PING_TIMEOUT,
+                    "timed out while testing the connection on-release",
+                );
+
+                // The connection is unresponsive, so avoid all async connection I/O here.
+                // Dropping `self` synchronously releases the pool guard and discards the socket.
+                false
+            }
         }
     }
 
