@@ -236,6 +236,8 @@ impl BackendMessage for PgDatabaseError {
 
 /// For reference: <https://www.postgresql.org/docs/current/errcodes-appendix.html>
 pub(crate) mod error_codes {
+    /// The requested feature is not supported.
+    pub const FEATURE_NOT_SUPPORTED: &str = "0A000";
     /// Caused when a unique or primary key is violated.
     pub const UNIQUE_VIOLATION: &str = "23505";
     /// Caused when a foreign key is violated.

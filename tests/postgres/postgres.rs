@@ -798,6 +798,153 @@ async fn it_caches_statements() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_clears_cached_statements_after_schema_change() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    sqlx::raw_sql(
+        "CREATE TEMPORARY TABLE statement_cache_test (id INTEGER PRIMARY KEY, value TEXT);\
+         INSERT INTO statement_cache_test VALUES (1, 'one')",
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let query = "SELECT * FROM statement_cache_test WHERE id = $1";
+    let row = sqlx::query(query).bind(1_i32).fetch_one(&mut conn).await?;
+
+    assert_eq!(row.columns().len(), 2);
+    assert_eq!(conn.cached_statements_size(), 1);
+
+    sqlx::raw_sql("ALTER TABLE statement_cache_test DROP COLUMN value")
+        .execute(&mut conn)
+        .await?;
+
+    let mut transaction = conn.begin().await?;
+    let error = sqlx::query(query)
+        .bind(1_i32)
+        .fetch_one(&mut *transaction)
+        .await
+        .unwrap_err();
+
+    let error = error
+        .into_database_error()
+        .unwrap()
+        .downcast::<PgDatabaseError>();
+
+    // PostgreSQL reports an invalid cached plan as FEATURE_NOT_SUPPORTED (0A000).
+    assert_eq!(error.code(), "0A000");
+    assert_eq!(error.routine(), Some("RevalidateCachedQuery"));
+    transaction.rollback().await?;
+    assert_eq!(conn.cached_statements_size(), 0);
+
+    let row = sqlx::query(query).bind(1_i32).fetch_one(&mut conn).await?;
+
+    assert_eq!(row.columns().len(), 1);
+    assert_eq!(row.get::<i32, _>("id"), 1);
+    assert_eq!(conn.cached_statements_size(), 1);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_does_not_retry_after_cached_statement_schema_change() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    sqlx::raw_sql(
+        "CREATE TEMPORARY TABLE statement_cache_retry_test \
+         (id INTEGER PRIMARY KEY, value TEXT);\
+         INSERT INTO statement_cache_retry_test VALUES (1, 'one')",
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let query = "SELECT * FROM statement_cache_retry_test WHERE id = $1";
+    let row = sqlx::query(query).bind(1_i32).fetch_one(&mut conn).await?;
+
+    assert_eq!(row.columns().len(), 2);
+    assert_eq!(conn.cached_statements_size(), 1);
+
+    sqlx::raw_sql("ALTER TABLE statement_cache_retry_test DROP COLUMN value")
+        .execute(&mut conn)
+        .await?;
+
+    let error = sqlx::query(query)
+        .bind(1_i32)
+        .fetch_one(&mut conn)
+        .await
+        .unwrap_err()
+        .into_database_error()
+        .unwrap()
+        .downcast::<PgDatabaseError>();
+
+    assert_eq!(error.code(), "0A000");
+    assert_eq!(error.routine(), Some("RevalidateCachedQuery"));
+    assert_eq!(conn.cached_statements_size(), 0);
+
+    let row = sqlx::query(query).bind(1_i32).fetch_one(&mut conn).await?;
+
+    assert_eq!(row.columns().len(), 1);
+    assert_eq!(row.get::<i32, _>("id"), 1);
+    assert_eq!(conn.cached_statements_size(), 1);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_keeps_cached_statements_after_unrelated_feature_not_supported() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    let cached_query = "SELECT $1::INTEGER";
+    let value: i32 = sqlx::query_scalar(cached_query)
+        .bind(1_i32)
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(value, 1);
+    assert_eq!(conn.cached_statements_size(), 1);
+
+    sqlx::raw_sql(
+        r#"
+        CREATE FUNCTION pg_temp.raise_feature_not_supported(value INTEGER)
+        RETURNS INTEGER
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            RAISE EXCEPTION 'unrelated unsupported feature' USING ERRCODE = '0A000';
+        END
+        $$
+        "#,
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let error = sqlx::query("SELECT pg_temp.raise_feature_not_supported($1)")
+        .bind(1_i32)
+        .execute(&mut conn)
+        .await
+        .unwrap_err()
+        .into_database_error()
+        .unwrap()
+        .downcast::<PgDatabaseError>();
+
+    assert_eq!(error.code(), "0A000");
+    assert!(!matches!(
+        error.routine(),
+        Some("RevalidateCachedQuery" | "RevalidateCachedPlan")
+    ));
+    assert_eq!(conn.cached_statements_size(), 2);
+
+    let value: i32 = sqlx::query_scalar(cached_query)
+        .bind(2_i32)
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(value, 2);
+    assert_eq!(conn.cached_statements_size(), 2);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_closes_statement_from_cache_issue_470() -> anyhow::Result<()> {
     sqlx_test::setup_if_needed();
 

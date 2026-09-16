@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{error_codes, Error};
 use crate::executor::{Execute, Executor};
 use crate::io::{PortalId, StatementId};
 use crate::logger::QueryLogger;
@@ -19,6 +19,23 @@ use sqlx_core::arguments::Arguments;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
 use std::{pin::pin, sync::Arc};
+
+/// Detects PostgreSQL's `cached plan must not change result type` error.
+///
+/// PostgreSQL: <https://coverage.postgresql.org/src/backend/utils/cache/plancache.c.gcov.html#870>
+/// pgJDBC: <https://github.com/pgjdbc/pgjdbc/blob/9ca108ce47b532a44c7d1de345e677395c185862/pgjdbc/src/main/java/org/postgresql/core/QueryExecutorBase.java#L423-L450>
+fn is_cached_plan_error(error: &Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|error| error.try_downcast_ref::<PgDatabaseError>())
+        .is_some_and(|error| {
+            error.code() == error_codes::FEATURE_NOT_SUPPORTED
+                && matches!(
+                    error.routine(),
+                    Some("RevalidateCachedQuery" | "RevalidateCachedPlan")
+                )
+        })
+}
 
 async fn prepare(
     conn: &mut PgConnection,
@@ -318,9 +335,9 @@ impl PgConnection {
                     self.invalidate_cached_statement(sql, clear_backend_cache)
                         .await?;
 
-                    // If we were in transaction mode we can't retry statement,
-                    //    so we can immediately return err
-                    if is_in_tx {
+                    // A changed result type is not retried automatically. Invalidating the
+                    // statement makes the next execution heal without hiding this error.
+                    if is_in_tx || clear_backend_cache {
                         return Err(err);
                     }
 
@@ -543,15 +560,17 @@ impl<'c> Executor<'c> for &'c mut PgConnection {
 //                      transaction pooling mode
 // - `Some(true)`  - if we should invalidate both backend and frontend caches
 fn check_stale_plan(error: &Error) -> Option<bool> {
+    if is_cached_plan_error(error) {
+        return Some(true);
+    }
+
     let error = error
         .as_database_error()?
         .try_downcast_ref::<PgDatabaseError>()?;
 
-    match (error.code(), error.routine()) {
-        // "cached plan must not change result type"
-        ("0A000", Some("RevalidateCachedQuery")) => Some(true),
+    match error.code() {
         // DISCARD ALL / DEALLOCATE / pgbouncer
-        ("26000", _) => Some(false),
+        "26000" => Some(false),
         _ => None,
     }
 }
