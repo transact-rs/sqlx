@@ -275,6 +275,43 @@ async fn it_handles_empty_queries() -> anyhow::Result<()> {
     Ok(())
 }
 
+// SQLite prepares no statement from whitespace or a comment after the last `;`, and what is
+// left of the query afterwards must still count as nothing left to run.
+#[sqlx_macros::test]
+async fn it_executes_statements_followed_by_whitespace_or_a_comment() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    for sql in [
+        "SELECT 1; SELECT 2;  \n\t\n",
+        "SELECT 1; SELECT 2; -- trailing comment",
+        "SELECT 1; SELECT 2; /* trailing comment */",
+    ] {
+        let rows: Vec<i32> = sqlx::raw_sql(sql)
+            .fetch_all(&mut conn)
+            .await?
+            .iter()
+            .map(|row| row.get(0))
+            .collect();
+
+        assert_eq!(rows, [1, 2], "{sql:?}");
+    }
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_executes_a_query_that_is_only_a_comment() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    for sql in ["-- only a comment", "/* only a comment */"] {
+        let done = conn.execute(sql).await?;
+
+        assert_eq!(done.rows_affected(), 0, "{sql:?}");
+    }
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_binds_parameters() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;
