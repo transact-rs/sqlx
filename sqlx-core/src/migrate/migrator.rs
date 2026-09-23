@@ -155,6 +155,36 @@ impl Migrator {
         self.iter().any(|m| m.version == version)
     }
 
+    /// Returns the highest version number of all migrations
+    /// in the Migrator. This corresponds to the latest version
+    pub fn latest_version(&self) -> i64 {
+        self.iter()
+            .max_by(|x, y| x.version.cmp(&y.version))
+            .map(|migration| migration.version)
+            .unwrap_or(0)
+    }
+
+    /// Get the latest version of the applied migrations.
+    pub async fn latest_applied_version<'a, A>(
+        &self,
+        migrator: A,
+    ) -> Result<Option<i64>, MigrateError>
+    where
+        A: Acquire<'a>,
+        <A::Connection as Deref>::Target: Migrate,
+    {
+        let mut conn = migrator.acquire().await?;
+
+        conn.ensure_migrations_table().await?;
+        let applied_migrations = conn.list_applied_migrations().await?;
+        let latest_version = applied_migrations
+            .iter()
+            .max_by(|x, y| x.version.cmp(&y.version))
+            .map(|migration| migration.version);
+
+        Ok(latest_version)
+    }
+
     /// Run any pending migrations against the database; and, validate previously applied migrations
     /// against the current migration source to detect accidental changes in previously-applied migrations.
     ///
@@ -348,6 +378,77 @@ impl Migrator {
             .filter(|m| m.version > target)
         {
             conn.revert(&self.table_name, migration).await?;
+        }
+
+        // unlock the migrator to allow other migrators to run
+        // but do nothing as we already migrated
+        if self.locking {
+            conn.unlock().await?;
+        }
+
+        Ok(())
+    }
+
+    /// Run up migrations against the database until a specific version.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use sqlx::migrate::MigrateError;
+    /// # fn main() -> Result<(), MigrateError> {
+    /// #     sqlx::__rt::test_block_on(async move {
+    /// use sqlx::migrate::Migrator;
+    /// use sqlx::sqlite::SqlitePoolOptions;
+    ///
+    /// let m = Migrator::new(std::path::Path::new("./migrations")).await?;
+    /// let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
+    /// m.run_through_version(&pool, 4).await
+    /// #     })
+    /// # }
+    /// ```
+    pub async fn run_through_version<'a, A>(
+        &self,
+        migrator: A,
+        target: i64,
+    ) -> Result<(), MigrateError>
+    where
+        A: Acquire<'a>,
+        <A::Connection as Deref>::Target: Migrate,
+    {
+        let mut conn = migrator.acquire().await?;
+
+        // lock the database for exclusive access by the migrator
+        if self.locking {
+            conn.lock().await?;
+        }
+
+        // creates [_migrations] table only if needed
+        // eventually this will likely migrate previous versions of the table
+        conn.ensure_migrations_table().await?;
+
+        let version = conn.dirty_version().await?;
+        if let Some(version) = version {
+            return Err(MigrateError::Dirty(version));
+        }
+
+        let applied_migrations = conn.list_applied_migrations().await?;
+        let applied_migrations: HashMap<_, _> = applied_migrations
+            .into_iter()
+            .map(|m| (m.version, m))
+            .collect();
+
+        for migration in self
+            .iter()
+            .filter(|m| m.migration_type.is_up_migration())
+            .filter(|m| m.version <= target)
+        {
+            if let Some(applied_migration) = applied_migrations.get(&migration.version) {
+                if migration.checksum != applied_migration.checksum {
+                    return Err(MigrateError::VersionMismatch(migration.version));
+                }
+            } else {
+                conn.apply(migration).await?;
+            }
         }
 
         // unlock the migrator to allow other migrators to run
