@@ -312,6 +312,34 @@ async fn it_executes_a_query_that_is_only_a_comment() -> anyhow::Result<()> {
     Ok(())
 }
 
+// SQLite reads a query only up to its first NUL byte. A query containing one used to hang
+// the connection's worker thread; it has to fail before anything in it runs.
+#[sqlx_macros::test]
+async fn it_rejects_a_query_containing_a_nul_byte() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    for sql in ["SELECT 1;\0SELECT 2", "SELECT 1;\0", "\0"] {
+        let res = conn.execute(sql).await;
+
+        assert!(
+            matches!(res, Err(sqlx::Error::InvalidArgument(_))),
+            "{sql:?}: {res:?}"
+        );
+    }
+
+    let err = conn.execute("SELECT 1;\0SELECT 2").await.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "query string contains a NUL byte at offset 9"
+    );
+
+    // The connection is still usable afterwards.
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&mut conn).await?;
+    assert_eq!(one, 1);
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_binds_parameters() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;

@@ -55,6 +55,14 @@ pub struct PreparedStatement<'a> {
 
 impl VirtualStatement {
     pub(crate) fn new(mut query: &str, persistent: bool) -> Result<Self, Error> {
+        // SQLite reads a query only up to its first NUL byte, so whatever followed one would
+        // silently never run.
+        if let Some(offset) = query.find('\0') {
+            return Err(Error::InvalidArgument(format!(
+                "query string contains a NUL byte at offset {offset}"
+            )));
+        }
+
         query = query.trim();
 
         if query.len() > i32::MAX as usize {
@@ -206,9 +214,18 @@ fn prepare(
     // so tail is left pointing to what remains un-compiled.
 
     let n = (tail as usize) - (query_ptr as usize);
+    let statement = NonNull::new(statement_handle).map(StatementHandle::new);
+
+    if statement.is_none() && n == 0 {
+        // Handing SQLite the same bytes again would get the same answer, forever.
+        return Err(err_protocol!(
+            "SQLite prepared no statement from the query and consumed none of it"
+        ));
+    }
+
     query.advance(n);
 
-    Ok(NonNull::new(statement_handle).map(StatementHandle::new))
+    Ok(statement)
 }
 
 #[cfg(test)]
@@ -252,5 +269,17 @@ mod tests {
         }
 
         assert_eq!(prepared, 3);
+    }
+
+    // SQLite reads nothing past a NUL, so a tail that starts with one yields no statement and
+    // does not advance; handing it back would get the same answer forever.
+    #[test]
+    fn prepare_errors_when_sqlite_consumes_nothing() {
+        let conn = open_in_memory();
+        let mut tail = Bytes::from_static(b"\0SELECT 1\0");
+
+        let res = prepare(conn.as_ptr(), &mut tail, false);
+
+        assert!(matches!(res, Err(Error::Protocol(_))), "{res:?}");
     }
 }
