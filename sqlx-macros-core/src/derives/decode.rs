@@ -14,6 +14,10 @@ use syn::{
 
 pub fn expand_derive_decode(input: &DeriveInput) -> syn::Result<TokenStream> {
     let attrs = parse_container_attributes(&input.attrs)?;
+    if let Some(try_from) = &attrs.try_from {
+        return expand_derive_decode_try_from(input, try_from);
+    }
+
     match &input.data {
         Data::Struct(DataStruct { fields, .. })
             if fields.len() == 1 && (matches!(fields, Fields::Unnamed(_)) || attrs.transparent) =>
@@ -44,6 +48,49 @@ pub fn expand_derive_decode(input: &DeriveInput) -> syn::Result<TokenStream> {
             "unit structs are not supported",
         )),
     }
+}
+
+fn expand_derive_decode_try_from(
+    input: &DeriveInput,
+    try_from: &syn::Type,
+) -> syn::Result<TokenStream> {
+    let ident = &input.ident;
+    let generics = &input.generics;
+    let (_, ty_generics, _) = generics.split_for_impl();
+
+    let mut generics = generics.clone();
+    generics
+        .params
+        .insert(0, parse_quote!(DB: ::sqlx::Database));
+    generics.params.insert(0, parse_quote!('r));
+    generics
+        .make_where_clause()
+        .predicates
+        .push(parse_quote!(#try_from: ::sqlx::decode::Decode<'r, DB>));
+    generics
+        .make_where_clause()
+        .predicates
+        .push(parse_quote!(#ident #ty_generics: ::std::convert::TryFrom<#try_from>));
+
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
+
+    Ok(quote!(
+        #[automatically_derived]
+        impl #impl_generics ::sqlx::decode::Decode<'r, DB> for #ident #ty_generics #where_clause {
+            fn decode(
+                value: <DB as ::sqlx::database::Database>::ValueRef<'r>,
+            ) -> ::std::result::Result<
+                Self,
+                ::std::boxed::Box<
+                    dyn ::std::error::Error + 'static + ::std::marker::Send + ::std::marker::Sync,
+                >,
+            > {
+                let value = <#try_from as ::sqlx::decode::Decode<'r, DB>>::decode(value)?;
+                <#ident #ty_generics as ::std::convert::TryFrom<#try_from>>::try_from(value)
+                    .map_err(|e| ::sqlx::__spec_error!(e))
+            }
+        }
+    ))
 }
 
 fn expand_derive_decode_transparent(
