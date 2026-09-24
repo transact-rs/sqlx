@@ -31,6 +31,43 @@ test_type!(i32(MySql, "2141512" == 2141512_i32));
 test_type!(u64(MySql, "CAST(2141512 AS UNSIGNED)" == 2141512_u64));
 test_type!(i64(MySql, "2141512" == 2141512_i64));
 
+// A DECIMAL (e.g. `SUM()` over integers) is sent as text even over the binary
+// protocol, so decoding one into an integer must parse the digits rather than
+// read the ASCII bytes as a little-endian integer.
+#[sqlx_macros::test]
+async fn decode_integer_from_decimal() -> anyhow::Result<()> {
+    let mut conn = new::<MySql>().await?;
+
+    // Prepared statement => binary protocol; b"13" read as LE would be 13105.
+    let row = sqlx::query("SELECT CAST(13 AS DECIMAL(4, 0))")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(row.try_get_unchecked::<u64, _>(0)?, 13);
+    assert_eq!(row.try_get_unchecked::<i64, _>(0)?, 13);
+
+    // Integral value with a nonzero scale.
+    let row = sqlx::query("SELECT CAST(13.00 AS DECIMAL(6, 2))")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(row.try_get_unchecked::<u64, _>(0)?, 13);
+
+    // Negative values are signed-only.
+    let row = sqlx::query("SELECT CAST(-7 AS DECIMAL(4, 0))")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(row.try_get_unchecked::<i64, _>(0)?, -7);
+    assert!(row.try_get_unchecked::<u64, _>(0).is_err());
+
+    // A real fraction errors instead of silently corrupting.
+    let row = sqlx::query("SELECT CAST(13.5 AS DECIMAL(4, 1))")
+        .fetch_one(&mut conn)
+        .await?;
+    let err = row.try_get_unchecked::<u64, _>(0).unwrap_err().to_string();
+    assert!(err.contains("fractional"), "unexpected error: {err}");
+
+    Ok(())
+}
+
 test_type!(f64(MySql, "3.14159265e0" == 3.14159265_f64));
 
 // NOTE: This behavior can be very surprising. MySQL implicitly widens FLOAT bind parameters
