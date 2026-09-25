@@ -453,9 +453,41 @@ impl ConnectOpts {
     }
 
     /// Populate `database_url` from the environment, if not set.
+    ///
+    /// Errors if it is not set and cannot be found in the environment.
     pub fn populate_db_url(&mut self, config: &Config) -> anyhow::Result<()> {
-        if self.database_url.is_some() {
+        if self.try_populate_db_url(config)? {
             return Ok(());
+        }
+
+        let var = config.common.database_url_var();
+        let context = if var != "DATABASE_URL" {
+            " (`common.database-url-var` in `sqlx.toml`)"
+        } else {
+            ""
+        };
+
+        anyhow::bail!("`--database-url` or `{var}`{context} must be set")
+    }
+
+    /// Populate `database_url` from the environment, if not set, without erroring if it
+    /// cannot be found.
+    ///
+    /// Used by commands that can run without a database connection, such as
+    /// `prepare`/`prepare --check` in offline mode.
+    pub fn populate_db_url_if_present(&mut self, config: &Config) -> anyhow::Result<()> {
+        self.try_populate_db_url(config)?;
+        Ok(())
+    }
+
+    /// Attempt to read `database_url` from the environment if not already set.
+    ///
+    /// Returns `Ok(true)` if `database_url` is set (either already, or just populated from
+    /// the environment), or `Ok(false)` if the relevant environment variable is simply unset.
+    /// Any other error (e.g. non-UTF-8 value) is still returned as `Err`.
+    fn try_populate_db_url(&mut self, config: &Config) -> anyhow::Result<bool> {
+        if self.database_url.is_some() {
+            return Ok(true);
         }
 
         let var = config.common.database_url_var();
@@ -472,17 +504,81 @@ impl ConnectOpts {
                     eprintln!("Read database url from `{var}`{context}");
                 }
 
-                self.database_url = Some(url)
+                self.database_url = Some(url);
+                Ok(true)
             }
-            Err(env::VarError::NotPresent) => {
-                anyhow::bail!("`--database-url` or `{var}`{context} must be set")
-            }
+            Err(env::VarError::NotPresent) => Ok(false),
             Err(env::VarError::NotUnicode(_)) => {
                 anyhow::bail!("`{var}`{context} is not valid UTF-8");
             }
         }
+    }
+}
 
-        Ok(())
+#[cfg(test)]
+mod connect_opts_tests {
+    use super::*;
+
+    fn connect_opts() -> ConnectOpts {
+        ConnectOpts {
+            no_dotenv: NoDotenvOpt { no_dotenv: false },
+            database_url: None,
+            connect_timeout: 10,
+            #[cfg(feature = "_sqlite")]
+            sqlite_create_db_wal: true,
+        }
+    }
+
+    fn config_with_var(var: &str) -> Config {
+        let mut config = Config::default();
+        config.common.database_url_var = Some(var.to_string());
+        config
+    }
+
+    #[test]
+    fn populate_db_url_if_present_does_not_error_when_unset() {
+        let var = "SQLX_CLI_TEST_POPULATE_IF_PRESENT_UNSET";
+        // SAFETY: `var` is process-unique to this test and touched by no other test.
+        unsafe { env::remove_var(var) };
+
+        let config = config_with_var(var);
+        let mut opts = connect_opts();
+
+        opts.populate_db_url_if_present(&config)
+            .expect("should not error when the env var is unset");
+        assert_eq!(opts.database_url, None);
+    }
+
+    #[test]
+    fn populate_db_url_if_present_reads_env_when_set() {
+        let var = "SQLX_CLI_TEST_POPULATE_IF_PRESENT_SET";
+        // SAFETY: `var` is process-unique to this test and touched by no other test.
+        unsafe { env::set_var(var, "postgres://example/db") };
+
+        let config = config_with_var(var);
+        let mut opts = connect_opts();
+
+        opts.populate_db_url_if_present(&config)
+            .expect("should populate the url when the env var is set");
+        assert_eq!(opts.database_url.as_deref(), Some("postgres://example/db"));
+
+        // SAFETY: `var` is process-unique to this test and touched by no other test.
+        unsafe { env::remove_var(var) };
+    }
+
+    #[test]
+    fn populate_db_url_errors_when_unset() {
+        let var = "SQLX_CLI_TEST_POPULATE_STRICT_UNSET";
+        // SAFETY: `var` is process-unique to this test and touched by no other test.
+        unsafe { env::remove_var(var) };
+
+        let config = config_with_var(var);
+        let mut opts = connect_opts();
+
+        let error = opts
+            .populate_db_url(&config)
+            .expect_err("should error when the env var is unset");
+        assert!(error.to_string().contains(var));
     }
 }
 
