@@ -77,6 +77,10 @@ impl MySqlConnection {
             column_names: Arc::new(column_names),
         };
 
+        // Queued so the drain closes the statement if the caller is
+        // dropped before caching or closing it.
+        self.inner.stream.close_pending.push(id);
+
         Ok((id, metadata))
     }
 
@@ -92,11 +96,15 @@ impl MySqlConnection {
         let (id, metadata) = self.prepare_statement(sql).await?;
 
         // in case of the cache being full, close the least recently used statement
-        if let Some((id, _)) = self
+        let evicted = self
             .inner
             .cache_statement
-            .insert(sql, (id, metadata.clone()))
-        {
+            .insert(sql, (id, metadata.clone()));
+
+        // Cached, so no longer closed by the drain.
+        self.inner.stream.close_pending.pop();
+
+        if let Some((id, _)) = evicted {
             self.inner
                 .stream
                 .send_packet(StmtClose { statement: id })
@@ -161,11 +169,7 @@ impl MySqlConnection {
                         .await?;
 
                     if arguments.types.len() != metadata.parameters {
-                        // Nothing else holds the id; the next command
-                        // flushes the close.
-                        self.inner.stream.sequence_id = 0;
-                        self.inner.stream.write_packet(StmtClose { statement: id })?;
-
+                        // Not cached and not closed here; the drain closes it.
                         return Err(
                             err_protocol!(
                                 "prepared statement expected {} parameters but {} parameters were provided",
@@ -185,6 +189,7 @@ impl MySqlConnection {
                         })
                         .await?;
 
+                    self.inner.stream.close_pending.pop();
                     self.inner.stream.send_packet(StmtClose { statement: id }).await?;
 
                     MySqlValueFormat::Binary
@@ -354,6 +359,7 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
             } else {
                 let (id, metadata) = self.prepare_statement(sql.as_str()).await?;
 
+                self.inner.stream.close_pending.pop();
                 self.inner
                     .stream
                     .send_packet(StmtClose { statement: id })
@@ -384,6 +390,7 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
 
             let (id, metadata) = self.prepare_statement(sql.as_str()).await?;
 
+            self.inner.stream.close_pending.pop();
             self.inner
                 .stream
                 .send_packet(StmtClose { statement: id })

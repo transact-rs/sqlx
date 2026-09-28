@@ -19,6 +19,8 @@ pub struct MySqlStream<S = Box<dyn Socket>> {
     pub(super) capabilities: Capabilities,
     pub(crate) sequence_id: u8,
     pub(crate) waiting: VecDeque<Waiting>,
+    // statements a dropped operation left open; closed by the drain
+    pub(crate) close_pending: Vec<u32>,
     pub(crate) is_tls: bool,
 }
 
@@ -70,6 +72,7 @@ impl<S: Socket> MySqlStream<S> {
 
         Self {
             waiting: VecDeque::new(),
+            close_pending: Vec::new(),
             capabilities,
             server_version: (0, 0, 0),
             sequence_id: 0,
@@ -79,6 +82,12 @@ impl<S: Socket> MySqlStream<S> {
     }
 
     pub(crate) async fn wait_until_ready(&mut self) -> Result<(), Error> {
+        // Close the statements a dropped operation left open.
+        for statement in std::mem::take(&mut self.close_pending) {
+            self.sequence_id = 0;
+            self.write_packet(StmtClose { statement })?;
+        }
+
         if !self.socket.write_buffer().is_empty() {
             self.socket.flush().await?;
         }
@@ -319,6 +328,7 @@ impl<S: Socket> MySqlStream<S> {
             capabilities: self.capabilities,
             sequence_id: self.sequence_id,
             waiting: self.waiting,
+            close_pending: self.close_pending,
             is_tls: self.is_tls,
         }
     }
