@@ -344,6 +344,13 @@ impl PgConnection {
                         // Save transaction mode. It will be lost after invalidating
                         let is_in_tx = self.in_transaction();
 
+                        tracing::debug!(
+                            target: "sqlx::query",
+                            clear_backend_cache,
+                            retry = !is_in_tx,
+                            "stale cached plan"
+                        );
+
                         self.invalidate_cached_statement(sql, clear_backend_cache)
                             .await?;
 
