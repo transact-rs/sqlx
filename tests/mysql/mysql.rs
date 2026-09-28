@@ -562,7 +562,8 @@ async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result
 
     let query = "SELECT id, filler FROM sqlx_test_cancel_probe_prepared";
 
-    let (prepared_before, closed_before) = stmt_prepare_close_counts(&mut conn).await?;
+    let (p, c, r) = stmt_prepare_close_counts(&mut conn).await?;
+    let mut counts = (p, c, 0, r);
 
     // Polled once, a fetch sends COM_STMT_PREPARE and is dropped, leaving
     // the response to the drain. The statements cover columns only,
@@ -577,6 +578,9 @@ async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result
         ("DO 1", false),
     ];
 
+    // Poll-once drops are deterministic: the first poll always ends at the
+    // prepare response read, so the balance below can only fail if the
+    // drain or the close tracking is wrong. Checked per persistent setting.
     for persistent in [false, true] {
         for (sql, with_param) in shapes {
             for i in 0..100 {
@@ -601,10 +605,19 @@ async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result
                     .with_context(|| format!("{sql:?}, persistent({persistent}), iteration {i}"))?;
             }
         }
+
+        counts = assert_statement_balance(
+            &mut conn,
+            counts,
+            &format!("dropped prepares, persistent({persistent})"),
+        )
+        .await?;
     }
 
     // Mostly cancels inside binary row reads; the loop above covers the
-    // prepare drain.
+    // prepare drain. No counter balance here: a cancel lands wherever the
+    // timer catches the fetch, so the balance depends on timing the code
+    // under test does not control. The pings cover the recovery.
     for i in 0u64..300 {
         // A 0 to 3 ms race, as above.
         let cancel_after = Duration::from_micros((i % 23) * 90);
@@ -624,17 +637,6 @@ async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result
             .with_context(|| format!("iteration {i}"))?;
     }
 
-    // Every statement the server prepared was closed or sits in the cache.
-    let (prepared_after, closed_after) = stmt_prepare_close_counts(&mut conn).await?;
-    let prepared = prepared_after - prepared_before;
-    let closed = closed_after - closed_before;
-    let cached = conn.cached_statements_size() as u64;
-    assert_eq!(
-        closed + cached,
-        prepared,
-        "{prepared} prepared, {closed} closed, {cached} cached"
-    );
-
     conn.execute("DROP TABLE sqlx_test_cancel_probe_prepared")
         .await?;
     conn.close().await?;
@@ -642,12 +644,38 @@ async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result
     Ok(())
 }
 
-// The session's Com_stmt_prepare and Com_stmt_close counts.
+// The Com_stmt_prepare/Com_stmt_close deltas since `before` must balance
+// against the statement cache delta, with server-side re-prepares taken out
+// of the prepare side: an execute that finds the statement's metadata stale
+// re-prepares it on the server, which counts as Com_stmt_prepare without
+// ever getting a COM_STMT_CLOSE. The phase name pins down a leak.
 #[cfg(feature = "_rt-tokio")]
-async fn stmt_prepare_close_counts(conn: &mut MySqlConnection) -> anyhow::Result<(u64, u64)> {
+async fn assert_statement_balance(
+    conn: &mut MySqlConnection,
+    before: (u64, u64, u64, u64),
+    phase: &str,
+) -> anyhow::Result<(u64, u64, u64, u64)> {
+    let (prepared, closed, reprepared) = stmt_prepare_close_counts(conn).await?;
+    let cached = conn.cached_statements_size() as u64;
+
+    assert_eq!(
+        (closed - before.1) + (cached - before.2),
+        (prepared - before.0) - (reprepared - before.3),
+        "{phase}: {} prepared ({} reprepared), {} closed, cached {cached}",
+        prepared - before.0,
+        reprepared - before.3,
+        closed - before.1
+    );
+
+    Ok((prepared, closed, cached, reprepared))
+}
+
+// The session's Com_stmt_prepare, Com_stmt_close and Com_stmt_reprepare counts.
+#[cfg(feature = "_rt-tokio")]
+async fn stmt_prepare_close_counts(conn: &mut MySqlConnection) -> anyhow::Result<(u64, u64, u64)> {
     let rows = conn
         .fetch_all(
-            "SHOW SESSION STATUS WHERE Variable_name IN ('Com_stmt_prepare', 'Com_stmt_close')",
+            "SHOW SESSION STATUS WHERE Variable_name IN ('Com_stmt_prepare', 'Com_stmt_close', 'Com_stmt_reprepare')",
         )
         .await?;
 
@@ -660,7 +688,11 @@ async fn stmt_prepare_close_counts(conn: &mut MySqlConnection) -> anyhow::Result
         Ok(row.try_get::<&str, _>(1)?.parse()?)
     };
 
-    Ok((counter("Com_stmt_prepare")?, counter("Com_stmt_close")?))
+    Ok((
+        counter("Com_stmt_prepare")?,
+        counter("Com_stmt_close")?,
+        counter("Com_stmt_reprepare")?,
+    ))
 }
 
 #[sqlx_macros::test]
