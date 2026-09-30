@@ -144,6 +144,66 @@ async fn test_derive_strong_enum() -> anyhow::Result<()> {
 }
 
 #[sqlx::test]
+async fn test_derive_strong_enum_not_null() -> anyhow::Result<()> {
+    #[derive(sqlx::Type, PartialEq, Eq, Debug)]
+    enum NotNullEnum {
+        FooFoo,
+        BarBar,
+        BazBaz,
+    }
+
+    #[derive(sqlx::FromRow, PartialEq, Eq, Debug)]
+    struct NotNullEnumRow {
+        not_null: NotNullEnum,
+        not_null_default: NotNullEnum,
+        not_null_indexed: NotNullEnum,
+    }
+
+    let mut conn = new::<MySql>().await?;
+
+    // These columns carry `NOT_NULL`, `NO_DEFAULT_VALUE` and `MULTIPLE_KEY` on top of the `ENUM`
+    // flag, which used to fail the type check against `MySqlTypeInfo::__enum()` (#3750).
+    sqlx::raw_sql(
+        r#"
+            CREATE TEMPORARY TABLE strong_enum_not_null (
+                not_null ENUM('FooFoo', 'BarBar', 'BazBaz') NOT NULL,
+                not_null_default ENUM('FooFoo', 'BarBar', 'BazBaz') NOT NULL DEFAULT 'FooFoo',
+                not_null_indexed ENUM('FooFoo', 'BarBar', 'BazBaz') NOT NULL,
+                KEY (not_null_indexed)
+            );
+        "#,
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let input = NotNullEnumRow {
+        not_null: NotNullEnum::FooFoo,
+        not_null_default: NotNullEnum::BarBar,
+        not_null_indexed: NotNullEnum::BazBaz,
+    };
+
+    sqlx::query(
+        r#"
+            INSERT INTO strong_enum_not_null(not_null, not_null_default, not_null_indexed)
+            VALUES (?, ?, ?)
+        "#,
+    )
+    .bind(&input.not_null)
+    .bind(&input.not_null_default)
+    .bind(&input.not_null_indexed)
+    .execute(&mut conn)
+    .await?;
+
+    let output: NotNullEnumRow = sqlx::query_as("SELECT * FROM strong_enum_not_null")
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(input, output);
+
+    Ok(())
+}
+
+#[sqlx::test]
 async fn test_derive_weak_enum() -> anyhow::Result<()> {
     #[derive(sqlx::Type, Debug, PartialEq, Eq)]
     #[repr(i8)]
