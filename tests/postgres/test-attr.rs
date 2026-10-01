@@ -199,3 +199,20 @@ macro_rules! macro_using_test {
     };
 }
 macro_using_test!("tests/postgres/migrations");
+
+// The test harness must read the variable named by `TestArgs::database_url_var`,
+// which `#[sqlx::test]` sets from `common.database-url-var` in `sqlx.toml`.
+#[test]
+#[should_panic(expected = "SQLX_TEST_UNSET_DATABASE_URL must be set")]
+fn it_reads_configured_database_url_var() {
+    async fn inner(_pool: PgPool) {}
+
+    let mut args = sqlx::testing::TestArgs::new(concat!(
+        module_path!(),
+        "::it_reads_configured_database_url_var"
+    ));
+    args.database_url_var("SQLX_TEST_UNSET_DATABASE_URL");
+
+    let f: fn(_) -> _ = inner;
+    sqlx::testing::TestFn::run_test(f, args)
+}
