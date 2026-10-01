@@ -79,6 +79,9 @@ Most of these will require you to set `DATABASE_URL` as an environment variable
 or in a `.env` file like `sqlx::query!()` _et al_, to give the test driver a superuser connection with which
 to manage test databases.
 
+If the crate has a `sqlx.toml` that sets `common.database-url-var`, the test driver reads that variable instead
+of `DATABASE_URL`.
+
 | Database | Requires `DATABASE_URL` |
 |----------|-------------------------| 
 | Postgres | Yes                     |
