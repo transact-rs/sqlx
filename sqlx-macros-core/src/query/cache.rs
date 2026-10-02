@@ -69,8 +69,12 @@ impl MtimeCacheBuilder {
     pub fn add_path(&mut self, path: PathBuf) {
         let mtime = get_mtime(&path);
 
+        // Only hand rustc paths it can fingerprint. A directory, or a file that
+        // does not exist, has no content to checksum, and under cargo's
+        // `-Z checksum-freshness` such a dep-info entry leaves the crate
+        // permanently dirty. The mtime check below still covers them.
         #[cfg(any(sqlx_macros_unstable, procmacro2_semver_exempt))]
-        {
+        if path.is_file() {
             proc_macro::tracked::path(&path);
         }
 
