@@ -3,7 +3,7 @@ use futures_util::{Stream, StreamExt, TryStreamExt};
 use sqlx::postgres::types::Oid;
 use sqlx::postgres::{
     PgAdvisoryLock, PgConnectOptions, PgConnection, PgDatabaseError, PgErrorPosition, PgListener,
-    PgPoolOptions, PgRow, PgSeverity, Postgres, PG_COPY_MAX_DATA_LEN,
+    PgPoolOptions, PgRow, PgSeverity, Postgres, TransactionStatus, PG_COPY_MAX_DATA_LEN,
 };
 use sqlx::{Column, Connection, Executor, Row, SqlSafeStr, Statement, TypeInfo};
 use sqlx_core::sql_str::AssertSqlSafe;
@@ -2292,6 +2292,105 @@ async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<
     // and the pooled connection is still usable
     let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
     assert_eq!(one, 1);
+
+    Ok(())
+}
+
+// Regression: a connection must not be returned to the pool inside a transaction block the
+// client has no record of. `PgConnection::ping` -- which `Floating::return_to_pool` uses to
+// validate a connection on release -- used to be a bare `wait_until_ready`, draining the
+// `ReadyForQuery` without ever inspecting its transaction-status byte. Two shapes reach it
+// with a client-side `transaction_depth` of zero, so neither drop guard queues a `ROLLBACK`:
+// a future cancelled while `BEGIN` is in flight (#4393), and a statement that fails inside a
+// block opened by a multi-statement `raw_sql`. The second never self-heals: the next
+// borrower's `BEGIN` fails because the block is already aborted, which leaves the depth at
+// zero again, so every checkout fails with 25P02 until `max_lifetime` recycles it.
+#[sqlx_macros::test]
+async fn it_does_not_return_a_connection_inside_a_transaction_to_the_pool() -> anyhow::Result<()> {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .min_connections(0)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    // Shape 2: a block opened and then aborted, entirely within one simple-query message, so
+    // the client's transaction depth is never raised. Deterministic -- no timing involved.
+    {
+        let mut conn = pool.acquire().await?;
+        let err = sqlx::raw_sql("BEGIN; SELECT 1/0;")
+            .execute(&mut *conn)
+            .await
+            .expect_err("division by zero should fail");
+        assert_eq!(
+            err.as_database_error().and_then(|e| e.code()).as_deref(),
+            Some("22012")
+        );
+        assert!(
+            !conn.is_in_transaction(),
+            "precondition: the client-side depth stays zero, which is what defeats the guards"
+        );
+        // released here: `ping` must end the block
+    }
+
+    // The same connection comes back (the pool holds exactly one).
+    let mut conn = pool.acquire().await?;
+    assert_eq!(
+        conn.transaction_status(),
+        TransactionStatus::Idle,
+        "connection was returned to the pool still inside a transaction block"
+    );
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&mut *conn).await?;
+    assert_eq!(one, 1, "a recycled connection must still answer queries");
+    drop(conn);
+
+    // Shape 1's lasting damage: a leaked `BEGIN READ ONLY` makes the next borrower's WRITE
+    // fail, which is how this usually surfaces in production rather than as 25P02.
+    {
+        let mut conn = pool.acquire().await?;
+        sqlx::raw_sql("BEGIN READ ONLY").execute(&mut *conn).await?;
+        assert!(!conn.is_in_transaction());
+    }
+
+    let mut conn = pool.acquire().await?;
+    let read_only: String = sqlx::query_scalar("SELECT current_setting('transaction_read_only')")
+        .fetch_one(&mut *conn)
+        .await?;
+    assert_eq!(
+        read_only, "off",
+        "connection was returned to the pool inside a READ ONLY block"
+    );
+    sqlx::query("CREATE TEMP TABLE ping_rollback_probe (x int)")
+        .execute(&mut *conn)
+        .await?;
+
+    Ok(())
+}
+
+// The other side of the guard above: `ping` must leave a transaction the caller is
+// deliberately holding completely alone. `ping` is public API, and rolling back a live
+// transaction underneath a caller would be far worse than the bug being fixed.
+#[sqlx_macros::test]
+async fn it_does_not_roll_back_a_transaction_the_caller_owns() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    let mut tx = conn.begin().await?;
+    sqlx::query("CREATE TEMP TABLE ping_keeps_my_transaction (x int)")
+        .execute(&mut *tx)
+        .await?;
+
+    tx.ping().await?;
+
+    // Still inside the same transaction, and its work survived.
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM ping_keeps_my_transaction")
+        .fetch_one(&mut *tx)
+        .await?;
+    assert_eq!(count, 0, "the temp table must still exist after a ping");
+    assert!(
+        tx.is_in_transaction(),
+        "ping rolled back the caller's transaction"
+    );
+
+    tx.commit().await?;
 
     Ok(())
 }
