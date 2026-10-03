@@ -291,11 +291,16 @@ impl ConnectionWorker {
                             let depth = shared.transaction_depth.load(Ordering::Acquire);
 
                             let res = if depth > 0 {
-                                conn.handle
-                                    .exec(rollback_ansi_transaction_sql(depth).as_str())
-                                    .map(|_| {
-                                        shared.transaction_depth.fetch_sub(1, Ordering::Release);
-                                    })
+                                // SQLite rolls back the whole transaction by itself on some
+                                // errors (e.g. SQLITE_FULL), and a ROLLBACK would then fail.
+                                let res = if conn.handle.in_transaction() {
+                                    conn.handle.exec(rollback_ansi_transaction_sql(depth).as_str())
+                                } else {
+                                    Ok(())
+                                };
+                                res.map(|_| {
+                                    shared.transaction_depth.fetch_sub(1, Ordering::Release);
+                                })
                             } else {
                                 Ok(())
                             };
