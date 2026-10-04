@@ -127,8 +127,28 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
             let list: Punctuated<Meta, Token![,]> =
                 attr.parse_args_with(<Punctuated<Meta, Token![,]>>::parse_terminated)?;
 
-            if let Some(path) = list.iter().find_map(|f| f.require_path_only().ok()) {
-                try_set!(repr, path.get_ident().unwrap().clone(), list);
+            // only an integer type is a usable repr; `C`, `transparent` etc. are not
+            if let Some(ident) = list
+                .iter()
+                .filter_map(|f| f.require_path_only().ok()?.get_ident())
+                .find(|ident| {
+                    matches!(
+                        ident.to_string().as_str(),
+                        "i8" | "i16"
+                            | "i32"
+                            | "i64"
+                            | "i128"
+                            | "isize"
+                            | "u8"
+                            | "u16"
+                            | "u32"
+                            | "u64"
+                            | "u128"
+                            | "usize"
+                    )
+                })
+            {
+                try_set!(repr, ident.clone(), list);
             }
         }
     }
