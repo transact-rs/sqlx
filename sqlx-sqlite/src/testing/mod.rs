@@ -21,7 +21,7 @@ impl TestSupport for Sqlite {
         Ok(())
     }
 
-    async fn cleanup_test_dbs() -> Result<Option<usize>, Error> {
+    async fn cleanup_test_dbs(_database_url_var: &str) -> Result<Option<usize>, Error> {
         crate::fs::remove_dir_all(BASE_PATH).await?;
         Ok(None)
     }

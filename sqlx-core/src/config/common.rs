@@ -8,7 +8,7 @@
 pub struct Config {
     /// Override the database URL environment variable.
     ///
-    /// This is used by both the macros and `sqlx-cli`.
+    /// This is used by the query macros, `#[sqlx::test]` and `sqlx-cli`.
     ///
     /// Case-sensitive. Defaults to `DATABASE_URL`.
     ///
@@ -37,7 +37,7 @@ pub struct Config {
     /// BAR_DATABASE_URL=postgres://postgres@localhost:5432/bar
     /// ```
     ///
-    /// The query macros used in `foo` will use `FOO_DATABASE_URL`,
+    /// The query macros and `#[sqlx::test]` used in `foo` will use `FOO_DATABASE_URL`,
     /// and the ones used in `bar` will use `BAR_DATABASE_URL`.
     pub database_url_var: Option<String>,
 }
