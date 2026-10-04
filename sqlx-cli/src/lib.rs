@@ -225,7 +225,10 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
             config,
         } => {
             let config = config.load_config().await?;
-            connect_opts.populate_db_url(&config)?;
+            // `prepare`/`prepare --check` can run without a database connection (e.g. in
+            // offline mode), so don't require `DATABASE_URL` to be set here; `prepare::run`
+            // only connects if a URL ends up being available.
+            connect_opts.populate_db_url_if_present(&config)?;
             prepare::run(&config, check, all, workspace, connect_opts, args).await?
         }
 
