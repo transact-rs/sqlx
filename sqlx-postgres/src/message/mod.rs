@@ -19,18 +19,22 @@ mod parameter_description;
 mod parameter_status;
 mod parse;
 mod parse_complete;
+#[cfg(feature = "password-auth")]
 mod password;
 mod query;
 mod ready_for_query;
 mod response;
 mod row_description;
+#[cfg(feature = "password-auth")]
 mod sasl;
 mod ssl_request;
 mod startup;
 mod sync;
 mod terminate;
 
-pub use authentication::{Authentication, AuthenticationSasl};
+pub use authentication::Authentication;
+#[cfg(feature = "password-auth")]
+pub use authentication::AuthenticationSasl;
 pub use backend_key_data::BackendKeyData;
 pub use bind::Bind;
 pub use close::Close;
@@ -46,11 +50,13 @@ pub use parameter_description::ParameterDescription;
 pub use parameter_status::ParameterStatus;
 pub use parse::Parse;
 pub use parse_complete::ParseComplete;
+#[cfg(feature = "password-auth")]
 pub use password::Password;
 pub use query::Query;
 pub use ready_for_query::{ReadyForQuery, TransactionStatus};
 pub use response::{Notice, PgSeverity};
 pub use row_description::RowDescription;
+#[cfg(feature = "password-auth")]
 pub use sasl::{SaslInitialResponse, SaslResponse};
 use sqlx_core::io::ProtocolEncode;
 pub use ssl_request::SslRequest;
@@ -82,6 +88,7 @@ pub enum FrontendMessageFormat {
     /// * MD5 password responses
     /// * SASL responses
     /// * GSSAPI/SSPI responses
+    #[cfg(feature = "password-auth")]
     PasswordPolymorphic = b'p',
     Query = b'Q',
     Sync = b'S',

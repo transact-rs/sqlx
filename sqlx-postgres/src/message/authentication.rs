@@ -1,12 +1,16 @@
+#[cfg(feature = "password-auth")]
 use std::str::from_utf8;
 
+#[cfg(feature = "password-auth")]
 use memchr::memchr;
 use sqlx_core::bytes::{Buf, Bytes};
 
 use crate::error::Error;
+#[cfg(feature = "password-auth")]
 use crate::io::ProtocolDecode;
 
 use crate::message::{BackendMessage, BackendMessageFormat};
+#[cfg(feature = "password-auth")]
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 // On startup, the server sends an appropriate authentication request message,
 // to which the frontend must reply with an appropriate authentication
@@ -34,7 +38,10 @@ pub enum Authentication {
     /// The frontend must now send a [PasswordMessage] containing the
     /// password (with user name) encrypted via MD5, then encrypted
     /// again using the 4-byte random salt.
+    #[cfg(feature = "password-auth")]
     Md5Password(AuthenticationMd5Password),
+    #[cfg(not(feature = "password-auth"))]
+    Md5Password,
 
     /// The frontend must now initiate a SASL negotiation,
     /// using one of the SASL mechanisms listed in the message.
@@ -45,19 +52,28 @@ pub enum Authentication {
     ///
     /// If further messages are needed, the server will
     /// respond with [Authentication::SaslContinue].
+    #[cfg(feature = "password-auth")]
     Sasl(AuthenticationSasl),
+    #[cfg(not(feature = "password-auth"))]
+    Sasl,
 
     /// This message contains challenge data from the previous step of SASL negotiation.
     ///
     /// The frontend must respond with a [SaslResponse] message.
+    #[cfg(feature = "password-auth")]
     SaslContinue(AuthenticationSaslContinue),
+    #[cfg(not(feature = "password-auth"))]
+    SaslContinue,
 
     /// SASL authentication has completed with additional mechanism-specific
     /// data for the client.
     ///
     /// The server will next send [Authentication::Ok] to
     /// indicate successful authentication.
+    #[cfg(feature = "password-auth")]
     SaslFinal(AuthenticationSaslFinal),
+    #[cfg(not(feature = "password-auth"))]
+    SaslFinal,
 }
 
 impl BackendMessage for Authentication {
@@ -70,15 +86,30 @@ impl BackendMessage for Authentication {
             3 => Authentication::CleartextPassword,
 
             5 => {
-                let mut salt = [0; 4];
-                buf.copy_to_slice(&mut salt);
+                #[cfg(feature = "password-auth")]
+                {
+                    let mut salt = [0; 4];
+                    buf.copy_to_slice(&mut salt);
 
-                Authentication::Md5Password(AuthenticationMd5Password { salt })
+                    Authentication::Md5Password(AuthenticationMd5Password { salt })
+                }
+
+                #[cfg(not(feature = "password-auth"))]
+                Authentication::Md5Password
             }
 
+            #[cfg(feature = "password-auth")]
             10 => Authentication::Sasl(AuthenticationSasl(buf)),
+            #[cfg(not(feature = "password-auth"))]
+            10 => Authentication::Sasl,
+            #[cfg(feature = "password-auth")]
             11 => Authentication::SaslContinue(AuthenticationSaslContinue::decode(buf)?),
+            #[cfg(not(feature = "password-auth"))]
+            11 => Authentication::SaslContinue,
+            #[cfg(feature = "password-auth")]
             12 => Authentication::SaslFinal(AuthenticationSaslFinal::decode(buf)?),
+            #[cfg(not(feature = "password-auth"))]
+            12 => Authentication::SaslFinal,
 
             ty => {
                 return Err(err_protocol!("unknown authentication method: {}", ty));
@@ -88,15 +119,18 @@ impl BackendMessage for Authentication {
 }
 
 /// Body of [Authentication::Md5Password].
+#[cfg(feature = "password-auth")]
 #[derive(Debug)]
 pub struct AuthenticationMd5Password {
     pub salt: [u8; 4],
 }
 
 /// Body of [Authentication::Sasl].
+#[cfg(feature = "password-auth")]
 #[derive(Debug)]
 pub struct AuthenticationSasl(Bytes);
 
+#[cfg(feature = "password-auth")]
 impl AuthenticationSasl {
     #[inline]
     pub fn mechanisms(&self) -> SaslMechanisms<'_> {
@@ -105,8 +139,10 @@ impl AuthenticationSasl {
 }
 
 /// An iterator over the SASL authentication mechanisms provided by the server.
+#[cfg(feature = "password-auth")]
 pub struct SaslMechanisms<'a>(&'a [u8]);
 
+#[cfg(feature = "password-auth")]
 impl<'a> Iterator for SaslMechanisms<'a> {
     type Item = &'a str;
 
@@ -123,6 +159,7 @@ impl<'a> Iterator for SaslMechanisms<'a> {
     }
 }
 
+#[cfg(feature = "password-auth")]
 #[derive(Debug)]
 pub struct AuthenticationSaslContinue {
     pub salt: Vec<u8>,
@@ -131,6 +168,7 @@ pub struct AuthenticationSaslContinue {
     pub message: String,
 }
 
+#[cfg(feature = "password-auth")]
 impl ProtocolDecode<'_> for AuthenticationSaslContinue {
     fn decode_with(buf: Bytes, _: ()) -> Result<Self, Error> {
         let mut iterations: u32 = 4096;
@@ -170,11 +208,13 @@ impl ProtocolDecode<'_> for AuthenticationSaslContinue {
     }
 }
 
+#[cfg(feature = "password-auth")]
 #[derive(Debug)]
 pub struct AuthenticationSaslFinal {
     pub verifier: Vec<u8>,
 }
 
+#[cfg(feature = "password-auth")]
 impl ProtocolDecode<'_> for AuthenticationSaslFinal {
     fn decode_with(buf: Bytes, _: ()) -> Result<Self, Error> {
         let mut verifier = Vec::new();

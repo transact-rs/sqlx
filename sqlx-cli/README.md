@@ -12,7 +12,7 @@ mode with `sqlx::query!()` and friends.
 $ cargo install sqlx-cli
 
 # only for postgres
-$ cargo install sqlx-cli --no-default-features --features native-tls,postgres
+$ cargo install sqlx-cli --no-default-features --features native-tls,postgres,postgres-password-auth
 
 # use vendored OpenSSL (build from source)
 $ cargo install sqlx-cli --features openssl-vendored
@@ -29,6 +29,9 @@ $ cargo install sqlx-cli --features mysql-rsa
 
 Add `mysql-rsa` only for non-TLS MySQL/MariaDB connections that use
 `caching_sha2_password` or `sha256_password`. If you use TLS, it is not needed.
+
+Add `postgres-password-auth` when a PostgreSQL server uses cleartext, MD5, or
+SCRAM password authentication. It is enabled by the SQLx CLI's default features.
 
 ## Usage
 

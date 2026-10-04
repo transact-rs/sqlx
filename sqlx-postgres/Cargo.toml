@@ -10,6 +10,8 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
+default = ["password-auth"]
+password-auth = ["dep:base64", "dep:hmac", "dep:md-5", "dep:rand", "dep:stringprep"]
 any = ["sqlx-core/any"]
 json = ["dep:serde", "dep:serde_json", "sqlx-core/json"]
 migrate = ["sqlx-core/migrate", "dep:crc"]
@@ -34,11 +36,12 @@ futures-util = { version = "0.3.32", default-features = false, features = ["allo
 
 # Cryptographic Primitives
 crc = { workspace = true, optional = true }
+# HKDF-SHA-256 is also used by `PgAdvisoryLock::new()`, independently of password auth.
 hkdf = { workspace = true }
-hmac = { workspace = true }
-md-5 = { workspace = true }
-rand = { workspace = true }
 sha2 = { workspace = true }
+hmac = { workspace = true, optional = true }
+md-5 = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
 
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
 bigdecimal = { workspace = true, optional = true }
@@ -53,7 +56,7 @@ uuid = { workspace = true, optional = true }
 
 # Misc
 atoi = "2.0"
-base64.workspace = true
+base64 = { workspace = true, optional = true }
 bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
 hex = "0.4.3"
@@ -62,7 +65,7 @@ log = "0.4.18"
 memchr = { version = "2.5.0", default-features = false }
 num-bigint = { version = "0.4.3", optional = true }
 smallvec = { version = "1.13.1" }
-stringprep = "0.1.2"
+stringprep = { version = "0.1.2", optional = true }
 tracing = { version = "0.1.37", features = ["log"] }
 whoami = { version = "2.0.2", features = ["std"], default-features = false }
 
@@ -79,7 +82,8 @@ workspace = true
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
 # workspace = true
 path = ".."
-features = ["postgres", "derive"]
+default-features = false
+features = ["postgres", "macros"]
 
 [target.'cfg(target_os = "windows")'.dependencies]
 etcetera = "0.11.0"

@@ -1,11 +1,15 @@
 use crate::HashMap;
 
 use crate::common::StatementCache;
-use crate::connection::{sasl, stream::PgStream};
+#[cfg(feature = "password-auth")]
+use crate::connection::sasl;
+use crate::connection::stream::PgStream;
 use crate::error::Error;
 use crate::io::StatementId;
+#[cfg(feature = "password-auth")]
+use crate::message::Password;
 use crate::message::{
-    Authentication, BackendKeyData, BackendMessageFormat, Password, ReadyForQuery, Startup,
+    Authentication, BackendKeyData, BackendMessageFormat, ReadyForQuery, Startup,
 };
 use crate::{PgConnectOptions, PgConnection};
 
@@ -71,6 +75,20 @@ impl PgConnection {
                         // do nothing; no more information is required to continue
                     }
 
+                    #[cfg(not(feature = "password-auth"))]
+                    Authentication::CleartextPassword
+                    | Authentication::Md5Password
+                    | Authentication::Sasl => {
+                        return Err(Error::Configuration(
+                            "PostgreSQL password authentication is disabled; enable feature \
+                             `postgres-password-auth` (or `password-auth` if using \
+                             `sqlx-postgres` directly), or use a non-password authentication \
+                             method."
+                                .into(),
+                        ));
+                    }
+
+                    #[cfg(feature = "password-auth")]
                     Authentication::CleartextPassword => {
                         // The frontend must now send a [PasswordMessage] containing the
                         // password in clear-text form.
@@ -82,6 +100,7 @@ impl PgConnection {
                             .await?;
                     }
 
+                    #[cfg(feature = "password-auth")]
                     Authentication::Md5Password(body) => {
                         // The frontend must now send a [PasswordMessage] containing the
                         // password (with user name) encrypted via MD5, then encrypted again
@@ -97,6 +116,7 @@ impl PgConnection {
                             .await?;
                     }
 
+                    #[cfg(feature = "password-auth")]
                     Authentication::Sasl(body) => {
                         sasl::authenticate(&mut stream, options, body).await?;
                     }
