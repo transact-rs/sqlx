@@ -206,7 +206,7 @@ async fn skip_reversible_migrations() {
             .success();
         assert_eq!(db.applied_migrations().await, vec![20230101000000]);
 
-        // Skip to to non-existent version.
+        // Skip to non-existent version.
         db.run_migration(MigrateCommand::Skip, Some(20230901000000999), false)
             .failure();
         assert_eq!(db.applied_migrations().await, vec![20230101000000]);
