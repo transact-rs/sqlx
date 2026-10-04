@@ -37,7 +37,9 @@ impl TestSupport for MySql {
     }
 
     async fn cleanup_test_dbs() -> Result<Option<usize>, Error> {
-        let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        let url = dotenvy::var("DATABASE_URL_TEST")
+        .or_else(|_| dotenvy::var("DATABASE_URL"))
+        .expect("DATABASE_URL_TEST or DATABASE_URL must be set");
 
         let mut conn = MySqlConnection::connect(&url).await?;
 
@@ -97,7 +99,9 @@ impl TestSupport for MySql {
 }
 
 async fn test_context(args: &TestArgs) -> Result<TestContext<MySql>, Error> {
-    let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let url = dotenvy::var("DATABASE_URL_TEST")
+        .or_else(|_| dotenvy::var("DATABASE_URL"))
+        .expect("DATABASE_URL_TEST or DATABASE_URL must be set");
 
     let master_opts = MySqlConnectOptions::from_str(&url).expect("failed to parse DATABASE_URL");
 
