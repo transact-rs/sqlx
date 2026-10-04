@@ -2245,14 +2245,10 @@ async fn it_can_recover_from_copy_in_invalid_params() -> anyhow::Result<()> {
     .await
 }
 
-// Regression: a future cancelled while `BEGIN`'s round trip is in flight used to leave the
-// session inside a transaction. `start_rollback` is a no-op while `transaction_depth` is
-// zero, and the depth was raised only after the await, so neither drop guard queued a
-// `ROLLBACK` -- and `return_to_pool` validates with a bare `wait_until_ready` that never
-// looks at the `ReadyForQuery` transaction-status byte, so the connection was handed to the
-// next borrower with the transaction still open.
+// Regression tests for https://github.com/transact-rs/sqlx/issues/4423 and #4393.
 #[sqlx_macros::test]
 async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<()> {
+    let mut observer = new::<Postgres>().await?;
     let pool = PgPoolOptions::new()
         .max_connections(1)
         .min_connections(0)
@@ -2263,35 +2259,81 @@ async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<
         .fetch_one(&pool)
         .await?;
 
-    // A plain `BEGIN` answers too quickly to cancel reliably; the sleep widens the same
-    // round trip so the cancellation lands inside it.
-    let cancelled = sqlx_core::rt::timeout(
-        Duration::from_millis(300),
-        pool.begin_with(AssertSqlSafe("BEGIN; SELECT pg_sleep(2);".to_string())),
-    )
-    .await;
-    assert!(cancelled.is_err(), "the begin should not have completed");
+    pool.execute("CREATE TEMPORARY TABLE sqlx_cancel_begin (id INTEGER)")
+        .await?;
 
-    // Outlast the sleep: the queued `ROLLBACK` is only flushed once the abandoned statement
-    // has answered and the connection is on its way back to the pool.
-    sqlx_core::rt::sleep(Duration::from_millis(3500)).await;
+    let lock_key = i64::from(pid);
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(lock_key)
+        .execute(&mut observer)
+        .await?;
 
-    let mut conn = new::<Postgres>().await?;
-    let state: Option<String> =
-        sqlx::query_scalar("SELECT state FROM pg_stat_activity WHERE pid = $1")
+    // Block after BEGIN, but before ReadyForQuery, and observe the server before cancelling.
+    // This must also poll `begin`, so it works on each supported runtime without spawning.
+    let begin = Box::pin(pool.begin_with(AssertSqlSafe(format!(
+        "BEGIN; SELECT pg_advisory_xact_lock({lock_key})"
+    ))));
+    let blocked = Box::pin(sqlx_core::rt::timeout(Duration::from_secs(10), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity \
+                 WHERE pid = $1 AND wait_event_type = 'Lock' AND wait_event = 'advisory')",
+            )
             .bind(pid)
-            .fetch_optional(&mut conn)
+            .fetch_one(&mut observer)
             .await?;
 
+            if blocked {
+                return Ok::<(), sqlx::Error>(());
+            }
+
+            sqlx_core::rt::sleep(Duration::from_millis(10)).await;
+        }
+    }));
+
+    match futures_util::future::select(begin, blocked).await {
+        futures_util::future::Either::Left((result, _)) => {
+            anyhow::bail!("BEGIN completed before cancellation: {result:?}");
+        }
+        futures_util::future::Either::Right((result, begin)) => {
+            drop(begin);
+            result??;
+        }
+    }
+
+    let unlocked: bool = sqlx::query_scalar("SELECT pg_advisory_unlock($1)")
+        .bind(lock_key)
+        .fetch_one(&mut observer)
+        .await?;
+    assert!(unlocked);
+
+    // Pool return must finish the rollback before the same backend is borrowed again.
+    let reused_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(reused_pid, pid, "the pooled connection should be reused");
+
+    let state: String = sqlx::query_scalar("SELECT state FROM pg_stat_activity WHERE pid = $1")
+        .bind(pid)
+        .fetch_one(&mut observer)
+        .await?;
     assert_eq!(
-        state.as_deref(),
-        Some("idle"),
+        state, "idle",
         "connection was returned to the pool still inside a transaction"
     );
 
-    // and the pooled connection is still usable
-    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
-    assert_eq!(one, 1);
+    // A later rollback must not undo writes issued outside a transaction.
+    pool.execute("INSERT INTO sqlx_cancel_begin VALUES (1)")
+        .await?;
+    pool.begin().await?.rollback().await?;
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlx_cancel_begin")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(count, 1, "the pooled write should have been autocommitted");
+
+    pool.close().await;
+    observer.close().await?;
 
     Ok(())
 }
