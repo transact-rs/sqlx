@@ -175,6 +175,11 @@ pub enum MigrateCommand {
     ///
     /// Simple migrations have just `.sql` for their extension and represent an up-migration only.
     ///
+    /// The initial contents of new migrations can be customized with template files in the
+    /// migration source directory. Use `.template.sql` for simple migrations and
+    /// `.template.up.sql` and `.template.down.sql` for reversible migrations. If the matching
+    /// template does not exist, the migration starts with the default placeholder comment.
+    ///
     /// Note that reverting a migration is **destructive** and will likely result in data loss.
     /// Reverting a migration will not restore any data discarded by commands in the up-migration.
     ///
