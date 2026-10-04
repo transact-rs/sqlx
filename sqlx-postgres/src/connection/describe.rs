@@ -186,6 +186,19 @@ impl PgConnection {
 
 fn visit_plan(plan: &Plan, outputs: &[String], nullables: &mut Vec<Option<bool>>) {
     if let Some(plan_outputs) = &plan.output {
+        // Columns from the OLD/NEW transition relations of a `RETURNING` clause
+        // (Postgres 18+) are nullable: OLD is null for a row added by `INSERT`
+        // (including `ON CONFLICT DO NOTHING`), NEW is null for one removed by `DELETE`.
+        if plan.node_type.as_deref() == Some("ModifyTable") {
+            for output in plan_outputs {
+                if output.starts_with("old.") || output.starts_with("new.") {
+                    if let Some(i) = outputs.iter().position(|o| o == output) {
+                        nullables[i] = Some(true);
+                    }
+                }
+            }
+        }
+
         // all outputs of a Full Join must be marked nullable
         // otherwise, all outputs of the inner half of an outer join must be marked nullable
         if plan.join_type.as_deref() == Some("Full")
@@ -234,6 +247,8 @@ enum Explain {
 
 #[derive(serde::Deserialize, Debug)]
 struct Plan {
+    #[serde(rename = "Node Type")]
+    node_type: Option<String>,
     #[serde(rename = "Join Type")]
     join_type: Option<String>,
     #[serde(rename = "Parent Relationship")]
@@ -299,4 +314,39 @@ fn explain_parsing() {
         matches!(utility_statement_parsed, [Explain::Other(_)]),
         "unexpected parse from {utility_statement:?}: {utility_statement_parsed:?}"
     )
+}
+
+// https://github.com/launchbadge/sqlx/issues/4332
+#[test]
+fn nullable_from_explain_returning_old() {
+    // `INSERT ... ON CONFLICT DO NOTHING RETURNING old.hash` on a NOT NULL column:
+    // `old.hash` is null for the freshly inserted row, so it must be nullable.
+    let explain = r#"[
+      {
+        "Plan": {
+          "Node Type": "ModifyTable",
+          "Operation": "Insert",
+          "Relation Name": "files",
+          "Output": ["old.hash"],
+          "Conflict Resolution": "NOTHING",
+          "Conflict Arbiter Indexes": ["files_pkey"],
+          "Plans": [
+            {
+              "Node Type": "Result",
+              "Parent Relationship": "Outer",
+              "Output": ["'\\xdeadbeef'::bytea", "NULL::bytea[]"]
+            }
+          ]
+        }
+      }
+    ]"#;
+
+    let [Explain::Plan { plan }] = &serde_json::from_str::<[Explain; 1]>(explain).unwrap() else {
+        panic!("unexpected parse from {explain:?}");
+    };
+    let outputs = plan.output.clone().unwrap();
+    let mut nullables = vec![None; outputs.len()];
+    visit_plan(plan, &outputs, &mut nullables);
+
+    assert_eq!(nullables, [Some(true)]);
 }
