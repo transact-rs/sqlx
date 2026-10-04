@@ -133,6 +133,19 @@ pub struct Config {
 
     /// Specify default options for new migrations created with `sqlx migrate add`.
     pub defaults: MigrationDefaults,
+    /// Default migrator used for tests.
+    pub default_migrator: Option<DefaultMigrator>,
+}
+
+#[derive(Debug)]
+#[cfg_attr(
+    feature = "sqlx-toml",
+    derive(serde::Deserialize),
+    serde(rename_all = "kebab-case", deny_unknown_fields, untagged)
+)]
+pub enum DefaultMigrator {
+    /// A single path to a migrator, e.g. `crate::foo::MIGRATOR`.
+    Path(String),
 }
 
 /// What to do with a `.sql` file in the migrations directory that doesn't parse as
