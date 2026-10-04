@@ -13,7 +13,7 @@ use crate::message::{
     BackendMessage, BackendMessageFormat, EncodeMessage, FrontendMessage, Notice, Notification,
     ParameterStatus, ReceivedMessage,
 };
-use crate::net::{self, BufferedSocket, Socket};
+use crate::net::{self, BufferedSocket, Socket, WithSocket};
 use crate::{PgConnectOptions, PgDatabaseError, PgSeverity};
 
 // the stream is a separate type from the connection to uphold the invariant where an instantiated
@@ -47,14 +47,27 @@ impl PgStream {
             None => net::connect_tcp(&options.host, options.port, MaybeUpgradeTls(options)).await?,
         };
 
-        let socket = socket_result?;
+        Ok(Self::from_socket(socket_result?))
+    }
 
-        Ok(Self {
+    // Like `connect`, but over a socket the caller already opened; TLS is still negotiated
+    // according to `options`.
+    pub(super) async fn connect_with_socket<S: Socket>(
+        options: &PgConnectOptions,
+        socket: S,
+    ) -> Result<Self, Error> {
+        let socket = MaybeUpgradeTls(options).with_socket(socket).await?;
+
+        Ok(Self::from_socket(socket))
+    }
+
+    fn from_socket(socket: Box<dyn Socket>) -> Self {
+        Self {
             inner: BufferedSocket::new(socket),
             notifications: None,
             parameter_statuses: BTreeMap::default(),
             server_version_num: None,
-        })
+        }
     }
 
     #[inline(always)]

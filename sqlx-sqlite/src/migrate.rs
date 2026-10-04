@@ -9,11 +9,11 @@ use crate::query::query;
 use crate::query_as::query_as;
 use crate::{Sqlite, SqliteConnectOptions, SqliteConnection, SqliteJournalMode};
 use futures_core::future::BoxFuture;
+use sqlx_core::rt::Instant;
 use sqlx_core::sql_str::AssertSqlSafe;
 use std::str::FromStr;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use std::time::Instant;
 
 pub(crate) use sqlx_core::migrate::*;
 use sqlx_core::query_scalar::query_scalar;

@@ -28,6 +28,26 @@ async fn it_connects() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "_rt-tokio")]
+#[sqlx_macros::test]
+async fn it_connects_with_socket() -> anyhow::Result<()> {
+    let options: PgConnectOptions = env::var("DATABASE_URL")?.parse()?;
+    let socket = tokio::net::TcpStream::connect((options.get_host(), options.get_port())).await?;
+
+    let mut conn = PgConnection::connect_with_socket(&options, socket).await?;
+
+    let value = sqlx::query("select 1 + 1")
+        .try_map(|row: PgRow| row.try_get::<i32, _>(0))
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(2i32, value);
+
+    conn.close().await?;
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_can_select_void() -> anyhow::Result<()> {
     let mut conn = new::<Postgres>().await?;

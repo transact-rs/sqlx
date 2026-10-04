@@ -1,5 +1,5 @@
+use crate::rt::Instant;
 use crate::{connection::LogSettings, sql_str::SqlStr};
-use std::time::Instant;
 
 // Yes these look silly. `tracing` doesn't currently support dynamic levels
 // https://github.com/tokio-rs/tracing/issues/372

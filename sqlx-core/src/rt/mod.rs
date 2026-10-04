@@ -12,6 +12,16 @@ pub mod rt_async_io;
 #[cfg(feature = "_rt-tokio")]
 pub mod rt_tokio;
 
+/// A monotonic clock reading, for measuring elapsed time.
+///
+/// This is [`std::time::Instant`], except on `wasm32-unknown-unknown`: that target has no clock of
+/// its own, so `std::time::Instant::now()` panics there, and `web-time` reads the host's clock
+/// (`performance.now()`) instead.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+pub use std::time::Instant;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub use web_time::Instant;
+
 #[derive(Debug, thiserror::Error)]
 #[error("operation timed out")]
 pub struct TimeoutError;

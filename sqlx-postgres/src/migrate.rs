@@ -1,6 +1,6 @@
+use sqlx_core::rt::Instant;
 use std::str::FromStr;
 use std::time::Duration;
-use std::time::Instant;
 
 use futures_core::future::BoxFuture;
 

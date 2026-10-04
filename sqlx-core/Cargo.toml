@@ -105,6 +105,9 @@ hashbrown = "0.16.0"
 
 thiserror.workspace = true
 
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+web-time = "1.1.0"
+
 [dev-dependencies]
 tempfile = "3.10.1"
 tokio = { version = "1.25.0", features = ["rt"] }
