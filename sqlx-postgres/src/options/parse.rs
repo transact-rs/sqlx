@@ -12,7 +12,9 @@ impl PgConnectOptions {
         if let Some(host) = url.host_str() {
             let host_decoded = percent_decode_str(host);
             options = match host_decoded.clone().next() {
-                Some(b'/') => options.socket(&*host_decoded.decode_utf8().map_err(Error::config)?),
+                Some(b'/') | Some(b'@') => {
+                    options.socket(&*host_decoded.decode_utf8().map_err(Error::config)?)
+                }
                 _ => options.host(host),
             }
         }
@@ -67,7 +69,7 @@ impl PgConnectOptions {
                 }
 
                 "host" => {
-                    if value.starts_with('/') {
+                    if value.starts_with('/') || value.starts_with('@') {
                         options = options.socket(&*value);
                     } else {
                         options = options.host(&value);
@@ -186,6 +188,14 @@ fn it_parses_socket_correctly_from_parameter() {
     let opts = PgConnectOptions::from_str(url).unwrap();
 
     assert_eq!(Some("/var/run/postgres/".into()), opts.socket);
+}
+
+#[test]
+fn it_parses_abstract_socket_correctly_from_parameter() {
+    let url = "postgres:///?host=@pgdata";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(Some("@pgdata".into()), opts.socket);
 }
 
 #[test]
