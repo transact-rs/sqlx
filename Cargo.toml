@@ -225,7 +225,7 @@ features = ["time", "net", "sync", "fs", "io-util", "rt"]
 default-features = false
 
 [dependencies]
-sqlx-core = { workspace = true, features = ["migrate"] }
+sqlx-core = { workspace = true }
 sqlx-macros = { workspace = true, optional = true }
 
 sqlx-mysql = { workspace = true, optional = true, default-features = false }
