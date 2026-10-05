@@ -186,6 +186,9 @@ pub async fn connect_tcp<Ws: WithSocket>(
     port: u16,
     with_socket: Ws,
 ) -> crate::Result<Ws::Output> {
+    // IPv6 addresses in URLs will be wrapped in brackets and the `url` crate doesn't trim those.
+    let host = host.trim_matches(&['[', ']'][..]);
+
     #[cfg(feature = "_rt-tokio")]
     if crate::rt::rt_tokio::available() {
         let socket = tokio::net::TcpStream::connect((host, port)).await?;
@@ -211,9 +214,6 @@ pub async fn connect_tcp<Ws: WithSocket>(
 async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socket> {
     use async_io::Async;
     use std::net::{IpAddr, TcpStream, ToSocketAddrs};
-
-    // IPv6 addresses in URLs will be wrapped in brackets and the `url` crate doesn't trim those.
-    let host = host.trim_matches(&['[', ']'][..]);
 
     if let Ok(addr) = host.parse::<IpAddr>() {
         let socket = Async::<TcpStream>::connect((addr, port)).await?;
@@ -295,5 +295,30 @@ pub async fn connect_uds<P: AsRef<Path>, Ws: WithSocket>(
             "Unix domain sockets are not supported on this platform",
         )
         .into())
+    }
+}
+
+#[cfg(all(test, feature = "_rt-tokio"))]
+mod tests {
+    // IPv6 hosts parsed from a URL (e.g. `postgres://user@[::1]:5432/db`) keep their brackets,
+    // because that is what `Url::host_str()` returns.
+    #[test]
+    fn connect_tcp_accepts_bracketed_ipv6_host() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let Ok(listener) = tokio::net::TcpListener::bind("[::1]:0").await else {
+                eprintln!("IPv6 loopback unavailable; skipping");
+                return;
+            };
+            let port = listener.local_addr().unwrap().port();
+
+            super::connect_tcp("[::1]", port, super::SocketIntoBox)
+                .await
+                .expect("connecting to `[::1]` should succeed");
+        });
     }
 }
