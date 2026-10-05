@@ -193,6 +193,10 @@ fn expand_derive_has_sql_type_strong_enum(
                 fn type_info() -> ::sqlx::mysql::MySqlTypeInfo {
                     ::sqlx::mysql::MySqlTypeInfo::__enum()
                 }
+
+                fn compatible(ty: &::sqlx::mysql::MySqlTypeInfo) -> ::std::primitive::bool {
+                    ty.__is_enum()
+                }
             }
         ));
     }
