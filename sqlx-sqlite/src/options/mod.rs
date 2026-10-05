@@ -228,11 +228,6 @@ impl SqliteConnectOptions {
         self
     }
 
-    /// Gets the current name of the database file.
-    pub fn get_filename(&self) -> &Path {
-        &self.filename
-    }
-
     /// Set the enforcement of [foreign key constraints](https://www.sqlite.org/pragma.html#pragma_foreign_keys).
     ///
     /// SQLx chooses to enable this by default so that foreign keys function as expected,
@@ -671,5 +666,182 @@ impl SqliteConnectOptions {
         }
 
         Ok(self)
+    }
+}
+
+impl SqliteConnectOptions {
+    /// Get the current database filename.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// # use std::path::Path;
+    /// let options = SqliteConnectOptions::new()
+    ///     .filename("data.db");
+    /// assert_eq!(options.get_filename(), Path::new("data.db"));
+    /// ```
+    pub fn get_filename(&self) -> &Path {
+        &self.filename
+    }
+
+    /// Get whether the in-memory flag is set.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .in_memory(true);
+    /// assert!(options.is_in_memory());
+    /// ```
+    pub fn is_in_memory(&self) -> bool {
+        self.in_memory
+    }
+
+    /// Get whether the database is opened in read-only mode.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .read_only(true);
+    /// assert!(options.is_read_only());
+    /// ```
+    pub fn is_read_only(&self) -> bool {
+        self.read_only
+    }
+
+    /// Get whether the database file will be created if missing.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .create_if_missing(true);
+    /// assert!(options.is_create_if_missing());
+    /// ```
+    pub fn is_create_if_missing(&self) -> bool {
+        self.create_if_missing
+    }
+
+    /// Get whether the shared cache is enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .shared_cache(true);
+    /// assert!(options.is_shared_cache());
+    /// ```
+    pub fn is_shared_cache(&self) -> bool {
+        self.shared_cache
+    }
+
+    /// Get the statement cache capacity.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .statement_cache_capacity(200);
+    /// assert_eq!(options.get_statement_cache_capacity(), 200);
+    /// ```
+    pub fn get_statement_cache_capacity(&self) -> usize {
+        self.statement_cache_capacity
+    }
+
+    /// Get the busy timeout duration.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// # use std::time::Duration;
+    /// let options = SqliteConnectOptions::new()
+    ///     .busy_timeout(Duration::from_secs(10));
+    /// assert_eq!(options.get_busy_timeout(), Duration::from_secs(10));
+    /// ```
+    pub fn get_busy_timeout(&self) -> Duration {
+        self.busy_timeout
+    }
+
+    /// Get the log settings.
+    pub fn get_log_settings(&self) -> &LogSettings {
+        &self.log_settings
+    }
+
+    /// Get whether the database is set as immutable.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .immutable(true);
+    /// assert!(options.is_immutable());
+    /// ```
+    pub fn is_immutable(&self) -> bool {
+        self.immutable
+    }
+
+    /// Get the VFS name.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .vfs("unix-none");
+    /// assert_eq!(options.get_vfs(), Some("unix-none"));
+    /// ```
+    pub fn get_vfs(&self) -> Option<&str> {
+        self.vfs.as_deref()
+    }
+
+    /// Get the command channel buffer size.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .command_buffer_size(100);
+    /// assert_eq!(options.get_command_channel_size(), 100);
+    /// ```
+    pub fn get_command_channel_size(&self) -> usize {
+        self.command_channel_size
+    }
+
+    /// Get the row channel buffer size.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .row_buffer_size(100);
+    /// assert_eq!(options.get_row_channel_size(), 100);
+    /// ```
+    pub fn get_row_channel_size(&self) -> usize {
+        self.row_channel_size
+    }
+
+    /// Get whether serialized threading mode is enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// let options = SqliteConnectOptions::new()
+    ///     .serialized(true);
+    /// assert!(options.is_serialized());
+    /// ```
+    pub fn is_serialized(&self) -> bool {
+        self.serialized
     }
 }
