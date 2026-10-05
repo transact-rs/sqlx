@@ -53,6 +53,8 @@ time = ["sqlx-macros-core/time"]
 uuid = ["sqlx-macros-core/uuid"]
 json = ["sqlx-macros-core/json"]
 
+regexp = ["sqlx-macros-core/regexp"]
+
 [dependencies]
 sqlx-core = { workspace = true, features = ["any"] }
 sqlx-macros-core = { workspace = true }
