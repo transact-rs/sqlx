@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
-use std::ops::{Deref, DerefMut};
+use std::ops::{ControlFlow, Deref, DerefMut};
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
 use crate::error::Error;
 use crate::io::MySqlBufExt;
 use crate::io::{ProtocolDecode, ProtocolEncode};
 use crate::net::{BufferedSocket, Socket};
 use crate::protocol::response::{EofPacket, ErrPacket, OkPacket, Status};
+use crate::protocol::statement::{PrepareOk, StmtClose};
 use crate::protocol::{Capabilities, Packet};
 use crate::{MySqlConnectOptions, MySqlDatabaseError};
 
@@ -18,6 +19,8 @@ pub struct MySqlStream<S = Box<dyn Socket>> {
     pub(super) capabilities: Capabilities,
     pub(crate) sequence_id: u8,
     pub(crate) waiting: VecDeque<Waiting>,
+    // statements a dropped operation left open; closed by the drain
+    pub(crate) close_pending: Vec<u32>,
     pub(crate) is_tls: bool,
 }
 
@@ -28,6 +31,21 @@ pub(crate) enum Waiting {
 
     // waiting for a row within a result set
     Row,
+
+    // waiting for (the rest of) a COM_STMT_PREPARE response
+    Prepare(PrepareProgress),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PrepareProgress {
+    // the stmt-prepare-ok header has not been read yet
+    Header,
+
+    // the header was read; this many definition and EOF packets follow
+    Tail {
+        statement_id: u32,
+        packets_left: u32,
+    },
 }
 
 impl<S: Socket> MySqlStream<S> {
@@ -54,6 +72,7 @@ impl<S: Socket> MySqlStream<S> {
 
         Self {
             waiting: VecDeque::new(),
+            close_pending: Vec::new(),
             capabilities,
             server_version: (0, 0, 0),
             sequence_id: 0,
@@ -63,11 +82,30 @@ impl<S: Socket> MySqlStream<S> {
     }
 
     pub(crate) async fn wait_until_ready(&mut self) -> Result<(), Error> {
+        // Close the statements a dropped operation left open.
+        for statement in std::mem::take(&mut self.close_pending) {
+            self.sequence_id = 0;
+            self.write_packet(StmtClose { statement })?;
+        }
+
         if !self.socket.write_buffer().is_empty() {
             self.socket.flush().await?;
         }
 
         while !self.waiting.is_empty() {
+            while matches!(self.waiting.front(), Some(Waiting::Prepare(_))) {
+                // The rest of a response a cancelled prepare left behind.
+                let (_, prepared) = self.recv_packet_tracked().await?;
+
+                // Close the statement in the poll that completed it, so a
+                // cancellation cannot lose the id.
+                if let Some(statement) = prepared {
+                    self.sequence_id = 0;
+                    self.write_packet(StmtClose { statement })?;
+                    self.socket.flush().await?;
+                }
+            }
+
             while self.waiting.front() == Some(&Waiting::Row) {
                 let packet = self.recv_packet().await?;
 
@@ -123,16 +161,37 @@ impl<S: Socket> MySqlStream<S> {
         // https://dev.mysql.com/doc/dev/mysql-server/8.0.12/page_protocol_basic_packets.html
         // https://mariadb.com/kb/en/library/0-packet/#standard-packet
 
-        let mut header: Bytes = self.socket.read(4).await?;
+        // One `try_read` takes header and payload, so a cancelled read leaves
+        // the stream at a part boundary. Payloads of 0xFFFFFF bytes or more
+        // span several parts.
+        const HEADER_LEN: usize = 4;
 
-        // cannot overflow
-        #[allow(clippy::cast_possible_truncation)]
-        let packet_size = header.get_uint_le(3) as usize;
-        let sequence_id = header.get_u8();
+        let (sequence_id, payload) = self
+            .socket
+            .try_read(|buf| {
+                if buf.len() < HEADER_LEN {
+                    return Ok(ControlFlow::Continue(HEADER_LEN));
+                }
+
+                // cannot overflow
+                #[allow(clippy::cast_possible_truncation)]
+                let packet_size = u32::from_le_bytes([buf[0], buf[1], buf[2], 0]) as usize;
+
+                let frame_len = HEADER_LEN + packet_size;
+
+                if buf.len() < frame_len {
+                    return Ok(ControlFlow::Continue(frame_len));
+                }
+
+                let mut frame = buf.split_to(frame_len);
+                let sequence_id = frame[3];
+                let payload = frame.split_off(HEADER_LEN).freeze();
+
+                Ok(ControlFlow::Break((sequence_id, payload)))
+            })
+            .await?;
 
         self.sequence_id = sequence_id.wrapping_add(1);
-
-        let payload: Bytes = self.socket.read(packet_size).await?;
 
         // TODO: packet compression
 
@@ -142,6 +201,14 @@ impl<S: Socket> MySqlStream<S> {
     // receive the next packet from the database server
     // may block (async) on more data from the server
     pub(crate) async fn recv_packet(&mut self) -> Result<Packet<Bytes>, Error> {
+        let (packet, _) = self.recv_packet_tracked().await?;
+
+        Ok(packet)
+    }
+
+    /// Like `recv_packet`, plus the statement id of a COM_STMT_PREPARE
+    /// response this packet completed.
+    async fn recv_packet_tracked(&mut self) -> Result<(Packet<Bytes>, Option<u32>), Error> {
         let payload = self.recv_packet_part().await?;
         let payload = if payload.len() < 0xFF_FF_FF {
             payload
@@ -174,7 +241,53 @@ impl<S: Socket> MySqlStream<S> {
             );
         }
 
-        Ok(Packet(payload))
+        let prepared = self.note_prepare_response_packet(&payload)?;
+
+        Ok((Packet(payload), prepared))
+    }
+
+    /// Counts the packets of a pending COM_STMT_PREPARE response and returns
+    /// its statement id once complete. Only stmt-prepare-ok says how many
+    /// packets follow, so every read path counts here.
+    fn note_prepare_response_packet(&mut self, payload: &Bytes) -> Result<Option<u32>, Error> {
+        let capabilities = self.capabilities;
+
+        let Some(Waiting::Prepare(progress)) = self.waiting.front_mut() else {
+            return Ok(None);
+        };
+
+        let (statement_id, packets_left) = match *progress {
+            PrepareProgress::Header => {
+                let ok = PrepareOk::decode_with(payload.clone(), capabilities)?;
+
+                let eof_packets = if capabilities.contains(Capabilities::DEPRECATE_EOF) {
+                    0
+                } else {
+                    u32::from(ok.params > 0) + u32::from(ok.columns > 0)
+                };
+
+                let packets_left = u32::from(ok.params) + u32::from(ok.columns) + eof_packets;
+
+                (ok.statement_id, packets_left)
+            }
+            PrepareProgress::Tail {
+                statement_id,
+                packets_left,
+            } => (statement_id, packets_left - 1),
+        };
+
+        if packets_left == 0 {
+            self.waiting.pop_front();
+
+            return Ok(Some(statement_id));
+        }
+
+        *progress = PrepareProgress::Tail {
+            statement_id,
+            packets_left,
+        };
+
+        Ok(None)
     }
 
     pub(crate) async fn recv<'de, T>(&mut self) -> Result<T, Error>
@@ -215,6 +328,7 @@ impl<S: Socket> MySqlStream<S> {
             capabilities: self.capabilities,
             sequence_id: self.sequence_id,
             waiting: self.waiting,
+            close_pending: self.close_pending,
             is_tls: self.is_tls,
         }
     }
