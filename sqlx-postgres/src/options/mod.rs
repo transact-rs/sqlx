@@ -70,7 +70,9 @@ impl PgConnectOptions {
         let host = var("PGHOSTADDR")
             .ok()
             .or_else(|| var("PGHOST").ok())
-            .unwrap_or_else(|| default_host(port));
+            .unwrap_or_else(|| "localhost".into());
+
+        let socket = default_socket(port);
 
         let username = if let Ok(username) = var("PGUSER") {
             username
@@ -86,7 +88,7 @@ impl PgConnectOptions {
         PgConnectOptions {
             port,
             host,
-            socket: None,
+            socket,
             username,
             password: var("PGPASSWORD").ok(),
             database,
@@ -603,7 +605,7 @@ impl PgConnectOptions {
     }
 }
 
-fn default_host(port: u16) -> String {
+fn default_socket(port: u16) -> Option<PathBuf> {
     // try to check for the existence of a unix socket and uses that
     let socket = format!(".s.PGSQL.{port}");
     let candidates = [
@@ -614,12 +616,11 @@ fn default_host(port: u16) -> String {
 
     for candidate in &candidates {
         if Path::new(candidate).join(&socket).exists() {
-            return candidate.to_string();
+            return Some(PathBuf::from(candidate));
         }
     }
 
-    // fallback to localhost if no socket was found
-    "localhost".to_owned()
+    None
 }
 
 /// Writer that escapes passed-in PostgreSQL options.

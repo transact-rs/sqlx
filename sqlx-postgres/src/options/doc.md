@@ -60,6 +60,7 @@ postgresql://user@localhost
 postgresql://user:secret@localhost
 postgresql://user:correct%20horse%20battery%20staple@localhost
 postgresql://localhost?dbname=mydb&user=postgres&password=postgres
+postgresql:///mydb
 ```
 
 See also [Note: Unix Domain Sockets](#note-unix-domain-sockets) below.
@@ -134,8 +135,9 @@ The general recommendation is to store timestamps as `TIMESTAMP WITH TIME ZONE`
 and to keep all application logic in UTC.
 
 # Note: Unix Domain Sockets
-If you want to connect to Postgres over a Unix domain socket, you can pass the path
-to the _directory_ containing the socket as the `host` parameter.
+If you want to connect to Postgres over a Unix domain socket, you can either pass the path
+to the _directory_ containing the socket as the `host` parameter, or leave the host part of the URL empty.
+When the host part is omitted, the standard Unix socket directory is used.
 
 The final path to the socket will be `{host}/.s.PGSQL.{port}` as is standard for Postgres.
 
