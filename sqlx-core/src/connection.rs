@@ -179,6 +179,29 @@ pub trait Connection: Send {
         async move { Self::connect_with(&options?).await }
     }
 
+    /// UNSTABLE: for use with `sqlx-macros-core`
+    ///
+    /// Establish a new database connection.
+    ///
+    /// A value of [`Options`][Self::Options] is first parsed from the provided connection string.
+    /// This parsing is database-specific.
+    /// The option then gets updated with options from the sqlx.toml file as appropriate.
+    #[doc(hidden)]
+    #[inline]
+    fn connect_with_driver_config(
+        url: &str,
+        driver_config: &config::drivers::Config,
+    ) -> impl Future<Output = Result<Self, Error>> + Send + 'static
+    where
+        Self: Sized,
+    {
+        let options = url
+            .parse::<Self::Options>()
+            .and_then(|options| options.__unstable_apply_driver_config(driver_config));
+
+        async move { Self::connect_with(&options?).await }
+    }
+
     /// Establish a new database connection with the provided options.
     fn connect_with(
         options: &Self::Options,

@@ -62,7 +62,7 @@ impl<DB: DatabaseExt> CachingDescribeBlocking<DB> {
         &self,
         query: &str,
         database_url: &str,
-        _driver_config: &config::drivers::Config,
+        driver_config: &config::drivers::Config,
     ) -> sqlx_core::Result<Describe<DB>>
     where
         for<'a> &'a mut DB::Connection: Executor<'a, Database = DB>,
@@ -76,7 +76,10 @@ impl<DB: DatabaseExt> CachingDescribeBlocking<DB> {
             let conn = match cache.entry(database_url.to_string()) {
                 hash_map::Entry::Occupied(hit) => hit.into_mut(),
                 hash_map::Entry::Vacant(miss) => {
-                    let conn = miss.insert(DB::Connection::connect(database_url).await?);
+                    let conn = miss.insert(
+                        DB::Connection::connect_with_driver_config(database_url, driver_config)
+                            .await?,
+                    );
                     DB::prepare_describe_connection(conn).await?;
                     conn
                 }
