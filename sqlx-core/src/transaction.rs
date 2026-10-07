@@ -274,6 +274,11 @@ where
             // operation that will happen on the next asynchronous invocation of the underlying
             // connection (including if the connection is returned to a pool)
 
+            tracing::debug!(
+                target: "sqlx::transaction",
+                "transaction dropped without explicit commit/rollback; queueing implicit rollback",
+            );
+
             DB::TransactionManager::start_rollback(&mut self.connection);
         }
     }

@@ -16,10 +16,23 @@ use futures_core::stream::BoxStream;
 use futures_core::Stream;
 use futures_util::TryStreamExt;
 use sqlx_core::arguments::Arguments;
+use sqlx_core::instrument_stream::InstrumentStream;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
 use std::{pin::pin, sync::Arc};
+use tracing::Instrument;
 
+#[tracing::instrument(
+    target = "sqlx::prepare",
+    name = "postgres.prepare",
+    skip_all,
+    fields(
+        db.system = "postgresql",
+        db.operation.parameters = arg_types.len(),
+        db.postgresql.persistent = persistent,
+    ),
+    level = "debug",
+)]
 async fn prepare(
     conn: &mut PgConnection,
     sql: &str,
@@ -170,8 +183,11 @@ impl PgConnection {
         resolve_column_origin: bool,
     ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
         if let Some(statement) = self.inner.cache_statement.get_mut(sql) {
+            tracing::trace!(target: "sqlx::prepare", "prepared statement cache hit");
             return Ok((*statement).clone());
         }
+
+        tracing::trace!(target: "sqlx::prepare", "prepared statement cache miss");
 
         let statement = prepare(
             self,
@@ -298,49 +314,74 @@ impl PgConnection {
         persistent: bool,
         metadata_opt: Option<Arc<PgStatementMetadata>>,
     ) -> Result<impl Stream<Item = Result<Either<PgQueryResult, PgRow>, Error>> + 'e, Error> {
+        // The span is attached to the returned stream (see `instrument_stream`)
+        // rather than via `#[tracing::instrument]` so it stays open while rows
+        // are fetched, not just while the query is set up. The setup below,
+        // including a stale-plan retry, runs inside the same span.
+        let span = tracing::debug_span!(
+            target: "sqlx::query",
+            "postgres.run",
+            db.system = "postgresql",
+            db.operation.parameters = arguments.as_ref().map_or(0, |a| a.len()),
+            db.postgresql.prepared = arguments.is_some(),
+        );
+
         let mut logger = QueryLogger::new(query, self.inner.log_settings.clone());
         let sql = logger.sql().as_str();
 
-        // before we continue, wait until we are "ready" to accept more queries
-        self.wait_until_ready().await?;
+        let (format, mut metadata, mut message) = async {
+            // before we continue, wait until we are "ready" to accept more queries
+            self.wait_until_ready().await?;
 
-        let (mut format, mut metadata) = self
-            .try_get_or_prepare(sql, arguments.as_mut(), persistent, metadata_opt.clone())
-            .await?;
+            let (mut format, mut metadata) = self
+                .try_get_or_prepare(sql, arguments.as_mut(), persistent, metadata_opt.clone())
+                .await?;
 
-        let mut message = match self.inner.stream.recv().await {
-            Ok(msg) => msg,
-            Err(err) => {
-                if let Some(clear_backend_cache) = check_stale_plan(&err) {
-                    // Save transaction mode. It will be lost after invalidating
-                    let is_in_tx = self.in_transaction();
+            let message = match self.inner.stream.recv().await {
+                Ok(msg) => msg,
+                Err(err) => {
+                    if let Some(clear_backend_cache) = check_stale_plan(&err) {
+                        // Save transaction mode. It will be lost after invalidating
+                        let is_in_tx = self.in_transaction();
 
-                    self.invalidate_cached_statement(sql, clear_backend_cache)
-                        .await?;
+                        tracing::debug!(
+                            target: "sqlx::query",
+                            clear_backend_cache,
+                            retry = !is_in_tx,
+                            "stale cached plan"
+                        );
 
-                    // If we were in transaction mode we can't retry statement,
-                    //    so we can immediately return err
-                    if is_in_tx {
+                        self.invalidate_cached_statement(sql, clear_backend_cache)
+                            .await?;
+
+                        // If we were in transaction mode we can't retry statement,
+                        //    so we can immediately return err
+                        if is_in_tx {
+                            return Err(err);
+                        }
+
+                        // Otherwise we can retry statement in hope everything is ok.
+                        (format, metadata) = self
+                            .try_get_or_prepare(
+                                sql,
+                                // It should be safe to retry `patch` on the same arguments
+                                arguments.as_mut(),
+                                persistent,
+                                metadata_opt.clone(),
+                            )
+                            .await?;
+
+                        self.inner.stream.recv().await?
+                    } else {
                         return Err(err);
                     }
-
-                    // Otherwise we can retry statement in hope everything is ok.
-                    (format, metadata) = self
-                        .try_get_or_prepare(
-                            sql,
-                            // It should be safe to retry `patch` on the same arguments
-                            arguments.as_mut(),
-                            persistent,
-                            metadata_opt.clone(),
-                        )
-                        .await?;
-
-                    self.inner.stream.recv().await?
-                } else {
-                    return Err(err);
                 }
-            }
-        };
+            };
+
+            Ok::<_, Error>((format, metadata, message))
+        }
+        .instrument(span.clone())
+        .await?;
 
         Ok(try_stream! {
             loop {
@@ -422,7 +463,8 @@ impl PgConnection {
             }
 
             Ok(())
-        })
+        }
+        .instrument_stream(span))
     }
 }
 

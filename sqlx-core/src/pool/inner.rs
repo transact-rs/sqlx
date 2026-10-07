@@ -256,6 +256,17 @@ impl<DB: Database> PoolInner<DB> {
         }
     }
 
+    #[tracing::instrument(
+        target = "sqlx::pool::acquire",
+        name = "pool.acquire",
+        skip_all,
+        fields(
+            pool.size = self.size(),
+            pool.idle = self.num_idle(),
+            pool.max = self.options.max_connections,
+        ),
+        level = "debug",
+    )]
     pub(super) async fn acquire(self: &Arc<Self>) -> Result<Floating<DB, Live<DB>>, Error> {
         if self.is_closed() {
             return Err(Error::PoolClosed);
@@ -335,6 +346,13 @@ impl<DB: Database> PoolInner<DB> {
         Ok(acquired)
     }
 
+    #[tracing::instrument(
+        target = "sqlx::pool::connect",
+        name = "pool.connect",
+        skip_all,
+        fields(pool.size = self.size()),
+        level = "debug",
+    )]
     pub(super) async fn connect(
         self: &Arc<Self>,
         deadline: Instant,
