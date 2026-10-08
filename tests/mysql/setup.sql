@@ -23,6 +23,12 @@ CREATE TABLE products (
     price NUMERIC CHECK (price > 0)
 );
 
+-- https://github.com/transact-rs/sqlx/issues/4358
+CREATE TABLE macro_infer_year_type (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    enrollment_year YEAR NOT NULL
+);
+
 -- Create a user without a password to test passwordless auth.
 CREATE USER 'no_password'@'%';
 
