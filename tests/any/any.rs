@@ -1,5 +1,6 @@
+use futures_util::FutureExt;
 use sqlx::any::{install_default_drivers, AnyRow};
-use sqlx::{Any, Connection, Executor, Row};
+use sqlx::{Any, AnyConnection, Connection, Executor, Row};
 use sqlx_core::error::BoxDynError;
 use sqlx_core::sql_str::AssertSqlSafe;
 use sqlx_core::Error;
@@ -207,4 +208,82 @@ async fn it_can_query_by_string_args() -> sqlx::Result<()> {
     }
 
     Ok(())
+}
+
+// A nested `begin` that fails or is cancelled must leave the enclosing transaction exactly
+// as it was. `Transaction::begin` used to arm its rollback-on-drop guard before the
+// driver's `begin` ran, so a failed or dropped nested `begin` rolled back the *enclosing*
+// level instead: its earlier writes were lost, later writes ran outside any transaction,
+// and the outer `commit()` or `rollback()` sent nothing and returned `Ok`.
+async fn assert_nested_begin_leaves_outer_transaction_intact(
+    nested_begin: impl AsyncFnOnce(&mut AnyConnection),
+) -> anyhow::Result<()> {
+    install_default_drivers();
+
+    let mut conn = new::<Any>().await?;
+    conn.execute("CREATE TEMPORARY TABLE nested_begin (id INTEGER)")
+        .await?;
+
+    let mut outer = conn.begin().await?;
+    outer
+        .execute("INSERT INTO nested_begin (id) VALUES (1)")
+        .await?;
+
+    nested_begin(&mut outer).await;
+
+    outer
+        .execute("INSERT INTO nested_begin (id) VALUES (2)")
+        .await?;
+    let (inside,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nested_begin")
+        .fetch_one(&mut *outer)
+        .await?;
+    assert_eq!(
+        inside, 2,
+        "the nested begin rolled back a write the outer transaction made before it"
+    );
+
+    outer.rollback().await?;
+    let (after,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM nested_begin")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(
+        after, 0,
+        "a write made after the nested begin survived the outer transaction's rollback"
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_keeps_the_outer_transaction_when_a_nested_begin_fails() -> anyhow::Result<()> {
+    assert_nested_begin_leaves_outer_transaction_intact(async |conn: &mut AnyConnection| {
+        // A custom `BEGIN` statement is refused inside a transaction.
+        let nested = conn.begin_with("BEGIN").await;
+        assert!(
+            matches!(nested, Err(Error::InvalidSavePointStatement)),
+            "{nested:?}"
+        );
+    })
+    .await
+}
+
+#[sqlx_macros::test]
+async fn it_keeps_the_outer_transaction_when_a_nested_begin_is_cancelled() -> anyhow::Result<()> {
+    assert_nested_begin_leaves_outer_transaction_intact(async |conn: &mut AnyConnection| {
+        // The first poll sends the savepoint and waits for the database to answer, so
+        // dropping the future then cancels it partway through. A fast database can answer
+        // within that poll; undo the savepoint it completed and try again.
+        for _ in 0..100 {
+            match conn.begin().now_or_never() {
+                None => return,
+                Some(nested) => nested
+                    .expect("begin savepoint")
+                    .rollback()
+                    .await
+                    .expect("roll back savepoint"),
+            }
+        }
+        panic!("begin finished on its first poll every time; nothing was cancelled");
+    })
+    .await
 }
