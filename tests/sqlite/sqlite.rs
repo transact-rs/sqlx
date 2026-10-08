@@ -249,6 +249,24 @@ async fn it_opens_temp_on_disk() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_shares_named_in_memory_database_across_connections() -> anyhow::Result<()> {
+    let options: SqliteConnectOptions = "sqlite:it-shares-named-in-memory?mode=memory".parse()?;
+
+    let mut conn1 = options.connect().await?;
+    let mut conn2 = options.connect().await?;
+
+    conn1.execute("CREATE TABLE shared (id INTEGER)").await?;
+    conn1.execute("INSERT INTO shared VALUES (42)").await?;
+
+    let id: i64 = sqlx::query_scalar("SELECT id FROM shared")
+        .fetch_one(&mut conn2)
+        .await?;
+    assert_eq!(id, 42);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_fails_to_parse() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;
     let res = sqlx::raw_sql("SEELCT 1").execute(&mut conn).await;
