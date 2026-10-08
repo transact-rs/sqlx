@@ -16,6 +16,18 @@ fn uint_type_info(ty: ColumnType) -> MySqlTypeInfo {
     }
 }
 
+fn uint_non_year_compatible(ty: &MySqlTypeInfo) -> bool {
+    matches!(
+        ty.r#type,
+        ColumnType::Tiny
+            | ColumnType::Short
+            | ColumnType::Long
+            | ColumnType::Int24
+            | ColumnType::LongLong
+            | ColumnType::Bit
+    ) && ty.flags.contains(ColumnFlags::UNSIGNED)
+}
+
 fn uint_compatible(ty: &MySqlTypeInfo) -> bool {
     matches!(
         ty.r#type,
@@ -35,7 +47,7 @@ impl Type<MySql> for u8 {
     }
 
     fn compatible(ty: &MySqlTypeInfo) -> bool {
-        uint_compatible(ty)
+        uint_non_year_compatible(ty)
     }
 }
 
