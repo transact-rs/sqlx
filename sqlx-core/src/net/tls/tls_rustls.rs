@@ -67,7 +67,21 @@ impl<S: Socket> Socket for RustlsSocket<S> {
     }
 
     fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.poll_complete_io(cx)
+        // Only write out the pending TLS records: once nothing is left to write,
+        // `poll_complete_io()` reads and waits for the peer to send something,
+        // so a close (which flushes first) would hang if the peer has nothing more to say.
+        while self.state.wants_write() {
+            match self.state.write_tls(&mut self.inner) {
+                // The transport accepts no more; `complete_io()` treats this as EOF too.
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    ready!(self.inner.poll_ready(cx))?;
+                }
+                Err(e) => return Poll::Ready(Err(e)),
+            }
+        }
+        Poll::Ready(self.inner.flush())
     }
 
     fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
