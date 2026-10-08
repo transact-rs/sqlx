@@ -22,6 +22,11 @@ pub trait TransactionManager {
     ///
     /// If we are already inside a transaction and `statement.is_some()`, then
     /// `Error::InvalidSavePoint` is returned without running any statements.
+    ///
+    /// If this future returns an error or is dropped before it completes, it must undo
+    /// whatever it started and leave the transaction depth where it found it. The caller
+    /// does not roll back on its behalf: at a nonzero depth, a second rollback would end
+    /// the enclosing transaction or savepoint.
     fn begin(
         conn: &mut <Self::Database as Database>::Connection,
         statement: Option<SqlStr>,
@@ -106,11 +111,14 @@ where
             let mut tx = Self {
                 connection: conn,
 
-                // If the call to `begin` fails or doesn't complete we want to attempt a rollback in case the transaction was started.
-                open: true,
+                // `TransactionManager::begin` undoes its own work if it fails or is dropped.
+                // Rolling back here too would end the *enclosing* level when this is a
+                // savepoint, so arm the guard only once `begin` has succeeded.
+                open: false,
             };
 
             DB::TransactionManager::begin(&mut tx.connection, statement).await?;
+            tx.open = true;
 
             Ok(tx)
         })
