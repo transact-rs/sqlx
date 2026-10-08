@@ -450,6 +450,11 @@ path = "tests/postgres/derives.rs"
 required-features = ["postgres", "macros"]
 
 [[test]]
+name = "postgres-oauth"
+path = "tests/postgres/oauth.rs"
+required-features = ["postgres", "macros"]
+
+[[test]]
 name = "postgres-error"
 path = "tests/postgres/error.rs"
 required-features = ["postgres"]
