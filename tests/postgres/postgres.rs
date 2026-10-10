@@ -1788,6 +1788,50 @@ async fn it_can_copy_out() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_can_reuse_connection_after_cancelled_copy_out() -> anyhow::Result<()> {
+    use sqlx::postgres::PgPoolCopyExt;
+    use sqlx_core::rt::timeout;
+
+    let mut setup = new::<Postgres>().await?;
+    setup
+        .execute("CREATE TABLE IF NOT EXISTS _sqlx_copy_out_cancel (id INT)")
+        .await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    let mut lock = setup.begin().await?;
+    lock.execute("LOCK TABLE _sqlx_copy_out_cancel IN ACCESS EXCLUSIVE MODE")
+        .await?;
+
+    let copy = async {
+        let mut stream = pool
+            .copy_out_raw("COPY (SELECT id FROM _sqlx_copy_out_cancel) TO STDOUT")
+            .await?;
+        while stream.try_next().await?.is_some() {}
+        Ok::<_, sqlx::Error>(())
+    };
+    assert!(
+        timeout(Duration::from_millis(200), copy).await.is_err(),
+        "COPY should time out while the table is locked"
+    );
+
+    lock.commit().await?;
+
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
+    assert_eq!(one, 1);
+
+    let mut stream = pool
+        .copy_out_raw("COPY (SELECT id FROM _sqlx_copy_out_cancel) TO STDOUT")
+        .await?;
+    while stream.try_next().await?.is_some() {}
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_encodes_custom_array_issue_1504() -> anyhow::Result<()> {
     use sqlx::encode::IsNull;
     use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo};
