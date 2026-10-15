@@ -175,6 +175,7 @@ be removed in the future.
 -   `tls-rustls-aws-lc-rs`: Use the `rustls` TLS backend with `aws-lc-rs`.
 
 -   `postgres`: Add support for the Postgres database server.
+-   `postgres-password-auth`: Enable PostgreSQL cleartext, MD5, and SCRAM password authentication. Enabled by default; builds that disable default features must opt in when using password authentication.
 
 -   `mysql`: Add support for the MySQL/MariaDB database server.
 -   Note: RSA auth without TLS requires `mysql-rsa` (not enabled by `mysql`).

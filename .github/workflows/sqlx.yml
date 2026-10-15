@@ -275,7 +275,7 @@ jobs:
         run: >
           cargo build 
           --no-default-features
-          --features postgres,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }},macros,migrate
+          --features postgres,postgres-password-auth,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }},macros,migrate
 
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
@@ -293,7 +293,7 @@ jobs:
           done
           cargo test \
             --no-default-features \
-            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --features any,postgres,postgres-password-auth,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
             -- \
             "${SKIP_ARGS[@]}"
         env:
@@ -309,7 +309,7 @@ jobs:
           done
           cargo test \
             --no-default-features \
-            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --features any,postgres,postgres-password-auth,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
             -- \
             "${SKIP_ARGS[@]}"
         env:
@@ -322,7 +322,7 @@ jobs:
           cargo test
           --test postgres-test-attr
           --no-default-features
-          --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+          --features any,postgres,postgres-password-auth,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           SQLX_OFFLINE_DIR: .sqlx
@@ -336,7 +336,7 @@ jobs:
           done
           cargo test \
             --no-default-features \
-            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --features any,postgres,postgres-password-auth,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
             -- \
             "${SKIP_ARGS[@]}"
         env:
@@ -352,7 +352,7 @@ jobs:
           cargo build
           --no-default-features
           --test postgres-macros
-          --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+          --features any,postgres,postgres-password-auth,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           SQLX_OFFLINE: true
           SQLX_OFFLINE_DIR: .sqlx
@@ -363,7 +363,7 @@ jobs:
           cargo test
           --no-default-features
           --test postgres-macros
-          --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+          --features any,postgres,postgres-password-auth,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
         env:
           DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
           SQLX_OFFLINE: true
@@ -430,7 +430,7 @@ jobs:
           for test in $PG_ISOLATED_TESTS; do
             cargo test \
               --no-default-features \
-              --features any,postgres,macros,_unstable-all-types,runtime-tokio,tls-none \
+              --features any,postgres,postgres-password-auth,macros,_unstable-all-types,runtime-tokio,tls-none \
               --test postgres \
               -- \
               --exact "$test" \

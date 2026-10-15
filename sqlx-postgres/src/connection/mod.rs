@@ -28,6 +28,7 @@ mod describe;
 mod establish;
 mod executor;
 mod resolve;
+#[cfg(feature = "password-auth")]
 mod sasl;
 mod stream;
 mod tls;

@@ -35,6 +35,8 @@ sqlx-toml = ["sqlx-core/sqlx-toml", "sqlx-sqlite?/sqlx-toml"]
 mysql = ["sqlx-mysql"]
 mysql-rsa = ["mysql", "sqlx-mysql/rsa"]
 postgres = ["sqlx-postgres"]
+# Keep this weak so password auth does not enable the optional PostgreSQL driver by itself.
+postgres-password-auth = ["sqlx-postgres?/password-auth"]
 sqlite = ["_sqlite", "sqlx-sqlite/bundled"]
 sqlite-unbundled = ["_sqlite", "sqlx-sqlite/unbundled"]
 
@@ -57,7 +59,7 @@ uuid = ["sqlx-core/uuid", "sqlx-mysql?/uuid", "sqlx-postgres?/uuid", "sqlx-sqlit
 [dependencies]
 sqlx-core = { workspace = true, features = ["offline"] }
 sqlx-mysql = { workspace = true, features = ["offline", "migrate"], optional = true, default-features = false }
-sqlx-postgres = { workspace = true, features = ["offline", "migrate"], optional = true }
+sqlx-postgres = { workspace = true, features = ["offline", "migrate"], optional = true, default-features = false }
 sqlx-sqlite = { workspace = true, features = ["offline", "migrate"], optional = true }
 
 async-global-executor = { workspace = true, optional = true }

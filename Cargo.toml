@@ -61,7 +61,7 @@ features = ["_unstable-docs"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["any", "macros", "migrate", "json"]
+default = ["any", "macros", "migrate", "json", "postgres-password-auth"]
 
 derive = ["sqlx-macros/derive"]
 macros = ["derive", "sqlx-macros/macros", "sqlx-core/offline", "sqlx-mysql?/offline", "sqlx-postgres?/offline", "sqlx-sqlite?/offline"]
@@ -120,6 +120,8 @@ _sqlite = []
 # database
 any = ["sqlx-core/any", "sqlx-mysql?/any", "sqlx-postgres?/any", "sqlx-sqlite?/any"]
 postgres = ["sqlx-postgres", "sqlx-macros?/postgres"]
+# Keep these dependency features weak so the default does not enable PostgreSQL by itself.
+postgres-password-auth = ["sqlx-postgres?/password-auth", "sqlx-macros?/postgres-password-auth"]
 mysql = ["sqlx-mysql", "sqlx-macros?/mysql"]
 mysql-rsa = ["mysql", "sqlx-mysql/rsa", "sqlx-macros?/mysql-rsa"]
 sqlite = ["sqlite-bundled", "sqlite-deserialize", "sqlite-load-extension", "sqlite-unlock-notify"]
@@ -171,7 +173,7 @@ sqlx-macros = { version = "=0.9.0", path = "sqlx-macros" }
 
 # Driver crates
 sqlx-mysql = { version = "=0.9.0", path = "sqlx-mysql", default-features = false }
-sqlx-postgres = { version = "=0.9.0", path = "sqlx-postgres" }
+sqlx-postgres = { version = "=0.9.0", path = "sqlx-postgres", default-features = false }
 sqlx-sqlite = { version = "=0.9.0", path = "sqlx-sqlite" }
 
 # Facade crate (for reference from sqlx-cli)
@@ -229,7 +231,7 @@ sqlx-core = { workspace = true, features = ["migrate"] }
 sqlx-macros = { workspace = true, optional = true }
 
 sqlx-mysql = { workspace = true, optional = true, default-features = false }
-sqlx-postgres = { workspace = true, optional = true }
+sqlx-postgres = { workspace = true, optional = true, default-features = false }
 sqlx-sqlite = { workspace = true, optional = true }
 
 [dev-dependencies]
