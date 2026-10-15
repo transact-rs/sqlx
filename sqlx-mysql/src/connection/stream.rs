@@ -33,7 +33,6 @@ pub(crate) enum Waiting {
 impl<S: Socket> MySqlStream<S> {
     pub(crate) fn with_socket(options: &MySqlConnectOptions, socket: S) -> Self {
         let mut capabilities = Capabilities::PROTOCOL_41
-            | Capabilities::IGNORE_SPACE
             | Capabilities::DEPRECATE_EOF
             | Capabilities::TRANSACTIONS
             | Capabilities::SECURE_CONNECTION
@@ -50,6 +49,10 @@ impl<S: Socket> MySqlStream<S> {
 
         if options.found_rows {
             capabilities |= Capabilities::FOUND_ROWS;
+        }
+
+        if options.ignore_space {
+            capabilities |= Capabilities::IGNORE_SPACE;
         }
 
         Self {

@@ -779,3 +779,46 @@ async fn test_client_found_rows() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn test_client_ignore_space() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let url = url::Url::parse(&env::var("DATABASE_URL")?)?;
+    let ignore_space_mode = "SELECT FIND_IN_SET('IGNORE_SPACE', @@SESSION.sql_mode) > 0";
+    let spaced_call = "SELECT COUNT (*) FROM (SELECT 1) AS t";
+
+    // CLIENT_IGNORE_SPACE unspecified = true by default.
+    let mut conn = MySqlConnectOptions::from_url(&url)?.connect().await?;
+
+    let enabled: i64 = sqlx::query_scalar(ignore_space_mode)
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(enabled, 1);
+
+    let count: i64 = sqlx::query_scalar(spaced_call).fetch_one(&mut conn).await?;
+    assert_eq!(count, 1);
+
+    conn.close().await?;
+
+    // Explicitly unset CLIENT_IGNORE_SPACE.
+    let mut conn = MySqlConnectOptions::from_url(&url)?
+        .ignore_space(false)
+        .connect()
+        .await?;
+
+    let enabled: i64 = sqlx::query_scalar(ignore_space_mode)
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(enabled, 0);
+
+    // Without IGNORE_SPACE, a space after a built-in function name is a syntax error.
+    let result = sqlx::query_scalar::<_, i64>(spaced_call)
+        .fetch_one(&mut conn)
+        .await;
+    assert!(result.is_err());
+
+    conn.close().await?;
+
+    Ok(())
+}
