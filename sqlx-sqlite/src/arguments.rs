@@ -83,12 +83,21 @@ impl SqliteArguments {
                     atoi(name.as_bytes()).expect("parameter of the form ?NNN")
                 } else if let Some(name) = name.strip_prefix('$') {
                     // parameter should have the form $NNN
-                    atoi(name.as_bytes()).ok_or_else(|| {
+                    let n = atoi(name.as_bytes()).ok_or_else(|| {
                         err_protocol!(
                             "parameters with non-integer names are not currently supported: {}",
                             name
                         )
-                    })?
+                    })?;
+
+                    if n == 0 {
+                        return Err(err_protocol!(
+                            "invalid parameter index: ${} (SQLite parameter indices start at 1)",
+                            name
+                        ));
+                    }
+
+                    n
                 } else {
                     return Err(err_protocol!("unsupported SQL parameter format: {}", name));
                 }

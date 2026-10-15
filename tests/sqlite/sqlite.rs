@@ -314,6 +314,29 @@ async fn it_binds_dollar_parameters() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_rejects_dollar_zero_parameter() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    let res = sqlx::query("SELECT $0")
+        .bind(10_i32)
+        .fetch_one(&mut conn)
+        .await;
+
+    let err = res.unwrap_err();
+    let sqlx::Error::Protocol(msg) = err else {
+        panic!("expected a protocol error, got {err:?}");
+    };
+    assert!(
+        msg.starts_with("invalid parameter index: $0 (SQLite parameter indices start at 1)"),
+        "{msg}"
+    );
+
+    conn.ping().await?;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_executes_queries() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;
 
