@@ -91,7 +91,12 @@ impl EstablishParams {
             query_params.insert("vfs", vfs);
         }
 
-        if !query_params.is_empty() {
+        // SQLite shares a named in-memory database between connections only when the name is
+        // passed as a `file:` URI.
+        let named_in_memory =
+            options.in_memory && !filename.is_empty() && !filename.starts_with("file:");
+
+        if named_in_memory || !query_params.is_empty() {
             filename = format!(
                 "file:{}?",
                 percent_encoding::percent_encode(filename.as_bytes(), NON_ALPHANUMERIC),
