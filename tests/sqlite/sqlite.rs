@@ -1396,6 +1396,48 @@ async fn it_can_recover_from_bad_transaction_begin() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[sqlx_macros::test]
+async fn it_can_begin_after_sqlite_rolls_back_a_full_transaction() -> anyhow::Result<()> {
+    let mut conn = SqliteConnectOptions::new()
+        .in_memory(true)
+        .connect()
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE t (data BLOB)")
+        .execute(&mut conn)
+        .await?;
+    sqlx::query("PRAGMA max_page_count = 2")
+        .execute(&mut conn)
+        .await?;
+
+    // SQLITE_FULL makes SQLite roll back the whole transaction on its own.
+    let mut tx = conn.begin().await?;
+    let err = sqlx::query("INSERT INTO t VALUES (zeroblob(65536))")
+        .execute(&mut *tx)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("full"), "{err}");
+    drop(tx);
+
+    sqlx::query("PRAGMA max_page_count = 1000")
+        .execute(&mut conn)
+        .await?;
+
+    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
+    sqlx::query("INSERT INTO t VALUES (zeroblob(65536))")
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM t")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(count, 1);
+
+    Ok(())
+}
+
 fn transaction_state(handle: &mut LockedSqliteHandle) -> SqliteTransactionState {
     use libsqlite3_sys::{sqlite3_txn_state, SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE};
 
