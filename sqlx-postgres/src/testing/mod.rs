@@ -38,8 +38,9 @@ impl TestSupport for Postgres {
         do_cleanup(&mut conn, db_name).await
     }
 
-    async fn cleanup_test_dbs() -> Result<Option<usize>, Error> {
-        let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    async fn cleanup_test_dbs(database_url_var: &str) -> Result<Option<usize>, Error> {
+        let url = dotenvy::var(database_url_var)
+            .unwrap_or_else(|_| panic!("{database_url_var} must be set"));
 
         let mut conn = PgConnection::connect(&url).await?;
 
@@ -90,9 +91,12 @@ impl TestSupport for Postgres {
 }
 
 async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
-    let url = dotenvy::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let database_url_var = args.database_url_var;
+    let url =
+        dotenvy::var(database_url_var).unwrap_or_else(|_| panic!("{database_url_var} must be set"));
 
-    let master_opts = PgConnectOptions::from_str(&url).expect("failed to parse DATABASE_URL");
+    let master_opts = PgConnectOptions::from_str(&url)
+        .unwrap_or_else(|e| panic!("failed to parse {database_url_var}: {e}"));
 
     let pool = PoolOptions::new()
         // Postgres' normal connection limit is 100 plus 3 superuser connections
@@ -110,13 +114,13 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Postgres>, Error> {
             assert_eq!(
                 existing.connect_options().host,
                 pool.connect_options().host,
-                "DATABASE_URL changed at runtime, host differs"
+                "{database_url_var} changed at runtime, host differs"
             );
 
             assert_eq!(
                 existing.connect_options().database,
                 pool.connect_options().database,
-                "DATABASE_URL changed at runtime, database differs"
+                "{database_url_var} changed at runtime, database differs"
             );
 
             existing
