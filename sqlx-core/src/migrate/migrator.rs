@@ -224,6 +224,17 @@ impl Migrator {
 
     // Getting around the annoying "implementation of `Acquire` is not general enough" error
     #[doc(hidden)]
+    #[tracing::instrument(
+        target = "sqlx::migrate",
+        name = "migrate.run",
+        skip_all,
+        fields(
+            migrate.target = target,
+            migrate.skip = skip,
+            migrate.table = %self.table_name,
+            migrate.known = self.migrations.len(),
+        ),
+    )]
     pub async fn run_direct<C>(
         &self,
         target: Option<i64>,
@@ -235,6 +246,7 @@ impl Migrator {
     {
         // lock the database for exclusive access by the migrator
         if self.locking {
+            tracing::debug!(target: "sqlx::migrate", "acquiring migration lock");
             conn.lock().await?;
         }
 
@@ -277,8 +289,21 @@ impl Migrator {
                 }
                 None => {
                     if skip {
+                        tracing::info!(
+                            target: "sqlx::migrate",
+                            version = migration.version,
+                            description = %migration.description,
+                            "skipping migration (marking as applied without running)",
+                        );
                         conn.skip(&self.table_name, migration).await?;
                     } else {
+                        tracing::info!(
+                            target: "sqlx::migrate",
+                            version = migration.version,
+                            description = %migration.description,
+                            migration_type = ?migration.migration_type,
+                            "applying migration",
+                        );
                         conn.apply(&self.table_name, migration).await?;
                     }
                 }
@@ -288,6 +313,7 @@ impl Migrator {
         // unlock the migrator to allow other migrators to run
         // but do nothing as we already migrated
         if self.locking {
+            tracing::debug!(target: "sqlx::migrate", "releasing migration lock");
             conn.unlock().await?;
         }
 
@@ -311,6 +337,12 @@ impl Migrator {
     /// #     })
     /// # }
     /// ```
+    #[tracing::instrument(
+        target = "sqlx::migrate",
+        name = "migrate.undo",
+        skip_all,
+        fields(migrate.target = target, migrate.table = %self.table_name),
+    )]
     pub async fn undo<'a, A>(&self, migrator: A, target: i64) -> Result<(), MigrateError>
     where
         A: Acquire<'a>,
@@ -320,6 +352,7 @@ impl Migrator {
 
         // lock the database for exclusive access by the migrator
         if self.locking {
+            tracing::debug!(target: "sqlx::migrate", "acquiring migration lock");
             conn.lock().await?;
         }
 
@@ -347,12 +380,19 @@ impl Migrator {
             .filter(|m| applied_migrations.contains_key(&m.version))
             .filter(|m| m.version > target)
         {
+            tracing::info!(
+                target: "sqlx::migrate",
+                version = migration.version,
+                description = %migration.description,
+                "reverting migration",
+            );
             conn.revert(&self.table_name, migration).await?;
         }
 
         // unlock the migrator to allow other migrators to run
         // but do nothing as we already migrated
         if self.locking {
+            tracing::debug!(target: "sqlx::migrate", "releasing migration lock");
             conn.unlock().await?;
         }
 

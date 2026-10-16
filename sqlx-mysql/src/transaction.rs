@@ -14,6 +14,13 @@ pub struct MySqlTransactionManager;
 impl TransactionManager for MySqlTransactionManager {
     type Database = MySql;
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "mysql.transaction.begin",
+        skip_all,
+        fields(db.system = "mysql", depth = conn.inner.transaction_depth),
+        level = "debug",
+    )]
     async fn begin(conn: &mut MySqlConnection, statement: Option<SqlStr>) -> Result<(), Error> {
         let depth = conn.inner.transaction_depth;
 
@@ -30,9 +37,18 @@ impl TransactionManager for MySqlTransactionManager {
         }
         conn.inner.transaction_depth += 1;
 
+        tracing::debug!("transaction/savepoint opened");
+
         Ok(())
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "mysql.transaction.commit",
+        skip_all,
+        fields(db.system = "mysql", depth = conn.inner.transaction_depth),
+        level = "debug",
+    )]
     async fn commit(conn: &mut MySqlConnection) -> Result<(), Error> {
         let depth = conn.inner.transaction_depth;
 
@@ -44,6 +60,13 @@ impl TransactionManager for MySqlTransactionManager {
         Ok(())
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "mysql.transaction.rollback",
+        skip_all,
+        fields(db.system = "mysql", depth = conn.inner.transaction_depth),
+        level = "debug",
+    )]
     async fn rollback(conn: &mut MySqlConnection) -> Result<(), Error> {
         let depth = conn.inner.transaction_depth;
 
@@ -59,6 +82,11 @@ impl TransactionManager for MySqlTransactionManager {
         let depth = conn.inner.transaction_depth;
 
         if depth > 0 {
+            tracing::debug!(
+                target: "sqlx::transaction",
+                depth,
+                "queueing implicit rollback for unfinished transaction/savepoint on drop",
+            );
             conn.inner.stream.waiting.push_back(Waiting::Result);
             conn.inner.stream.sequence_id = 0;
             conn.inner
