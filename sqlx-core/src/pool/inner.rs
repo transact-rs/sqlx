@@ -22,6 +22,20 @@ use futures_util::FutureExt;
 use std::time::{Duration, Instant};
 use tracing::Level;
 
+/// Upper bound on the two unbounded waits in `PoolInner::close()`.
+///
+/// `close()` first joins every checked-out connection — a caller that never
+/// returns its `PoolConnection` would otherwise block shutdown forever, since
+/// the pool has no handle with which to force-close it — and then serially
+/// closes the idle connections, each of which is an un-timed round trip to a
+/// possibly-wedged server. One deadline is computed once and shared by both, so
+/// the whole call is bounded at this value rather than at N x this value.
+///
+/// A const rather than a `PoolOptions` field: this is a shutdown-liveness
+/// guard, not a per-pool tuning knob, and a new field would change the public
+/// `PoolOptions` API for a fork patch. 5s matches `CLOSE_ON_DROP_TIMEOUT`.
+const CLOSE_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub(crate) struct PoolInner<DB: Database> {
     pub(super) connect_options: RwLock<Arc<<DB::Connection as Connection>::Options>>,
     pub(super) idle_conns: ArrayQueue<Idle<DB>>,
@@ -107,10 +121,56 @@ impl<DB: Database> PoolInner<DB> {
                 self.options.max_connections
             };
 
-            let _permits = self.semaphore.acquire(permits_to_acquire).await;
+            // `mark_closed()` above is what makes it safe for a caller to drop a
+            // checked-out connection at any moment, so waiting on those
+            // checkouts here is a courtesy, not a prerequisite. It is also the
+            // only thing that can make `close()` take unbounded time when a
+            // caller never gives its connection back. Bound it; on expiry carry
+            // straight on to the drain — there is nothing here to force close.
+            //
+            // The permits, when we do get them, stay bound for the rest of
+            // `close()` exactly as they did before, so the drain still runs with
+            // every permit held.
+            let deadline = Instant::now() + CLOSE_JOIN_TIMEOUT;
+
+            let _permits = crate::rt::timeout(
+                CLOSE_JOIN_TIMEOUT,
+                self.semaphore.acquire(permits_to_acquire),
+            )
+            .await
+            .inspect_err(|_elapsed| {
+                tracing::warn!(
+                    "timed out after {:?} waiting for {permits_to_acquire} checked-out \
+                     connection permit(s) to be released while closing the pool; proceeding \
+                     without joining them",
+                    CLOSE_JOIN_TIMEOUT,
+                );
+            });
 
             while let Some(idle) = self.idle_conns.pop() {
-                let _ = idle.live.raw.close().await;
+                // Each `close()` is a serial round trip to a (possibly wedged)
+                // server, so they share what is left of the one deadline above
+                // instead of each getting a fresh timeout.
+                let remaining = deadline.saturating_duration_since(Instant::now());
+
+                if crate::rt::timeout(remaining, idle.live.raw.close())
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        "on-close deadline reached while closing idle pooled \
+                         connections; dropping the rest without waiting on them"
+                    );
+
+                    // Do not `break`: that would leave connections sitting in
+                    // `idle_conns` while `num_idle` and `size` are stored 0
+                    // below, so the accounting would lie and the queue entries
+                    // would be dropped only when the pool itself is dropped.
+                    // `remaining` is already zero and a zero `timeout` still
+                    // polls the close future once, so `continue` drops the rest
+                    // without re-introducing any waiting.
+                    continue;
+                }
             }
 
             self.num_idle.store(0, Ordering::Release);
@@ -632,7 +692,20 @@ impl<DB: Database> DecrementSizeGuard<DB> {
 impl<DB: Database> Drop for DecrementSizeGuard<DB> {
     fn drop(&mut self) {
         if !self.cancelled {
-            self.pool.size.fetch_sub(1, Ordering::AcqRel);
+            // Saturating: `PoolInner::close()` stores `size = 0` once it stops
+            // waiting for checked-out connections (see `CLOSE_JOIN_TIMEOUT`),
+            // and a connection that was still checked out at that point is
+            // dropped — taking this guard with it — only later. A plain
+            // `fetch_sub` would then wrap `size` to `u32::MAX` and make
+            // `Pool::size()` report a lie. Zero is the truthful value at that
+            // point, because this connection is genuinely gone. No behaviour
+            // change while the count is non-zero (the normal path).
+            let _ = self
+                .pool
+                .size
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |size| {
+                    Some(size.saturating_sub(1))
+                });
 
             // and here we release the permit we got on construction
             self.pool.semaphore.release(1);
@@ -813,5 +886,88 @@ mod underflow_tests {
 
         // Drain so the stub connections' size slots are released before the pool drops.
         while inner.try_acquire().is_some() {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use sqlx::pool::PoolOptions;
+    use sqlx::Sqlite;
+
+    use super::CLOSE_JOIN_TIMEOUT;
+
+    /// `Pool::close()` must not be holdable open forever by a caller that never
+    /// returns its connection: the join on checked-out permits is bounded, and
+    /// on expiry `close()` proceeds to the drain and returns anyway.
+    ///
+    /// Runs against in-memory SQLite, so it needs no database server. Run with
+    /// the crate's own command: `cargo test -p sqlx-core --all-features`.
+    #[test]
+    fn close_gives_up_on_a_permit_that_is_never_released() {
+        crate::rt::test_block_on(async {
+            let pool = PoolOptions::<Sqlite>::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("connect to in-memory SQLite");
+
+            // Take the pool's only permit and never give it back, standing in
+            // for a caller that holds a `PoolConnection` for the life of the
+            // process.
+            std::mem::forget(pool.acquire().await.expect("acquire a connection"));
+
+            let start = Instant::now();
+            pool.close().await;
+            let elapsed = start.elapsed();
+
+            // It had to wait out the bound — so the join really was abandoned
+            // rather than satisfied — but it did not wait forever.
+            assert!(
+                elapsed >= CLOSE_JOIN_TIMEOUT,
+                "close() returned in {elapsed:?}, less than the {CLOSE_JOIN_TIMEOUT:?} bound, \
+                 so it never had to give up on the held permit"
+            );
+            assert!(
+                elapsed < CLOSE_JOIN_TIMEOUT * 4,
+                "close() took {elapsed:?}; the join on checked-out connections is not bounded \
+                 by {CLOSE_JOIN_TIMEOUT:?}"
+            );
+        });
+    }
+
+    /// A connection that was still checked out when the join was abandoned must
+    /// not wrap the pool's size counter when it is finally dropped.
+    ///
+    /// `close()` stores `size = 0` on giving up the join, so the guard this
+    /// connection still holds decrements against zero; with a plain `fetch_sub`
+    /// that wraps to `u32::MAX` and `Pool::size()` reports the lie.
+    #[test]
+    fn size_saturates_when_an_abandoned_connection_is_dropped() {
+        crate::rt::test_block_on(async {
+            let pool = PoolOptions::<Sqlite>::new()
+                .max_connections(1)
+                .connect("sqlite::memory:")
+                .await
+                .expect("connect to in-memory SQLite");
+
+            let mut conn = pool.acquire().await.expect("acquire a connection");
+            assert_eq!(pool.size(), 1);
+
+            // The permit is held for the whole call, so the join is abandoned
+            // and `size` is stored 0 while this connection is still checked out.
+            pool.close().await;
+            assert_eq!(pool.size(), 0);
+
+            // Dropping it here runs the size guard against that zero.
+            conn.return_to_pool().await;
+
+            assert_eq!(
+                pool.size(),
+                0,
+                "the size counter wrapped instead of saturating"
+            );
+        });
     }
 }

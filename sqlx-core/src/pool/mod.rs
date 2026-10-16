@@ -424,9 +424,21 @@ impl<DB: Database> Pool<DB> {
     /// Checked-out connections are unaffected, but will be gracefully closed on-drop
     /// rather than being returned to the pool.
     ///
-    /// Returns a `Future` which can be `.await`ed to ensure all connections are
-    /// gracefully closed. It will first close any idle connections currently waiting in the pool,
-    /// then wait for all checked-out connections to be returned or closed.
+    /// Returns a `Future` which can be `.await`ed to *ask* for a graceful close. The close is
+    /// best-effort and bounded, not a guarantee: the whole call is capped at
+    /// `CLOSE_JOIN_TIMEOUT` (currently 5s), and connections it could not reach in that time are
+    /// dropped rather than gracefully closed.
+    ///
+    /// One deadline is shared by both steps:
+    ///
+    /// 1. It gives checked-out connections up to `CLOSE_JOIN_TIMEOUT` to be returned. A
+    ///    connection still checked out when that expires is left behind — it is not force-closed,
+    ///    and it is closed when its holder eventually drops it (or with the last handle to the
+    ///    pool). This bound is why `close()` cannot be held open indefinitely by a caller that
+    ///    never returns its connection.
+    /// 2. It then closes the idle connections it drained, each of which is a round trip to a
+    ///    possibly-unresponsive server, spending only what is left of that deadline rather than a
+    ///    fresh timeout each. Idle connections still unclosed past the deadline are dropped.
     ///
     /// Waiting for connections to be gracefully closed is optional, but will allow the database
     /// server to clean up the resources sooner rather than later. This is especially important
