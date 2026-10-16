@@ -90,7 +90,34 @@ impl Encode<'_, MySql> for i64 {
     }
 }
 
+/// Extract the integer-part string from a MySQL `DECIMAL`/`NEWDECIMAL` textual value.
+///
+/// MySQL transmits these types as ASCII text even in the binary protocol, so the raw
+/// bytes are not a native integer. Returns the integer-part string if the value is
+/// integral, otherwise an error (a fractional value cannot be represented as an integer).
+pub(super) fn integral_decimal_str(s: &str) -> Result<&str, BoxDynError> {
+    let (int_part, frac_part) = s.split_once('.').unwrap_or((s, ""));
+
+    if frac_part.bytes().any(|b| b != b'0') {
+        return Err(format!(
+            "cannot decode DECIMAL value `{s}` as an integer: it has a fractional part"
+        )
+        .into());
+    }
+
+    Ok(int_part)
+}
+
 fn int_decode(value: MySqlValueRef<'_>) -> Result<i64, BoxDynError> {
+    if matches!(
+        value.type_info.r#type,
+        ColumnType::Decimal | ColumnType::NewDecimal
+    ) {
+        return integral_decimal_str(value.as_str()?)?
+            .parse()
+            .map_err(Into::into);
+    }
+
     Ok(match value.format() {
         MySqlValueFormat::Text => value.as_str()?.parse()?,
         MySqlValueFormat::Binary => {
