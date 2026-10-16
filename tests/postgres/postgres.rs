@@ -83,6 +83,50 @@ async fn it_pings_after_suspended_query() -> anyhow::Result<()> {
     Ok(())
 }
 
+// https://github.com/launchbadge/sqlx/issues/2077
+// `fetch_one` reads one row of a statement that returns many, and the next statements of the
+// transaction must still run. No `Close` of the unnamed portal is sent: the portal runs to its end,
+// and the next `Bind` destroys it.
+#[sqlx_macros::test]
+async fn it_runs_statements_after_fetch_one_in_a_transaction_issue_2077() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    let mut tx = conn.begin().await?;
+
+    for _ in 0..3 {
+        let first: i32 = sqlx::query_scalar("select n from generate_series(1, $1) n order by n")
+            .bind(50_i32)
+            .fetch_one(&mut *tx)
+            .await?;
+        assert_eq!(first, 1);
+    }
+
+    sqlx::query("create temporary table issue_2077 (n int4)")
+        .execute(&mut *tx)
+        .await?;
+
+    let inserted = sqlx::query("insert into issue_2077 select generate_series(1, $1)")
+        .bind(50_i32)
+        .execute(&mut *tx)
+        .await?;
+    assert_eq!(inserted.rows_affected(), 50);
+
+    let first: i32 = sqlx::query_scalar("select n from issue_2077 where n > $1 order by n")
+        .bind(0_i32)
+        .fetch_one(&mut *tx)
+        .await?;
+    assert_eq!(first, 1);
+
+    let count: i64 = sqlx::query_scalar("select count(*) from issue_2077")
+        .fetch_one(&mut *tx)
+        .await?;
+    assert_eq!(count, 50);
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_maths() -> anyhow::Result<()> {
     let mut conn = new::<Postgres>().await?;

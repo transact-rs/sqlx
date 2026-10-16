@@ -268,18 +268,18 @@ impl PgConnection {
                 // https://github.com/launchbadge/sqlx/issues/3673
                 limit: 0,
             })?;
-            // From https://www.postgresql.org/docs/current/protocol-flow.html:
+            // We send no `Close` for the unnamed portal. The `Execute` above has no row limit, so the
+            // portal runs to completion and is never left suspended (#2077), and from
+            // https://www.postgresql.org/docs/current/protocol-flow.html:
             //
             // "An unnamed portal is destroyed at the end of the transaction, or as
             // soon as the next Bind statement specifying the unnamed portal as
             // destination is issued. (Note that a simple Query message also
             // destroys the unnamed portal."
-
-            // we ask the database server to close the unnamed portal and free the associated resources
-            // earlier - after the execution of the current query.
-            self.inner
-                .stream
-                .write_msg(Close::Portal(PortalId::UNNAMED))?;
+            //
+            // This is the sequence libpq sends. A message between `Execute` and `Sync` also makes
+            // YugabyteDB treat the `Execute` as part of a batch, and YugabyteDB does not retry a
+            // conflicting statement of a batch once its transaction has written.
 
             // finally, [Sync] asks postgres to process the messages that we sent and respond with
             // a [ReadyForQuery] message when it's completely done. Theoretically, we could send
@@ -364,7 +364,6 @@ impl PgConnection {
                     | BackendMessageFormat::ParseComplete
                     | BackendMessageFormat::ParameterDescription
                     | BackendMessageFormat::NoData
-                    // unnamed portal has been closed
                     | BackendMessageFormat::CloseComplete
                     => {
                         // harmless messages to ignore
