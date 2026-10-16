@@ -4,7 +4,7 @@ use crate::executor::Executor;
 use crate::{MySqlConnectOptions, MySqlConnection};
 use log::LevelFilter;
 use sqlx_core::sql_str::AssertSqlSafe;
-use sqlx_core::Url;
+use sqlx_core::{config, Url};
 use std::time::Duration;
 
 impl ConnectOptions for MySqlConnectOptions {
@@ -99,5 +99,12 @@ impl ConnectOptions for MySqlConnectOptions {
     fn log_slow_statements(mut self, level: LevelFilter, duration: Duration) -> Self {
         self.log_settings.log_slow_statements(level, duration);
         self
+    }
+
+    fn __unstable_apply_driver_config(
+        self,
+        config: &config::drivers::Config,
+    ) -> crate::Result<Self> {
+        self.apply_driver_config(&config.mysql)
     }
 }
