@@ -585,4 +585,25 @@ async fn test_uuid_is_compatible_mariadb() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Repro for https://github.com/transact-rs/sqlx/issues/4358:
+// `query!` with no type override infers `YEAR` as `u8`, which cannot hold the full
+// `1901..=2155` value range, so decoding a realistic year fails at runtime.
+#[sqlx_macros::test]
+async fn macro_infer_year_type() -> anyhow::Result<()> {
+    let mut conn = new::<MySql>().await?;
+
+    sqlx::query("INSERT INTO macro_infer_year_type (enrollment_year) VALUES (?)")
+        .bind(2024_i32)
+        .execute(&mut conn)
+        .await?;
+
+    let row = sqlx::query!("SELECT enrollment_year FROM macro_infer_year_type")
+        .fetch_one(&mut conn)
+        .await?;
+
+    println!("inferred enrollment_year = {:?}", row.enrollment_year);
+
+    Ok(())
+}
+
 // we don't emit bind parameter type-checks for MySQL so testing the overrides is redundant
