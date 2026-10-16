@@ -55,7 +55,7 @@ pub use copy::{PgCopyIn, PgPoolCopyExt};
 pub use database::Postgres;
 pub use error::{PgDatabaseError, PgErrorPosition};
 pub use listener::{PgListener, PgNotification};
-pub use message::PgSeverity;
+pub use message::{PgSeverity, TransactionStatus};
 pub use options::{PgConnectOptions, PgSslMode};
 pub use query_result::PgQueryResult;
 pub use row::PgRow;
