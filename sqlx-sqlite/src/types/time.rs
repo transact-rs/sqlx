@@ -165,7 +165,7 @@ fn decode_datetime(value: SqliteValueRef<'_>) -> Result<PrimitiveDateTime, BoxDy
     let dt = match value.type_info().0 {
         DataType::Text => decode_datetime_from_text(value.text_borrowed()?),
         DataType::Int4 | DataType::Integer => {
-            let parsed = OffsetDateTime::from_unix_timestamp(value.int64()?).unwrap();
+            let parsed = OffsetDateTime::from_unix_timestamp(value.int64()?)?;
             Some(PrimitiveDateTime::new(parsed.date(), parsed.time()))
         }
 

@@ -166,6 +166,21 @@ mod time_tests {
         "'20:45:31.133'" == time!(20:45:31.133),
         "'19:44'" == time!(19:44),
     ));
+
+    // An INTEGER holding a Unix timestamp that is out of range for `time` (for example a
+    // millisecond timestamp) must fail to decode instead of panicking.
+    #[sqlx_macros::test]
+    async fn it_errors_on_out_of_range_integer_primitive_date_time() -> anyhow::Result<()> {
+        let mut conn = new::<Sqlite>().await?;
+
+        let result = sqlx::query_scalar::<_, PrimitiveDateTime>("SELECT 1700000000000")
+            .fetch_one(&mut conn)
+            .await;
+
+        assert!(result.is_err(), "expected a decode error, got {result:?}");
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "bstr")]
