@@ -66,10 +66,15 @@ pub enum JsonAttribute {
     Nullable,
 }
 
+pub enum Flatten {
+    NonNullable,
+    Nullable,
+}
+
 pub struct SqlxChildAttributes {
     pub rename: Option<String>,
     pub default: bool,
-    pub flatten: bool,
+    pub flatten: Option<Flatten>,
     pub try_from: Option<Type>,
     pub skip: bool,
     pub json: Option<JsonAttribute>,
@@ -147,7 +152,7 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
     let mut rename = None;
     let mut default = false;
     let mut try_from = None;
-    let mut flatten = false;
+    let mut flatten = Option::<Flatten>::None;
     let mut skip: bool = false;
     let mut json = None;
 
@@ -164,7 +169,15 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
             } else if meta.path.is_ident("default") {
                 default = true;
             } else if meta.path.is_ident("flatten") {
-                flatten = true;
+                if meta.input.peek(syn::token::Paren) {
+                    let content;
+                    parenthesized!(content in meta.input);
+                    let literal: Ident = content.parse()?;
+                    assert_eq!(literal.to_string(), "nullable", "Unrecognized `flatten` attribute. Valid values are `flatten` or `flatten(nullable)`");
+                    flatten = Some(Flatten::Nullable);
+                } else {
+                    flatten = Some(Flatten::NonNullable);
+                }
             } else if meta.path.is_ident("skip") {
                 skip = true;
             } else if meta.path.is_ident("json") {
@@ -182,7 +195,7 @@ pub fn parse_child_attributes(input: &[Attribute]) -> syn::Result<SqlxChildAttri
             Ok(())
         })?;
 
-        if json.is_some() && flatten {
+        if json.is_some() && flatten.is_some() {
             fail!(
                 attr,
                 "Cannot use `json` and `flatten` together on the same field"
