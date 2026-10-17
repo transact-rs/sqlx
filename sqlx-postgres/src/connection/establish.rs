@@ -1,3 +1,4 @@
+use crate::connection::gssapi;
 use crate::HashMap;
 
 use crate::common::StatementCache;
@@ -95,6 +96,10 @@ impl PgConnection {
                                 salt: body.salt,
                             })
                             .await?;
+                    }
+
+                    Authentication::Gss => {
+                        gssapi::authenticate(&mut stream, options).await?;
                     }
 
                     Authentication::Sasl(body) => {
