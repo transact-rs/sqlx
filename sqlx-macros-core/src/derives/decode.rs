@@ -4,12 +4,13 @@ use super::attributes::{
 };
 use super::rename_all;
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::token::Comma;
 use syn::{
-    parse_quote, Arm, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, FieldsNamed, Stmt,
-    TypeParamBound, Variant,
+    parse_quote, Arm, Data, DataEnum, DataStruct, DeriveInput, Field, Fields, FieldsNamed,
+    FieldsUnnamed, Stmt, TypeParamBound, Variant,
 };
 
 pub fn expand_derive_decode(input: &DeriveInput) -> syn::Result<TokenStream> {
@@ -152,29 +153,46 @@ fn expand_derive_decode_strong_enum(
 
     let ident = &input.ident;
     let ident_s = ident.to_string();
+    let mut other_variant = None;
 
-    let value_arms = variants.iter().map(|v| -> Arm {
-        let id = &v.ident;
-        let attributes = parse_child_attributes(&v.attrs).unwrap();
+    let value_arms = variants
+        .iter()
+        .map(|v| -> Option<Arm> {
+            let id = &v.ident;
+            let attributes = parse_child_attributes(&v.attrs).unwrap();
 
-        if let Some(rename) = attributes.rename {
-            parse_quote!(#rename => ::std::result::Result::Ok(#ident :: #id),)
-        } else if let Some(pattern) = cattr.rename_all {
-            let name = rename_all(&id.to_string(), pattern);
+            if attributes.other {
+                other_variant = Some(v);
+                return None;
+            }
 
-            parse_quote!(#name => ::std::result::Result::Ok(#ident :: #id),)
-        } else {
-            let name = id.to_string();
-            parse_quote!(#name => ::std::result::Result::Ok(#ident :: #id),)
+            Some(if let Some(rename) = attributes.rename {
+                parse_quote!(#rename => ::std::result::Result::Ok(#ident :: #id),)
+            } else if let Some(pattern) = cattr.rename_all {
+                let name = rename_all(&id.to_string(), pattern);
+
+                parse_quote!(#name => ::std::result::Result::Ok(#ident :: #id),)
+            } else {
+                let name = id.to_string();
+                parse_quote!(#name => ::std::result::Result::Ok(#ident :: #id),)
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let default_arm = match other_variant {
+        Some(variant) => {
+            let span = match &variant.fields {
+                Fields::Unnamed(FieldsUnnamed { unnamed, .. }) => {
+                    unnamed.first().expect("unreachable").span()
+                }
+                _ => unreachable!(),
+            };
+            let id = &variant.ident;
+            quote_spanned! { span => other => ::std::result::Result::Ok(#ident :: #id (String::from(other))) }
         }
-    });
-
-    let values = quote! {
-        match value {
-            #(#value_arms)*
-
+        None => quote! {
             _ => Err(format!("invalid value {:?} for enum {}", value, #ident_s).into())
-        }
+        },
     };
 
     let mut tts = TokenStream::new();
@@ -199,7 +217,10 @@ fn expand_derive_decode_strong_enum(
                         ::sqlx::mysql::MySql,
                     >>::decode(value)?;
 
-                    #values
+                    match value {
+                        #(#value_arms)*
+                        #default_arm
+                    }
                 }
             }
         ));
@@ -225,7 +246,10 @@ fn expand_derive_decode_strong_enum(
                         ::sqlx::postgres::Postgres,
                     >>::decode(value)?;
 
-                    #values
+                    match value {
+                        #(#value_arms)*
+                        #default_arm
+                    }
                 }
             }
         ));
@@ -251,7 +275,10 @@ fn expand_derive_decode_strong_enum(
                         ::sqlx::sqlite::Sqlite,
                     >>::decode(value)?;
 
-                    #values
+                    match value {
+                        #(#value_arms)*
+                        #default_arm
+                    }
                 }
             }
         ));
