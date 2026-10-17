@@ -564,7 +564,9 @@ async fn test_uuid_is_compatible_mariadb() -> anyhow::Result<()> {
     struct Tweet {
         id: Uuid,
         text: String,
-        created_at: OffsetDateTime,
+        // `TIMESTAMP NOT NULL` is inferred as nullable because a "zero date" decodes
+        // as `None` (see https://github.com/launchbadge/sqlx/issues/4283).
+        created_at: Option<OffsetDateTime>,
         owner_id: Option<Uuid>,
     }
 
