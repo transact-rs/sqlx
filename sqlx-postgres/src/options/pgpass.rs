@@ -222,7 +222,7 @@ fn find_next_field<'a>(line: &mut &'a str) -> Result<Cow<'a, str>, PGPassLinePar
             last_added = idx + 1;
         } else {
             if escaping && c != '\\' && c != ':' {
-                tracing::warn!("Superfluous escape in in pgpass file");
+                tracing::warn!("Superfluous escape in pgpass file");
             }
             escaping = false;
         }
