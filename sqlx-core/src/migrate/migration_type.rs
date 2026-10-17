@@ -74,6 +74,15 @@ impl MigrationType {
         }
     }
 
+    /// Returns the filename of the template used when creating this type of migration.
+    pub fn template_filename(&self) -> &'static str {
+        match self {
+            MigrationType::Simple => ".template.sql",
+            MigrationType::ReversibleUp => ".template.up.sql",
+            MigrationType::ReversibleDown => ".template.down.sql",
+        }
+    }
+
     #[deprecated = "unused"]
     pub fn infer(migrator: &Migrator, reversible: bool) -> MigrationType {
         match migrator.iter().last() {

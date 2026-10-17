@@ -60,6 +60,19 @@ sqlx migrate add <name>
 Creates a new file in `migrations/<timestamp>-<name>.sql`. Add your database schema changes to
 this new file.
 
+The initial contents of new migrations can be customized with template files in the migration
+source directory:
+
+| Migration type | Template file |
+| --- | --- |
+| Simple | `.template.sql` |
+| Reversible up | `.template.up.sql` |
+| Reversible down | `.template.down.sql` |
+
+When a matching template exists, `sqlx migrate add` copies its contents into the new migration.
+Otherwise, the migration starts with the default placeholder comment. A custom migration source
+specified with `--source` is also where SQLx looks for templates.
+
 ---
 
 ```bash
