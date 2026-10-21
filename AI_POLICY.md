@@ -15,8 +15,8 @@ Instead, we reserve the right to refuse contributions for **any** reason, includ
 * Ignoring instructions in, or completely bypassing our issue or PR templates;
 * Using AI to author issue or PR descriptions;
 * Using AI to generate responses or interactions in threads;
-* Submitting pull requests which duplicates work in existing open ones without acknowledging 
-  _why_ a new pull request is justified;
+* Submitting pull requests which duplicates work in existing open PRs without acknowledging this 
+  or explaining _why_ a new pull request is justified;
 * Submitting commits attributed to an AI agent, such as Claude;
 * Submitting **any** content containing clear hallmarks of generative AI.
 
