@@ -70,6 +70,7 @@ pub struct SqliteConnectOptions {
     pub(crate) log_settings: LogSettings,
     pub(crate) immutable: bool,
     pub(crate) vfs: Option<Cow<'static, str>>,
+    pub(crate) thread_stack_size: Option<usize>,
 
     pub(crate) pragmas: IndexMap<Cow<'static, str>, Option<Cow<'static, str>>>,
 
@@ -204,6 +205,7 @@ impl SqliteConnectOptions {
             log_settings: Default::default(),
             immutable: false,
             vfs: None,
+            thread_stack_size: None,
             pragmas,
             #[cfg(feature = "load-extension")]
             extensions: Default::default(),
@@ -231,6 +233,42 @@ impl SqliteConnectOptions {
     /// Gets the current name of the database file.
     pub fn get_filename(&self) -> &Path {
         &self.filename
+    }
+
+    /// Set the thread stack size in bytes for the SQLite worker thread.
+    ///
+    /// **This is an advanced option.** By default (`None`), SQLx uses the Rust standard library's
+    /// default stack size (typically 2 MB), which is safe for most use cases including user-supplied
+    /// callbacks and platform-specific requirements.
+    ///
+    /// Only set this if you have a specific reason to do so, such as running in an embedded environment
+    /// with constrained memory. Be aware that:
+    /// - User-supplied callbacks (hooks, custom functions) run on this thread and may have unpredictable
+    ///   stack requirements
+    /// - Different platforms (32-bit vs 64-bit) have different stack size requirements
+    /// - Setting this too low may cause stack overflow crashes
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use sqlx_sqlite::SqliteConnectOptions;
+    /// # use std::str::FromStr;
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let options = SqliteConnectOptions::from_str("sqlite::memory:")?
+    ///     .thread_stack_size(1024 * 1024); // 1 MB - use with caution!
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn thread_stack_size(mut self, size: usize) -> Self {
+        self.thread_stack_size = Some(size);
+        self
+    }
+
+    /// Get the current thread stack size in bytes.
+    ///
+    /// Returns `None` if using the default stack size from the Rust standard library.
+    pub fn get_thread_stack_size(&self) -> Option<usize> {
+        self.thread_stack_size
     }
 
     /// Set the enforcement of [foreign key constraints](https://www.sqlite.org/pragma.html#pragma_foreign_keys).

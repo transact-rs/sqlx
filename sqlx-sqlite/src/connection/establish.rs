@@ -29,6 +29,7 @@ pub struct EstablishParams {
     busy_timeout: Duration,
     statement_cache_capacity: usize,
     log_settings: LogSettings,
+    pub(crate) thread_stack_size: Option<usize>,
     #[cfg(feature = "load-extension")]
     extensions: IndexMap<CString, Option<CString>>,
     pub(crate) thread_name: String,
@@ -147,6 +148,7 @@ impl EstablishParams {
             busy_timeout: options.busy_timeout,
             statement_cache_capacity: options.statement_cache_capacity,
             log_settings: options.log_settings.clone(),
+            thread_stack_size: options.thread_stack_size,
             #[cfg(feature = "load-extension")]
             extensions,
             thread_name: (options.thread_name)(thread_id as u64),
