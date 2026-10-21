@@ -211,7 +211,12 @@ impl ConnectionWorker {
                             update_cached_statements_size(&conn, &shared.cached_statements_size);
                         }
                         Command::Begin { tx, statement } => {
-                            let depth = shared.transaction_depth.load(Ordering::Acquire);
+                            let mut depth = shared.transaction_depth.load(Ordering::Acquire);
+
+                            if depth > 0 && !conn.handle.in_transaction() {
+                                shared.transaction_depth.store(0, Ordering::Release);
+                                depth = 0;
+                            }
 
                             let is_custom_statement = statement.is_some();
                             let statement = match statement {
@@ -253,11 +258,15 @@ impl ConnectionWorker {
                                         shared.transaction_depth.fetch_sub(1, Ordering::Release);
                                     })
                                 {
-                                    // The rollback failed. To prevent leaving the connection
-                                    // in an inconsistent state we shutdown this worker which
-                                    // causes any subsequent operation on the connection to fail.
-                                    tracing::error!(%error, "failed to rollback cancelled transaction");
-                                    break;
+                                    if !conn.handle.in_transaction() {
+                                        shared.transaction_depth.store(0, Ordering::Release);
+                                    } else {
+                                        // The rollback failed. To prevent leaving the connection
+                                        // in an inconsistent state we shutdown this worker which
+                                        // causes any subsequent operation on the connection to fail.
+                                        tracing::error!(%error, "failed to rollback cancelled transaction");
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -265,11 +274,17 @@ impl ConnectionWorker {
                             let depth = shared.transaction_depth.load(Ordering::Acquire);
 
                             let res = if depth > 0 {
-                                conn.handle
+                                let res = conn.handle
                                     .exec(commit_ansi_transaction_sql(depth).as_str())
                                     .map(|_| {
                                         shared.transaction_depth.fetch_sub(1, Ordering::Release);
-                                    })
+                                    });
+
+                                if res.is_err() && !conn.handle.in_transaction() {
+                                    shared.transaction_depth.store(0, Ordering::Release);
+                                }
+
+                                res
                             } else {
                                 Ok(())
                             };
@@ -291,11 +306,23 @@ impl ConnectionWorker {
                             let depth = shared.transaction_depth.load(Ordering::Acquire);
 
                             let res = if depth > 0 {
-                                conn.handle
-                                    .exec(rollback_ansi_transaction_sql(depth).as_str())
-                                    .map(|_| {
-                                        shared.transaction_depth.fetch_sub(1, Ordering::Release);
-                                    })
+                                if !conn.handle.in_transaction() {
+                                    shared.transaction_depth.store(0, Ordering::Release);
+                                    Ok(())
+                                } else {
+                                    let res = conn.handle
+                                        .exec(rollback_ansi_transaction_sql(depth).as_str())
+                                        .map(|_| {
+                                            shared.transaction_depth.fetch_sub(1, Ordering::Release);
+                                        });
+
+                                    if res.is_err() && !conn.handle.in_transaction() {
+                                        shared.transaction_depth.store(0, Ordering::Release);
+                                        Ok(())
+                                    } else {
+                                        res
+                                    }
+                                }
                             } else {
                                 Ok(())
                             };
