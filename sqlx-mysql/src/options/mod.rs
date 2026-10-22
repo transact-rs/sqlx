@@ -82,6 +82,7 @@ pub struct MySqlConnectOptions {
     pub(crate) timezone: Option<String>,
     pub(crate) set_names: bool,
     pub(crate) found_rows: bool,
+    pub(crate) ignore_space: bool,
 }
 
 impl Default for MySqlConnectOptions {
@@ -126,6 +127,7 @@ impl MySqlConnectOptions {
             timezone: Some(String::from("+00:00")),
             set_names: true,
             found_rows: true,
+            ignore_space: true,
         }
     }
 
@@ -445,6 +447,20 @@ impl MySqlConnectOptions {
     /// The default value is set to true.
     pub fn found_rows(mut self, flag_val: bool) -> Self {
         self.found_rows = flag_val;
+        self
+    }
+
+    /// Sets the flag that enables or disables CLIENT_IGNORE_SPACE,
+    /// which makes the server add `IGNORE_SPACE` to the session's `sql_mode`.
+    ///
+    /// With `IGNORE_SPACE`, the server permits spaces between a built-in function name
+    /// and the following `(` character, and treats built-in function names as reserved words.
+    /// Disabling it matches the default of most other MySQL clients, which some proxies
+    /// (such as ProxySQL) require before they will share backend connections between clients.
+    ///
+    /// The default value is set to true.
+    pub fn ignore_space(mut self, flag_val: bool) -> Self {
+        self.ignore_space = flag_val;
         self
     }
 }
