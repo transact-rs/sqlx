@@ -28,8 +28,14 @@ dir_workspace = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 dir_tests = os.path.join(dir_workspace, "tests")
 
 RUNTIMES = ["async-std", "async-global-executor", "smol", "tokio"]
-CHECK_TLS = ["native-tls", "rustls", "rustls-ring", "rustls-aws-lc-rs", "none"]
-TLS_VARIANTS = ["native-tls", "rustls-ring", "rustls-aws-lc-rs", "none"]
+CHECK_TLS = [
+    "native-tls", "rustls", "rustls-ring", "rustls-aws-lc-rs",
+    "rustls-aws-lc-rs-native-roots", "none",
+]
+TLS_VARIANTS = [
+    "native-tls", "rustls-ring", "rustls-aws-lc-rs",
+    "rustls-aws-lc-rs-native-roots", "none",
+]
 POSTGRES_VERSIONS = ["17", "16", "15", "14", "13"]
 MYSQL_VERSIONS = ["8", "5_7"]
 MARIADB_VERSIONS = ["verylatest", "11_8", "11_4", "10_11", "10_6"]
@@ -312,7 +318,7 @@ for runtime in RUNTIMES:
             # Since docker mysql 5.7 using yaSSL(It only supports TLSv1.1), avoid running when using rustls.
             # https://github.com/docker-library/mysql/issues/567
             # only run when using native-tls
-            if not (version == "5_7" and tls in ["rustls-ring", "rustls-aws-lc-rs"]):
+            if not (version == "5_7" and tls in ["rustls-ring", "rustls-aws-lc-rs", "rustls-aws-lc-rs-native-roots"]):
                 run(
                     f"cargo test --no-default-features --features {features}",
                     comment=f"test mysql {version}",
@@ -322,7 +328,7 @@ for runtime in RUNTIMES:
                 )
 
                 ## +client-ssl
-                if tls != "none" and not (version == "5_7" and tls in ["rustls-ring", "rustls-aws-lc-rs"]):
+                if tls != "none" and not (version == "5_7" and tls in ["rustls-ring", "rustls-aws-lc-rs", "rustls-aws-lc-rs-native-roots"]):
                     run(
                         f"cargo test --no-default-features --features {base_features}",
                         comment=f"test mysql {version}_client_ssl no-password",
