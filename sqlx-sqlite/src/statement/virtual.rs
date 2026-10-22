@@ -27,11 +27,12 @@ pub struct VirtualStatement {
 
     /// the current index of the actual statement that is executing
     /// if `None`, no statement is executing and `prepare()` must be called;
-    /// if `Some(self.handles.len())` and `self.tail.is_empty()`,
+    /// if `Some(self.handles.len())` and `self.tail` holds only its NUL terminator,
     /// there are no more statements to execute and `reset()` must be called
     index: Option<usize>,
 
-    /// tail of the most recently prepared SQL statement within this container
+    /// tail of the most recently prepared SQL statement within this container,
+    /// always ending in a NUL terminator
     tail: Bytes,
 
     /// underlying sqlite handles for each inner statement
@@ -54,6 +55,14 @@ pub struct PreparedStatement<'a> {
 
 impl VirtualStatement {
     pub(crate) fn new(mut query: &str, persistent: bool) -> Result<Self, Error> {
+        // SQLite reads a query only up to its first NUL byte, so whatever followed one would
+        // silently never run.
+        if let Some(offset) = query.find('\0') {
+            return Err(Error::InvalidArgument(format!(
+                "query string contains a NUL byte at offset {offset}"
+            )));
+        }
+
         query = query.trim();
 
         if query.len() > i32::MAX as usize {
@@ -65,7 +74,11 @@ impl VirtualStatement {
 
         Ok(Self {
             persistent,
-            tail: Bytes::from(String::from(query)),
+            // NUL-terminated, and every tail keeps that terminator: SQLite copies
+            // the whole input before parsing it whenever the last byte it is
+            // handed is not NUL, which makes a query of N statements cost
+            // O(N * len) bytes of copying.
+            tail: Bytes::from(format!("{query}\0")),
             handles: SmallVec::with_capacity(1),
             index: None,
             columns: SmallVec::with_capacity(1),
@@ -84,7 +97,7 @@ impl VirtualStatement {
             .or(Some(0));
 
         while self.handles.len() <= self.index.unwrap_or(0) {
-            if self.tail.is_empty() {
+            if is_exhausted(&self.tail) {
                 return Ok(None);
             }
 
@@ -141,6 +154,15 @@ impl VirtualStatement {
     }
 }
 
+/// Whether nothing but the NUL terminator is left to prepare.
+fn is_exhausted(tail: &[u8]) -> bool {
+    tail.len() <= 1
+}
+
+/// Hands `query` to `sqlite3_prepare_v3` once and advances it past what SQLite consumed.
+///
+/// Returns `None` when that stretch held no statement, e.g. whitespace, a comment or a lone
+/// `;`; the caller keeps calling until a statement is prepared or the query is exhausted.
 fn prepare(
     conn: *mut sqlite3,
     query: &mut Bytes,
@@ -159,46 +181,105 @@ fn prepare(
         flags |= SQLITE_PREPARE_PERSISTENT as u32;
     }
 
-    while !query.is_empty() {
-        let mut statement_handle: *mut sqlite3_stmt = null_mut();
-        let mut tail: *const c_char = null();
+    let mut statement_handle: *mut sqlite3_stmt = null_mut();
+    let mut tail: *const c_char = null();
 
-        let query_ptr = query.as_ptr() as *const c_char;
-        let query_len = i32::try_from(query.len()).map_err(|_| {
-            err_protocol!(
-                "query string too large for SQLite3 API ({} bytes); \
-                 try breaking it into smaller chunks (< 2 GiB), executed separately",
-                query.len()
-            )
-        })?;
+    let query_ptr = query.as_ptr() as *const c_char;
+    let query_len = i32::try_from(query.len()).map_err(|_| {
+        err_protocol!(
+            "query string too large for SQLite3 API ({} bytes); \
+             try breaking it into smaller chunks (< 2 GiB), executed separately",
+            query.len()
+        )
+    })?;
 
-        // <https://www.sqlite.org/c3ref/prepare.html>
-        let status = unsafe {
-            sqlite3_prepare_v3(
-                conn,
-                query_ptr,
-                query_len,
-                flags,
-                &mut statement_handle,
-                &mut tail,
-            )
-        };
+    // <https://www.sqlite.org/c3ref/prepare.html>
+    let status = unsafe {
+        sqlite3_prepare_v3(
+            conn,
+            query_ptr,
+            query_len,
+            flags,
+            &mut statement_handle,
+            &mut tail,
+        )
+    };
 
-        if status != SQLITE_OK {
-            return Err(unsafe { SqliteError::new(conn).into() });
-        }
-
-        // tail should point to the first byte past the end of the first SQL
-        // statement in zSql. these routines only compile the first statement,
-        // so tail is left pointing to what remains un-compiled.
-
-        let n = (tail as usize) - (query_ptr as usize);
-        query.advance(n);
-
-        if let Some(handle) = NonNull::new(statement_handle) {
-            return Ok(Some(StatementHandle::new(handle)));
-        }
+    if status != SQLITE_OK {
+        return Err(unsafe { SqliteError::new(conn).into() });
     }
 
-    Ok(None)
+    // tail should point to the first byte past the end of the first SQL
+    // statement in zSql. these routines only compile the first statement,
+    // so tail is left pointing to what remains un-compiled.
+
+    let n = (tail as usize) - (query_ptr as usize);
+    let statement = NonNull::new(statement_handle).map(StatementHandle::new);
+
+    if statement.is_none() && n == 0 {
+        // Handing SQLite the same bytes again would get the same answer, forever.
+        return Err(err_protocol!(
+            "SQLite prepared no statement from the query and consumed none of it"
+        ));
+    }
+
+    query.advance(n);
+
+    Ok(statement)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libsqlite3_sys::{SQLITE_OPEN_CREATE, SQLITE_OPEN_MEMORY, SQLITE_OPEN_READWRITE};
+
+    fn open_in_memory() -> ConnectionHandle {
+        ConnectionHandle::open(
+            c":memory:",
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_MEMORY,
+        )
+        .unwrap()
+    }
+
+    // SQLite copies the whole input before parsing it whenever the last byte it is handed is
+    // not NUL, so a tail without the terminator makes a query of N statements cost
+    // O(N * len) bytes of copying. Driving `prepare()` by hand sees every tail it hands over.
+    #[test]
+    fn every_tail_handed_to_sqlite_ends_in_nul() {
+        let conn = open_in_memory();
+        let mut tail = VirtualStatement::new(
+            "SELECT 1; ; -- one\nSELECT 2; /* two */ SELECT 3; -- the end",
+            false,
+        )
+        .unwrap()
+        .tail;
+        let mut prepared = 0;
+
+        while tail[..] != b"\0"[..] {
+            assert_eq!(
+                tail.last(),
+                Some(&0),
+                "tail handed to SQLite is not NUL-terminated: {:?}",
+                String::from_utf8_lossy(&tail)
+            );
+
+            if prepare(conn.as_ptr(), &mut tail, false).unwrap().is_some() {
+                prepared += 1;
+            }
+        }
+
+        assert_eq!(prepared, 3);
+    }
+
+    // SQLite reads nothing past a NUL, so a tail that starts with one yields no statement and
+    // does not advance; handing it back would get the same answer forever.
+    #[test]
+    fn prepare_errors_when_sqlite_consumes_nothing() {
+        let conn = open_in_memory();
+        let mut tail = Bytes::from_static(b"\0SELECT 1\0");
+
+        let res = prepare(conn.as_ptr(), &mut tail, false);
+
+        assert!(matches!(res, Err(Error::Protocol(_))), "{res:?}");
+    }
 }
