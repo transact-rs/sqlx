@@ -57,7 +57,7 @@ sqlx database drop
 sqlx migrate add <name>
 ```
 
-Creates a new file in `migrations/<timestamp>-<name>.sql`. Add your database schema changes to
+Creates a new file in `migrations/<timestamp>_<name>.sql`. Add your database schema changes to
 this new file.
 
 ---
