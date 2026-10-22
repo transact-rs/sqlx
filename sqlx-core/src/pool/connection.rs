@@ -14,6 +14,7 @@ use super::inner::{is_beyond_max_lifetime, DecrementSizeGuard, PoolInner};
 use crate::pool::options::PoolConnectionMetadata;
 
 const CLOSE_ON_DROP_TIMEOUT: Duration = Duration::from_secs(5);
+const RETURN_TO_POOL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A connection managed by a [`Pool`][crate::pool::Pool].
 ///
@@ -143,7 +144,16 @@ impl<DB: Database> PoolConnection<DB> {
 
         async move {
             let returned_to_pool = if let Some(floating) = floating {
-                floating.return_to_pool().await
+                // Bound the whole return, including callbacks and connection shutdown.
+                // On timeout, dropping the future drops the connection and its size guard,
+                // releasing the permit without awaiting any further connection I/O.
+                match crate::rt::timeout(RETURN_TO_POOL_TIMEOUT, floating.return_to_pool()).await {
+                    Ok(returned) => returned,
+                    Err(_) => {
+                        tracing::warn!("timed out while returning a connection to the pool");
+                        false
+                    }
+                }
             } else {
                 false
             };
