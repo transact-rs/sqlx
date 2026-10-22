@@ -13,6 +13,21 @@ test_type!(origin_enum<Origin>(Sqlite,
     "2" == Origin::Bar,
 ));
 
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[sqlx(rename_all = "lowercase")]
+enum SafeOperation {
+    Add,
+    Subtract,
+    #[sqlx(other)]
+    Unknown(String),
+}
+
+test_type!(safe_operation_enum<SafeOperation>(Sqlite,
+    "'add'" == SafeOperation::Add,
+    "'subtract'" == SafeOperation::Subtract,
+    "'multiply'" == SafeOperation::Unknown("multiply".to_string()),
+));
+
 #[derive(PartialEq, Eq, Debug, sqlx::Type)]
 #[sqlx(transparent)]
 struct TransparentTuple(i64);
