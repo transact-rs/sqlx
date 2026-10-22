@@ -14,6 +14,13 @@ pub struct PgTransactionManager;
 impl TransactionManager for PgTransactionManager {
     type Database = Postgres;
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "postgres.transaction.begin",
+        skip_all,
+        fields(db.system = "postgresql", depth = conn.inner.transaction_depth),
+        level = "debug",
+    )]
     async fn begin(conn: &mut PgConnection, statement: Option<SqlStr>) -> Result<(), Error> {
         let depth = conn.inner.transaction_depth;
 
@@ -41,9 +48,18 @@ impl TransactionManager for PgTransactionManager {
         }
         rollback.defuse();
 
+        tracing::debug!("transaction/savepoint opened");
+
         Ok(())
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "postgres.transaction.commit",
+        skip_all,
+        fields(db.system = "postgresql", depth = conn.inner.transaction_depth),
+        level = "debug",
+    )]
     async fn commit(conn: &mut PgConnection) -> Result<(), Error> {
         if conn.inner.transaction_depth > 0 {
             conn.execute(commit_ansi_transaction_sql(conn.inner.transaction_depth))
@@ -55,6 +71,13 @@ impl TransactionManager for PgTransactionManager {
         Ok(())
     }
 
+    #[tracing::instrument(
+        target = "sqlx::transaction",
+        name = "postgres.transaction.rollback",
+        skip_all,
+        fields(db.system = "postgresql", depth = conn.inner.transaction_depth),
+        level = "debug",
+    )]
     async fn rollback(conn: &mut PgConnection) -> Result<(), Error> {
         if conn.inner.transaction_depth > 0 {
             conn.execute(rollback_ansi_transaction_sql(conn.inner.transaction_depth))
@@ -68,6 +91,11 @@ impl TransactionManager for PgTransactionManager {
 
     fn start_rollback(conn: &mut PgConnection) {
         if conn.inner.transaction_depth > 0 {
+            tracing::debug!(
+                target: "sqlx::transaction",
+                depth = conn.inner.transaction_depth,
+                "queueing implicit rollback for unfinished transaction/savepoint on drop",
+            );
             conn.queue_simple_query(
                 rollback_ansi_transaction_sql(conn.inner.transaction_depth).as_str(),
             )

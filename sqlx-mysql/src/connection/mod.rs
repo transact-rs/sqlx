@@ -70,6 +70,13 @@ impl Connection for MySqlConnection {
 
     type Options = MySqlConnectOptions;
 
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "mysql.close",
+        skip_all,
+        fields(db.system = "mysql"),
+        level = "debug",
+    )]
     async fn close(mut self) -> Result<(), Error> {
         self.inner.stream.send_packet(Quit).await?;
         self.inner.stream.shutdown().await?;
@@ -82,6 +89,13 @@ impl Connection for MySqlConnection {
         Ok(())
     }
 
+    #[tracing::instrument(
+        target = "sqlx::connect",
+        name = "mysql.ping",
+        skip_all,
+        fields(db.system = "mysql"),
+        level = "trace",
+    )]
     async fn ping(&mut self) -> Result<(), Error> {
         self.inner.stream.wait_until_ready().await?;
         self.inner.stream.send_packet(Ping).await?;

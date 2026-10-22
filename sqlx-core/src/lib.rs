@@ -66,6 +66,7 @@ pub mod describe;
 pub mod executor;
 pub mod from_row;
 pub mod fs;
+pub mod instrument_stream;
 pub mod io;
 pub mod logger;
 pub mod net;

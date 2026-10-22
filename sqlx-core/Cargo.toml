@@ -88,6 +88,7 @@ futures-util = { version = "0.3.32", default-features = false, features = ["allo
 log = { version = "0.4.18", default-features = false }
 memchr = { version = "2.5.0", default-features = false }
 percent-encoding = "2.3.0"
+pin-project-lite = "0.2.16"
 serde = { version = "1.0.219", features = ["derive", "rc"], optional = true }
 serde_json = { version = "1.0.142", features = ["raw_value"], optional = true }
 toml = { version = "0.8.16", optional = true }
