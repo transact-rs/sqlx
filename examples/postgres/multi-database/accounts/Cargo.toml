@@ -20,4 +20,4 @@ time = { version = "0.3.48", features = ["serde"] }
 serde = { version = "1.0.219", features = ["derive"] }
 
 [dev-dependencies]
-sqlx = { workspace = true, features = ["runtime-tokio"] }
+sqlx = { workspace = true, features = ["runtime-tokio", "migrate"] }

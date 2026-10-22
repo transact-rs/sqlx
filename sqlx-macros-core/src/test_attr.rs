@@ -166,6 +166,8 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
         _ => quote! {},
     };
 
+    let database_url_var = config.common.database_url_var();
+
     Ok(quote! {
         #(#attrs)*
         #[::core::prelude::v1::test]
@@ -175,6 +177,8 @@ fn expand_advanced(args: AttributeArgs, input: syn::ItemFn) -> crate::Result<Tok
             }
 
             let mut args = ::sqlx::testing::TestArgs::new(concat!(module_path!(), "::", stringify!(#name)));
+
+            args.database_url_var(#database_url_var);
 
             #migrations
 
