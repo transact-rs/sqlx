@@ -52,6 +52,9 @@ pub enum Error {
     #[error("error occurred while attempting to establish a TLS connection: {0}")]
     Tls(#[source] BoxDynError),
 
+    #[error("error occured during gssapi negotiation: {0}")]
+    GssApi(#[from] BoxDynError),
+
     /// Unexpected or invalid data encountered while communicating with the database.
     ///
     /// This should indicate there is a programming error in a SQLx driver or there
