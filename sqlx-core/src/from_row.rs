@@ -151,6 +151,52 @@ use crate::{error::Error, row::Row};
 ///
 /// This field is compatible with the `default` attribute.
 ///
+/// By default the `#[sqlx(flatten)]` attribute will assume that the nested struct is always
+/// present. This is a problem for a `LEFT JOIN`, which yields NULL in every column of the joined
+/// table when there is no matching row.
+///
+/// If you wish to describe a nested struct which may be absent, use the
+/// `#[sqlx(flatten(nullable))]` attribute on a field of type `Option<T>`.
+///
+/// For example
+/// ```rust,ignore
+/// #[derive(sqlx::FromRow)]
+/// struct Address {
+///     country: String,
+///     city: String,
+///     road: String,
+/// }
+///
+/// #[derive(sqlx::FromRow)]
+/// struct User {
+///     id: i32,
+///     name: String,
+///     #[sqlx(flatten(nullable))]
+///     address: Option<Address>,
+/// }
+/// ```
+/// Given a query such as:
+///
+/// ```sql
+/// SELECT users.id, users.name, addresses.country, addresses.city, addresses.road
+/// FROM users LEFT JOIN addresses ON addresses.user_id = users.id;
+/// ```
+///
+/// Would describe a nested struct which is `None` when the joined row is absent.
+///
+/// This may be combined with the `try_from` attribute, in which case `try_from` names the
+/// row-readable type and the conversion targets the type inside the `Option`:
+///
+/// ```rust,ignore
+/// #[derive(sqlx::FromRow)]
+/// struct User {
+///     id: i32,
+///     name: String,
+///     #[sqlx(flatten(nullable), try_from = "Address")]
+///     address: Option<VerifiedAddress>,
+/// }
+/// ```
+///
 /// #### `skip`
 ///
 /// This is a variant of the `default` attribute which instead always takes the value from
@@ -522,3 +568,13 @@ impl_from_row_for_tuple!(
     (14) -> T15;
     (15) -> T16;
 );
+
+/// Support trait for the `FromRow` derive, used by `#[sqlx(flatten(nullable))]`.
+#[doc(hidden)]
+pub trait OptionOf {
+    type Inner;
+}
+
+impl<T> OptionOf for Option<T> {
+    type Inner = T;
+}
