@@ -468,6 +468,233 @@ async fn test_issue_622() -> anyhow::Result<()> {
     Ok(())
 }
 
+// A query cancelled mid-read must leave the connection usable.
+// Tokio only, since the test cancels through `tokio::select!`.
+#[cfg(feature = "_rt-tokio")]
+#[tokio::test]
+async fn test_cancelled_mid_read_leaves_connection_usable() -> anyhow::Result<()> {
+    use std::time::Duration;
+
+    setup_if_needed();
+
+    let mut conn = MySqlConnection::connect(&env::var("DATABASE_URL")?).await?;
+
+    // Rows large enough to span several socket reads, so reads await
+    // mid-packet. Built by doubling to keep the SQL short.
+    conn.execute("DROP TABLE IF EXISTS sqlx_test_cancel_probe")
+        .await?;
+    conn.execute(
+        "CREATE TABLE sqlx_test_cancel_probe (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            filler MEDIUMTEXT NOT NULL
+        )",
+    )
+    .await?;
+    conn.execute("INSERT INTO sqlx_test_cancel_probe (filler) VALUES (REPEAT('x', 100000))")
+        .await?;
+    for _ in 0..5 {
+        conn.execute(
+            "INSERT INTO sqlx_test_cancel_probe (filler) \
+             SELECT filler FROM sqlx_test_cancel_probe",
+        )
+        .await?;
+    }
+
+    let query = "SELECT id, filler FROM sqlx_test_cancel_probe";
+
+    for i in 0u64..300 {
+        // Tokio rounds sleeps up to whole milliseconds: a 0 to 3 ms race.
+        let cancel_after = Duration::from_micros((i % 23) * 90);
+
+        tokio::select! {
+            rows = conn.fetch_all(query) => {
+                rows?;
+            }
+            _ = tokio::time::sleep(cancel_after) => {}
+        }
+
+        // `ping` drains what the cancelled read left; a misaligned stream
+        // fails or hangs here.
+        tokio::time::timeout(Duration::from_secs(30), conn.ping())
+            .await
+            .map_err(|_| anyhow::anyhow!("connection wedged after cancelled read (iteration {i})"))?
+            .with_context(|| format!("iteration {i}"))?;
+    }
+
+    conn.execute("DROP TABLE sqlx_test_cancel_probe").await?;
+    conn.close().await?;
+
+    Ok(())
+}
+
+// A prepare cancelled before its response is read must leave the
+// connection usable, and every prepared statement closed or cached.
+#[cfg(feature = "_rt-tokio")]
+#[tokio::test]
+async fn test_cancelled_mid_prepare_leaves_connection_usable() -> anyhow::Result<()> {
+    use futures_util::FutureExt;
+    use std::time::Duration;
+
+    setup_if_needed();
+
+    let mut conn = MySqlConnection::connect(&env::var("DATABASE_URL")?).await?;
+
+    conn.execute("DROP TABLE IF EXISTS sqlx_test_cancel_probe_prepared")
+        .await?;
+    conn.execute(
+        "CREATE TABLE sqlx_test_cancel_probe_prepared (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            filler MEDIUMTEXT NOT NULL
+        )",
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO sqlx_test_cancel_probe_prepared (filler) VALUES (REPEAT('x', 100000))",
+    )
+    .await?;
+    for _ in 0..5 {
+        conn.execute(
+            "INSERT INTO sqlx_test_cancel_probe_prepared (filler) \
+             SELECT filler FROM sqlx_test_cancel_probe_prepared",
+        )
+        .await?;
+    }
+
+    let query = "SELECT id, filler FROM sqlx_test_cancel_probe_prepared";
+
+    let (p, c, r) = stmt_prepare_close_counts(&mut conn).await?;
+    let mut counts = (p, c, 0, r);
+
+    // Polled once, a fetch sends COM_STMT_PREPARE and is dropped, leaving
+    // the response to the drain. The statements cover columns only,
+    // parameters and columns, parameters only, and neither.
+    let shapes = [
+        (query, false),
+        (
+            "SELECT id FROM sqlx_test_cancel_probe_prepared WHERE id > ?",
+            true,
+        ),
+        ("DO ?", true),
+        ("DO 1", false),
+    ];
+
+    // Poll-once drops are deterministic: the first poll always ends at the
+    // prepare response read, so the balance below can only fail if the
+    // drain or the close tracking is wrong. Checked per persistent setting.
+    for persistent in [false, true] {
+        for (sql, with_param) in shapes {
+            for i in 0..100 {
+                let mut polled = sqlx::query(sql).persistent(persistent);
+
+                if with_param {
+                    polled = polled.bind(0);
+                }
+
+                if let Some(rows) = polled.fetch_all(&mut conn).now_or_never() {
+                    rows?;
+                }
+
+                tokio::time::timeout(Duration::from_secs(30), conn.ping())
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "connection wedged after dropped prepare \
+                             ({sql:?}, persistent({persistent}), iteration {i})"
+                        )
+                    })?
+                    .with_context(|| format!("{sql:?}, persistent({persistent}), iteration {i}"))?;
+            }
+        }
+
+        counts = assert_statement_balance(
+            &mut conn,
+            counts,
+            &format!("dropped prepares, persistent({persistent})"),
+        )
+        .await?;
+    }
+
+    // Mostly cancels inside binary row reads; the loop above covers the
+    // prepare drain. No counter balance here: a cancel lands wherever the
+    // timer catches the fetch, so the balance depends on timing the code
+    // under test does not control. The pings cover the recovery.
+    for i in 0u64..300 {
+        // A 0 to 3 ms race, as above.
+        let cancel_after = Duration::from_micros((i % 23) * 90);
+
+        tokio::select! {
+            rows = sqlx::query(query).persistent(false).fetch_all(&mut conn) => {
+                rows?;
+            }
+            _ = tokio::time::sleep(cancel_after) => {}
+        }
+
+        tokio::time::timeout(Duration::from_secs(30), conn.ping())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!("connection wedged after cancelled prepare/execute (iteration {i})")
+            })?
+            .with_context(|| format!("iteration {i}"))?;
+    }
+
+    conn.execute("DROP TABLE sqlx_test_cancel_probe_prepared")
+        .await?;
+    conn.close().await?;
+
+    Ok(())
+}
+
+// The Com_stmt_prepare/Com_stmt_close deltas since `before` must balance
+// against the statement cache delta, with server-side re-prepares taken out
+// of the prepare side: an execute that finds the statement's metadata stale
+// re-prepares it on the server, which counts as Com_stmt_prepare without
+// ever getting a COM_STMT_CLOSE. The phase name pins down a leak.
+#[cfg(feature = "_rt-tokio")]
+async fn assert_statement_balance(
+    conn: &mut MySqlConnection,
+    before: (u64, u64, u64, u64),
+    phase: &str,
+) -> anyhow::Result<(u64, u64, u64, u64)> {
+    let (prepared, closed, reprepared) = stmt_prepare_close_counts(conn).await?;
+    let cached = conn.cached_statements_size() as u64;
+
+    assert_eq!(
+        (closed - before.1) + (cached - before.2),
+        (prepared - before.0) - (reprepared - before.3),
+        "{phase}: {} prepared ({} reprepared), {} closed, cached {cached}",
+        prepared - before.0,
+        reprepared - before.3,
+        closed - before.1
+    );
+
+    Ok((prepared, closed, cached, reprepared))
+}
+
+// The session's Com_stmt_prepare, Com_stmt_close and Com_stmt_reprepare counts.
+#[cfg(feature = "_rt-tokio")]
+async fn stmt_prepare_close_counts(conn: &mut MySqlConnection) -> anyhow::Result<(u64, u64, u64)> {
+    let rows = conn
+        .fetch_all(
+            "SHOW SESSION STATUS WHERE Variable_name IN ('Com_stmt_prepare', 'Com_stmt_close', 'Com_stmt_reprepare')",
+        )
+        .await?;
+
+    let counter = |name: &str| -> anyhow::Result<u64> {
+        let row = rows
+            .iter()
+            .find(|row| row.get::<&str, _>(0).eq_ignore_ascii_case(name))
+            .with_context(|| format!("{name} is missing from SHOW SESSION STATUS"))?;
+
+        Ok(row.try_get::<&str, _>(1)?.parse()?)
+    };
+
+    Ok((
+        counter("Com_stmt_prepare")?,
+        counter("Com_stmt_close")?,
+        counter("Com_stmt_reprepare")?,
+    ))
+}
+
 #[sqlx_macros::test]
 async fn it_can_work_with_transactions() -> anyhow::Result<()> {
     let mut conn = new::<MySql>().await?;
