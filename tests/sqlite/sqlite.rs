@@ -1396,6 +1396,38 @@ async fn it_can_recover_from_bad_transaction_begin() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[sqlx_macros::test]
+async fn it_resets_depth_when_sqlite_auto_rolls_back() -> anyhow::Result<()> {
+    let mut conn = SqliteConnectOptions::new()
+        .in_memory(true)
+        .connect()
+        .await?;
+
+    conn.execute("PRAGMA page_size = 512;").await?;
+    conn.execute("PRAGMA max_page_count = 2;").await?;
+    conn.execute("CREATE TABLE test (x TEXT);").await?;
+
+    let mut tx = conn.begin().await?;
+    // Trigger SQLITE_FULL by exceeding max_page_count
+    let res = sqlx::query("INSERT INTO test VALUES (zeroblob(2048));")
+        .execute(&mut *tx)
+        .await;
+    assert!(res.is_err());
+
+    // When SQLite automatically rolls back, rollback should succeed and reset depth
+    tx.rollback().await?;
+
+    // Subsequent begin_with must succeed instead of failing with InvalidSavePointStatement
+    let mut tx2 = conn.begin_with("BEGIN IMMEDIATE").await?;
+    let value = sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&mut *tx2)
+        .await?;
+    assert_eq!(value, 1);
+    tx2.commit().await?;
+
+    Ok(())
+}
+
 fn transaction_state(handle: &mut LockedSqliteHandle) -> SqliteTransactionState {
     use libsqlite3_sys::{sqlite3_txn_state, SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE};
 
