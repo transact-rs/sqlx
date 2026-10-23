@@ -75,6 +75,8 @@ async fn it_encrypts() -> anyhow::Result<()> {
 
     assert!(result.is_err());
 
+    conn.close().await?;
+
     Ok(())
 }
 
@@ -106,6 +108,8 @@ async fn it_can_store_and_read_encrypted_data() -> anyhow::Result<()> {
 
     assert!(result.len() > 0);
 
+    conn.close().await?;
+
     Ok(())
 }
 
@@ -136,6 +140,8 @@ async fn it_fails_if_password_is_incorrect() -> anyhow::Result<()> {
     conn.close().await?;
 
     assert!(result.is_err());
+
+    conn.close().await?;
 
     Ok(())
 }
@@ -182,6 +188,8 @@ async fn it_honors_order_of_encryption_pragmas() -> anyhow::Result<()> {
 
     assert!(result.len() > 0);
 
+    conn.close().await?;
+
     Ok(())
 }
 
@@ -217,6 +225,8 @@ async fn it_allows_to_rekey_the_db() -> anyhow::Result<()> {
     conn.close().await?;
 
     assert!(result.len() > 0);
+
+    conn.close().await?;
 
     Ok(())
 }
