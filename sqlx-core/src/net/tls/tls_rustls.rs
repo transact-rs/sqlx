@@ -67,7 +67,21 @@ impl<S: Socket> Socket for RustlsSocket<S> {
     }
 
     fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.poll_complete_io(cx)
+        // Only write out the pending TLS records: once nothing is left to write,
+        // `poll_complete_io()` reads and waits for the peer to send something,
+        // so a close (which flushes first) would hang if the peer has nothing more to say.
+        while self.state.wants_write() {
+            match self.state.write_tls(&mut self.inner) {
+                // The transport accepts no more; `complete_io()` treats this as EOF too.
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    ready!(self.inner.poll_ready(cx))?;
+                }
+                Err(e) => return Poll::Ready(Err(e)),
+            }
+        }
+        Poll::Ready(self.inner.flush())
     }
 
     fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -351,5 +365,151 @@ impl ServerCertVerifier for NoHostnameTlsVerifier {
 
     fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         self.verifier.supported_verify_schemes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::Waker;
+
+    use rustls::{ConnectionCommon, ServerConfig, ServerConnection};
+
+    use super::*;
+    use crate::net::BufferedSocket;
+
+    // A self-signed certificate and its key, for the test server only.
+    const CERT: &str = "\
+-----BEGIN CERTIFICATE-----
+MIIBIjCB1aADAgECAhQRcu62KABJbi99FYkUEAUGt9j9JDAFBgMrZXAwFDESMBAG
+A1UEAwwJbG9jYWxob3N0MCAXDTI2MTAwODIyMzE0OVoYDzIxMjYwOTE0MjIzMTQ5
+WjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwKjAFBgMrZXADIQCIT8wE5M9/LF5HKWU7
+hFe/SqknU66oA0FPmjfdziJ/IqM3MDUwFAYDVR0RBA0wC4IJbG9jYWxob3N0MB0G
+A1UdDgQWBBRarcSa6Ue2Ob0JlPlE/409LAm6STAFBgMrZXADQQBpNitWpyHm05qH
+3Z4w/YG/Ufe05/aDwRAwOKM9snf+pqJ8eG+WnxupOK9oJY/GpmTpW2XSBpVHyGRJ
+SmndpuEE
+-----END CERTIFICATE-----";
+
+    const KEY: &str = "\
+-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
+-----END PRIVATE KEY-----";
+
+    /// A peer that takes every write and never sends anything.
+    #[derive(Default)]
+    struct SilentPeer {
+        received: Vec<u8>,
+    }
+
+    impl Socket for SilentPeer {
+        fn try_read(&mut self, _buf: &mut dyn ReadBuf) -> io::Result<usize> {
+            Err(io::ErrorKind::WouldBlock.into())
+        }
+
+        fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.received.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn poll_read_ready(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Pending
+        }
+
+        fn poll_write_ready(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// Has `to` read and process `records`.
+    fn deliver<D>(mut records: &[u8], to: &mut ConnectionCommon<D>) {
+        while !records.is_empty() {
+            to.read_tls(&mut records).unwrap();
+            to.process_new_packets().unwrap();
+        }
+    }
+
+    /// Delivers the TLS records queued in `from` to `to`.
+    fn transfer<A, B>(from: &mut ConnectionCommon<A>, to: &mut ConnectionCommon<B>) {
+        let mut records = Vec::new();
+        while from.wants_write() {
+            from.write_tls(&mut records).unwrap();
+        }
+        deliver(&records, to);
+    }
+
+    #[track_caller]
+    fn assert_ready_ok(poll: Poll<io::Result<()>>) {
+        assert!(
+            matches!(poll, Poll::Ready(Ok(()))),
+            "expected `Ready(Ok(()))`, got {poll:?}"
+        );
+    }
+
+    // A flush with nothing left to write used to read and wait for the peer to send something,
+    // so a close, which flushes first, never ended if the peer had nothing more to say (#4449).
+    #[test]
+    fn flush_and_shutdown_do_not_wait_for_a_silent_peer() {
+        let mut cx = Context::from_waker(Waker::noop());
+
+        // The client's config as `sslmode=require` builds it; loading no files, it's ready at once.
+        let tls_config = TlsConfig {
+            accept_invalid_certs: true,
+            accept_invalid_hostnames: true,
+            root_cert_path: None,
+            client_cert_path: None,
+            client_key_path: None,
+        };
+        let Poll::Ready(Ok(RustlsConnector { config })) = pin!(connector(tls_config)).poll(&mut cx)
+        else {
+            panic!("`connector()` should be ready at once");
+        };
+
+        let server_config = ServerConfig::builder_with_provider(config.crypto_provider().clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from_pem_slice(CERT.as_bytes()).unwrap()],
+                PrivateKeyDer::from_pem_slice(KEY.as_bytes()).unwrap(),
+            )
+            .unwrap();
+        let mut server = ServerConnection::new(Arc::new(server_config)).unwrap();
+        let mut client =
+            ClientConnection::new(config, ServerName::try_from("localhost").unwrap()).unwrap();
+
+        // Complete the handshake in memory.
+        while client.is_handshaking() || server.is_handshaking() {
+            transfer(&mut client, &mut server);
+            transfer(&mut server, &mut client);
+        }
+
+        let mut socket = RustlsSocket {
+            inner: StdSocket::new(SilentPeer::default()),
+            state: client,
+            close_notify_sent: false,
+        };
+
+        // A write is flushed out.
+        assert_eq!(socket.try_write(b"ping").unwrap(), 4);
+        assert_ready_ok(socket.poll_flush(&mut cx));
+
+        // With nothing left to write, a flush must not wait for the peer.
+        assert_ready_ok(socket.poll_flush(&mut cx));
+
+        // `close_hard()` shuts down through `BufferedSocket::shutdown()`, which flushes first.
+        let mut socket = BufferedSocket::new(socket);
+        assert_ready_ok(pin!(socket.shutdown()).poll(&mut cx));
+
+        // The peer got the write, then the close_notify.
+        deliver(&socket.into_inner().inner.socket.received, &mut server);
+        let mut received = Vec::new();
+        server.reader().read_to_end(&mut received).unwrap();
+        assert_eq!(received, b"ping");
+        assert!(server.process_new_packets().unwrap().peer_has_closed());
     }
 }
