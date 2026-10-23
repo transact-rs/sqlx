@@ -47,6 +47,14 @@ test_type!(bytes<Vec<u8>>(Sqlite,
         == vec![0_u8, 0, 0, 0, 0x52]
 ));
 
+test_type!(byte_array_empty<[u8; 0]>(Sqlite,
+    "X''" == [0_u8; 0],
+));
+
+test_type!(byte_array<[u8; 4]>(Sqlite,
+    "X'DEADBEEF'" == [0xDE_u8, 0xAD, 0xBE, 0xEF],
+));
+
 #[cfg(feature = "json")]
 mod json_tests {
     use super::*;
