@@ -15,6 +15,8 @@ use crate::pool::options::PoolConnectionMetadata;
 
 const CLOSE_ON_DROP_TIMEOUT: Duration = Duration::from_secs(5);
 
+const RETURN_TO_POOL_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// A connection managed by a [`Pool`][crate::pool::Pool].
 ///
 /// Will be returned to the pool on-drop.
@@ -143,7 +145,14 @@ impl<DB: Database> PoolConnection<DB> {
 
         async move {
             let returned_to_pool = if let Some(floating) = floating {
-                floating.return_to_pool().await
+                // A silently dead peer never answers the ping/close, which would strand
+                // this task's permit; on timeout dropping `floating` releases it.
+                crate::rt::timeout(RETURN_TO_POOL_TIMEOUT, floating.return_to_pool())
+                    .await
+                    .unwrap_or_else(|_| {
+                        tracing::warn!("timed out returning connection to pool; discarding it");
+                        false
+                    })
             } else {
                 false
             };
