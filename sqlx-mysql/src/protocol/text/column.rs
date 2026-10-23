@@ -176,6 +176,7 @@ impl ColumnType {
         let is_binary = flags.contains(ColumnFlags::BINARY);
         let is_unsigned = flags.contains(ColumnFlags::UNSIGNED);
         let is_enum = flags.contains(ColumnFlags::ENUM);
+        let is_set = flags.contains(ColumnFlags::SET);
 
         match self {
             ColumnType::Tiny if max_size == Some(1) => "BOOLEAN",
@@ -205,8 +206,9 @@ impl ColumnType {
             ColumnType::Json => "JSON",
             ColumnType::Vector => "VECTOR",
 
-            ColumnType::String if is_binary => "BINARY",
             ColumnType::String if is_enum => "ENUM",
+            ColumnType::String if is_set => "SET",
+            ColumnType::String if is_binary => "BINARY",
             ColumnType::VarChar | ColumnType::VarString if is_binary => "VARBINARY",
 
             ColumnType::String => "CHAR",
@@ -292,5 +294,23 @@ mod tests {
             column.r#type.name(column.flags, Some(column.max_size)),
             "VECTOR"
         );
+    }
+
+    #[test]
+    fn names_enum_and_set_with_binary_collation() {
+        let enum_binary = ColumnFlags::ENUM | ColumnFlags::BINARY;
+        assert_eq!(ColumnType::String.name(enum_binary, None), "ENUM");
+
+        let set_binary = ColumnFlags::SET | ColumnFlags::BINARY;
+        assert_eq!(ColumnType::String.name(set_binary, None), "SET");
+
+        let set_plain = ColumnFlags::SET;
+        assert_eq!(ColumnType::String.name(set_plain, None), "SET");
+
+        let binary_plain = ColumnFlags::BINARY;
+        assert_eq!(ColumnType::String.name(binary_plain, None), "BINARY");
+
+        let char_plain = ColumnFlags::empty();
+        assert_eq!(ColumnType::String.name(char_plain, None), "CHAR");
     }
 }
