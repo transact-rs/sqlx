@@ -89,8 +89,12 @@ impl FrontendMessage for Bind<'_> {
 
         buf.extend(self.params);
 
-        let result_formats_len = u16::try_from(self.formats.len())
-            .map_err(|_| err_protocol!("too many result format codes ({})", self.formats.len()))?;
+        let result_formats_len = u16::try_from(self.result_formats.len()).map_err(|_| {
+            err_protocol!(
+                "too many result format codes ({})",
+                self.result_formats.len()
+            )
+        })?;
 
         buf.extend(result_formats_len.to_be_bytes());
 
@@ -104,3 +108,33 @@ impl FrontendMessage for Bind<'_> {
 
 // TODO: Unit Test Bind
 // TODO: Benchmark Bind
+
+#[cfg(test)]
+mod repro {
+    use super::Bind;
+    use crate::io::{PortalId, StatementId};
+    use crate::message::FrontendMessage;
+    use crate::PgValueFormat;
+
+    #[test]
+    fn repro_result_formats_count() {
+        let mut buf = Vec::new();
+        Bind {
+            portal: PortalId::UNNAMED,
+            statement: StatementId::UNNAMED,
+            formats: &[PgValueFormat::Binary],
+            num_params: 0,
+            params: &[],
+            result_formats: &[],
+        }
+        .encode_msg(&mut buf)
+        .unwrap();
+        // 'B' len(4) portal\0 stmt\0 | n_formats=1 | fmt | n_params=0 | n_result_formats=? (no codes follow)
+        let tail = &buf[buf.len() - 2..];
+        assert_eq!(
+            tail,
+            [0, 0],
+            "result-format count must be 0, message: {buf:?}"
+        );
+    }
+}
