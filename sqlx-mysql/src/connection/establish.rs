@@ -22,7 +22,21 @@ impl MySqlConnection {
 
         let stream = handshake?;
 
-        Ok(Self {
+        Ok(Self::establish_with_stream(stream, options))
+    }
+
+    pub(crate) async fn establish_with_socket<S: Socket>(
+        socket: S,
+        options: &MySqlConnectOptions,
+    ) -> Result<Self, Error> {
+        let do_handshake = DoHandshake::new(options)?;
+        let stream = do_handshake.with_socket(socket).await?;
+
+        Ok(Self::establish_with_stream(stream, options))
+    }
+
+    fn establish_with_stream(stream: MySqlStream, options: &MySqlConnectOptions) -> Self {
+        Self {
             inner: Box::new(MySqlConnectionInner {
                 stream,
                 transaction_depth: 0,
@@ -30,7 +44,7 @@ impl MySqlConnection {
                 cache_statement: StatementCache::new(options.statement_cache_capacity),
                 log_settings: options.log_settings.clone(),
             }),
-        })
+        }
     }
 }
 
