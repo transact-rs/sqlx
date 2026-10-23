@@ -321,7 +321,7 @@ impl PgListener {
 
                 // Mark the connection as ready for another query
                 BackendMessageFormat::ReadyForQuery => {
-                    self.connection().await?.inner.pending_ready_for_query_count -= 1;
+                    self.connection().await?.handle_ready_for_query(message)?;
                 }
 
                 // Ignore unexpected messages

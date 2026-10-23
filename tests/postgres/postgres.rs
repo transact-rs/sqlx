@@ -1788,6 +1788,50 @@ async fn it_can_copy_out() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_can_reuse_connection_after_cancelled_copy_out() -> anyhow::Result<()> {
+    use sqlx::postgres::PgPoolCopyExt;
+    use sqlx_core::rt::timeout;
+
+    let mut setup = new::<Postgres>().await?;
+    setup
+        .execute("CREATE TABLE IF NOT EXISTS _sqlx_copy_out_cancel (id INT)")
+        .await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    let mut lock = setup.begin().await?;
+    lock.execute("LOCK TABLE _sqlx_copy_out_cancel IN ACCESS EXCLUSIVE MODE")
+        .await?;
+
+    let copy = async {
+        let mut stream = pool
+            .copy_out_raw("COPY (SELECT id FROM _sqlx_copy_out_cancel) TO STDOUT")
+            .await?;
+        while stream.try_next().await?.is_some() {}
+        Ok::<_, sqlx::Error>(())
+    };
+    assert!(
+        timeout(Duration::from_millis(200), copy).await.is_err(),
+        "COPY should time out while the table is locked"
+    );
+
+    lock.commit().await?;
+
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
+    assert_eq!(one, 1);
+
+    let mut stream = pool
+        .copy_out_raw("COPY (SELECT id FROM _sqlx_copy_out_cancel) TO STDOUT")
+        .await?;
+    while stream.try_next().await?.is_some() {}
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_encodes_custom_array_issue_1504() -> anyhow::Result<()> {
     use sqlx::encode::IsNull;
     use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo};
@@ -2314,6 +2358,140 @@ async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<
     // and the pooled connection is still usable
     let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
     assert_eq!(one, 1);
+
+    Ok(())
+}
+
+// `Pool` skips its release test for a connection that reports itself protocol-idle, so the report must be `false` in every state an interrupted or unfinished operation can leave behind.
+#[sqlx_macros::test]
+async fn it_is_protocol_idle_only_with_nothing_in_flight() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+    assert!(conn.is_protocol_idle(), "a new connection");
+
+    sqlx::query("SELECT 1").execute(&mut conn).await?;
+    assert!(conn.is_protocol_idle(), "after a completed query");
+
+    {
+        let mut rows = sqlx::query("SELECT generate_series(1, 100000)").fetch(&mut conn);
+        rows.try_next().await?;
+    }
+    assert!(
+        !conn.is_protocol_idle(),
+        "a dropped result stream still owes its remaining rows"
+    );
+    conn.ping().await?;
+    assert!(conn.is_protocol_idle(), "after the stream was drained");
+
+    assert!(sqlx::query("SELECT 1 / 0")
+        .execute(&mut conn)
+        .await
+        .is_err());
+    assert!(
+        !conn.is_protocol_idle(),
+        "a failed statement leaves its ReadyForQuery unread"
+    );
+    conn.ping().await?;
+    assert!(conn.is_protocol_idle());
+
+    let tx = conn.begin().await?;
+    drop(tx);
+    assert!(
+        !conn.is_protocol_idle(),
+        "a dropped transaction queues its ROLLBACK"
+    );
+    conn.ping().await?;
+    assert!(conn.is_protocol_idle());
+
+    conn.execute("BEGIN").await?;
+    assert!(
+        !conn.is_protocol_idle(),
+        "inside a transaction block the client did not open"
+    );
+    conn.execute("ROLLBACK").await?;
+    assert!(conn.is_protocol_idle());
+
+    let lock = PgAdvisoryLock::new("sqlx-postgres-protocol-idle");
+    drop(lock.acquire(&mut conn).await?);
+    assert!(
+        !conn.is_protocol_idle(),
+        "a dropped advisory lock guard queues its release"
+    );
+    conn.ping().await?;
+    assert!(conn.is_protocol_idle());
+
+    conn.execute("CREATE TEMPORARY TABLE protocol_idle_copy (id INT)")
+        .await?;
+    let copy = conn
+        .copy_in_raw("COPY protocol_idle_copy (id) FROM STDIN")
+        .await?;
+    drop(copy);
+    assert!(
+        !conn.is_protocol_idle(),
+        "a dropped copy queues its CopyFail and still owes its ReadyForQuery"
+    );
+    assert!(
+        conn.ping().await.is_err(),
+        "the next use reports the aborted copy"
+    );
+    conn.ping().await?;
+    assert!(conn.is_protocol_idle());
+    let two: i32 = sqlx::query_scalar("SELECT 2").fetch_one(&mut conn).await?;
+    assert_eq!(two, 2, "the connection is back in step with the server");
+
+    Ok(())
+}
+
+// Regression: `COPY ... FROM STDIN` did not count the `ReadyForQuery` it is owed. A `finish()` cancelled while the server was still processing the copy left the connection looking idle, with `CommandComplete` and `ReadyForQuery` still to arrive as the replies to the next statement.
+#[sqlx_macros::test]
+async fn it_flushes_a_pooled_copy_in_cancelled_during_finish() -> anyhow::Result<()> {
+    use sqlx::postgres::PgPoolCopyExt;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    // Temporary objects keep the test self-contained; the single-connection pool keeps them visible.
+    sqlx::raw_sql(
+        r#"
+        CREATE TEMPORARY TABLE copy_in_cancel (id INT);
+        CREATE FUNCTION pg_temp.slow_statement() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN PERFORM pg_sleep(1); RETURN NULL; END
+        $$;
+        CREATE TRIGGER slow_statement AFTER INSERT ON copy_in_cancel
+            FOR EACH STATEMENT EXECUTE FUNCTION pg_temp.slow_statement();
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&pool)
+        .await?;
+
+    let mut copy = pool
+        .copy_in_raw("COPY copy_in_cancel (id) FROM STDIN")
+        .await?;
+    copy.send(b"1\n".as_slice()).await?;
+    // The statement trigger runs after the last row, so `finish()` is still waiting for `CommandComplete`.
+    let cancelled = sqlx_core::rt::timeout(Duration::from_millis(200), copy.finish()).await;
+    assert!(cancelled.is_err(), "the copy should not have finished yet");
+
+    let (reused, two): (i32, i32) = sqlx::query_as("SELECT pg_backend_pid(), 2")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(two, 2);
+    assert_eq!(
+        reused, pid,
+        "the connection should have been flushed, not replaced"
+    );
+
+    let copied: i64 = sqlx::query_scalar("SELECT count(*) FROM copy_in_cancel")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(
+        copied, 1,
+        "the cancelled finish still completed on the server"
+    );
 
     Ok(())
 }

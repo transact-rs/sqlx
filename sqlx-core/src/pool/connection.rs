@@ -304,6 +304,12 @@ impl<DB: Database> Floating<DB, Live<DB>> {
             }
         }
 
+        // The test below exists to flush protocol state that an interrupted operation left behind. A driver that can prove there is none lets the connection skip that round trip. Liveness is checked on acquire (`test_before_acquire`) like for any idle connection.
+        if self.raw.is_protocol_idle() {
+            self.release();
+            return true;
+        }
+
         // test the connection on-release to ensure it is still viable,
         // and flush anything time-sensitive like transaction rollbacks
         // if an Executor future/stream is dropped during an `.await` call, the connection
