@@ -3,8 +3,10 @@ use std::env::var;
 use std::fmt::{self, Display, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use sqlx_core::net::tls::TlsConnector;
+use sqlx_core::net::TcpKeepalive;
 pub use ssl_mode::PgSslMode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
@@ -29,6 +31,8 @@ pub struct PgConnectOptions {
     pub(crate) log_settings: LogSettings,
     pub(crate) extra_float_digits: Option<Cow<'static, str>>,
     pub(crate) options: Option<String>,
+    pub(crate) tcp_keepalive: Option<TcpKeepalive>,
+    pub(crate) tcp_user_timeout: Option<Duration>,
 }
 
 impl Default for PgConnectOptions {
@@ -108,6 +112,8 @@ impl PgConnectOptions {
             extra_float_digits: Some("2".into()),
             log_settings: Default::default(),
             options: var("PGOPTIONS").ok(),
+            tcp_keepalive: None,
+            tcp_user_timeout: None,
         }
     }
 
@@ -389,6 +395,56 @@ impl PgConnectOptions {
         self
     }
 
+    /// Enables TCP keepalive on the server connection with the given parameters, or disables it
+    /// with `None`.
+    ///
+    /// Without keepalive, a connection waiting for a response from a server that disappeared
+    /// without closing the socket (a failover, a killed container, a dropped NAT mapping) waits
+    /// forever. This mirrors libpq's `keepalives_idle`, `keepalives_interval` and
+    /// `keepalives_count`; see [`TcpKeepalive`] for the parameters and their platform support.
+    /// Unlike libpq, keepalive is off by default. It is ignored on Unix-domain sockets.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_core::net::TcpKeepalive;
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new().tcp_keepalive(
+    ///     TcpKeepalive::new()
+    ///         .with_idle(Duration::from_secs(30))
+    ///         .with_interval(Duration::from_secs(10))
+    ///         .with_retries(3),
+    /// );
+    /// ```
+    pub fn tcp_keepalive(mut self, keepalive: impl Into<Option<TcpKeepalive>>) -> Self {
+        self.tcp_keepalive = keepalive.into();
+        self
+    }
+
+    /// Sets `TCP_USER_TIMEOUT` on the server connection, or keeps the operating system default
+    /// with `None`.
+    ///
+    /// The kernel drops the connection once sent data, keepalive probes included, has gone
+    /// unacknowledged for `timeout`. Without it, Linux retransmits for about 15 minutes before it
+    /// fails a connection whose server stopped answering without a FIN or RST, such as one lost in
+    /// a failover. This mirrors libpq's `tcp_user_timeout`. A zero duration also keeps the
+    /// default, and the kernel counts whole milliseconds, so a shorter non-zero `timeout` becomes
+    /// one. Only Linux, Android, Fuchsia and Cygwin have the option; elsewhere, and on Unix-domain
+    /// sockets, it is ignored.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new().tcp_user_timeout(Duration::from_secs(60));
+    /// ```
+    pub fn tcp_user_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.tcp_user_timeout = timeout.into();
+        self
+    }
+
     /// Sets or removes the `extra_float_digits` connection option.
     ///
     /// This changes the default precision of floating-point values returned in text mode (when
@@ -600,6 +656,36 @@ impl PgConnectOptions {
     /// ```
     pub fn get_options(&self) -> Option<&str> {
         self.options.as_deref()
+    }
+
+    /// Get the TCP keepalive parameters, if keepalive is enabled.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_core::net::TcpKeepalive;
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let keepalive = TcpKeepalive::new().with_idle(Duration::from_secs(30));
+    /// let options = PgConnectOptions::new().tcp_keepalive(keepalive);
+    /// assert_eq!(options.get_tcp_keepalive(), Some(keepalive));
+    /// ```
+    pub fn get_tcp_keepalive(&self) -> Option<TcpKeepalive> {
+        self.tcp_keepalive
+    }
+
+    /// Get the `TCP_USER_TIMEOUT`, if set.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use std::time::Duration;
+    /// # use sqlx_postgres::PgConnectOptions;
+    /// let options = PgConnectOptions::new().tcp_user_timeout(Duration::from_secs(60));
+    /// assert_eq!(options.get_tcp_user_timeout(), Some(Duration::from_secs(60)));
+    /// ```
+    pub fn get_tcp_user_timeout(&self) -> Option<Duration> {
+        self.tcp_user_timeout
     }
 }
 

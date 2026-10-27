@@ -38,6 +38,11 @@ if a parameter is not passed in via URL, it is populated by reading
 | `sslkey`           | `PGSSLKEY`           | Unset. See [Note: SSL](#note-ssl).                          |
 | `options`          | `PGOPTIONS`          | Unset.                                                      |
 | `application_name` | `PGAPPNAME`          | Unset.                                                      |
+| `keepalives`       |                      | Off. See [Note: Keepalive](#note-keepalive).                |
+| `keepalives_idle`  |                      | Unset. See [Note: Keepalive](#note-keepalive).              |
+| `keepalives_interval` |                   | Unset. See [Note: Keepalive](#note-keepalive).              |
+| `keepalives_count` |                      | Unset. See [Note: Keepalive](#note-keepalive).              |
+| `tcp_user_timeout` |                      | Unset. Milliseconds; `0` is the system default.             |
 
 [`passfile`] handling may be bypassed using [`PgConnectOptions::new_without_pgpass()`].
 
@@ -104,6 +109,11 @@ it is parsed directly.
 This behavior is _only_ implemented for the environment variables, not the URL parameters.
 
 Note: passing the SSL private key via environment variable may be a security risk.
+
+# Note: Keepalive
+The `keepalives_*` parameters set [`TcpKeepalive`](sqlx_core::net::TcpKeepalive) through [`PgConnectOptions::tcp_keepalive()`], with the same meaning as in libpq: `keepalives_idle` and `keepalives_interval` in seconds, `keepalives_count` as a number of probes, and `0` for the system default.
+
+Unlike libpq, keepalive is off by default. `keepalives=1`, or any of the `keepalives_*` parameters, turns it on, and `keepalives=0` turns it off regardless of the others.
 
 # Note: TimeZone
 Upon connection, SQLx sets the session `TimeZone` parameter to `UTC`,
