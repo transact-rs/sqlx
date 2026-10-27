@@ -269,6 +269,7 @@ where
                 let delimiter = ',';
                 let mut done = false;
                 let mut in_quotes = false;
+                let mut was_quoted = false;
                 let mut in_escape = false;
                 let mut value = String::with_capacity(10);
                 let mut chars = s.chars();
@@ -285,6 +286,7 @@ where
 
                                 '"' => {
                                     in_quotes = !in_quotes;
+                                    was_quoted = true;
                                 }
 
                                 '\\' => {
@@ -307,7 +309,7 @@ where
                         }
                     }
 
-                    let value_opt = if value == "NULL" {
+                    let value_opt = if !was_quoted && value == "NULL" {
                         None
                     } else {
                         Some(value.as_bytes())
@@ -321,10 +323,60 @@ where
                     })?);
 
                     value.clear();
+                    was_quoted = false;
                 }
 
                 Ok(elements)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decode::Decode;
+
+    #[test]
+    fn test_text_array_decode_quoted_null() {
+        let s = "{\"NULL\",NULL,null}";
+        let value_ref = PgValueRef {
+            value: Some(s.as_bytes()),
+            row: None,
+            type_info: PgTypeInfo::with_name("text[]"),
+            format: PgValueFormat::Text,
+        };
+
+        let decoded: Vec<Option<String>> =
+            <Vec<Option<String>> as Decode<Postgres>>::decode(value_ref).unwrap();
+        assert_eq!(
+            decoded,
+            vec![
+                Some("NULL".to_string()),
+                None,
+                Some("null".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_text_array_decode_string_vec_quoted_null() {
+        let s = "{\"NULL\",\"foo\"}";
+        let value_ref = PgValueRef {
+            value: Some(s.as_bytes()),
+            row: None,
+            type_info: PgTypeInfo::with_name("text[]"),
+            format: PgValueFormat::Text,
+        };
+
+        let decoded: Vec<String> =
+            <Vec<String> as Decode<Postgres>>::decode(value_ref).unwrap();
+        assert_eq!(
+            decoded,
+            vec![
+                "NULL".to_string(),
+                "foo".to_string(),
+            ]
+        );
     }
 }

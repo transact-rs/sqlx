@@ -86,6 +86,14 @@ test_type!(string_vec<Vec<String>>(Postgres,
 
     "array['Hello, World', '', 'Goodbye']::text[]"
         == vec!["Hello, World", "", "Goodbye"],
+
+    "array['NULL', 'null']::text[]"
+        == vec!["NULL", "null"],
+));
+
+test_type!(string_vec_opt<Vec<Option<String>>>(Postgres,
+    "array['NULL', NULL, 'null']::text[]"
+        == vec![Some("NULL".to_string()), None, Some("null".to_string())],
 ));
 
 test_type!(string_array<[String; 3]>(Postgres,
