@@ -94,7 +94,10 @@ pub struct RustlsConnector {
 
 pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {
     #[cfg(all(
-        feature = "_tls-rustls-aws-lc-rs",
+        any(
+            feature = "_tls-rustls-aws-lc-rs",
+            feature = "_tls-rustls-aws-lc-rs-native-roots"
+        ),
         not(feature = "_tls-rustls-ring-webpki"),
         not(feature = "_tls-rustls-ring-native-roots")
     ))]

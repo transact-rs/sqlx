@@ -36,8 +36,8 @@ jobs:
         runtime: [ async-global-executor, smol, tokio ]
         tls: [ native-tls, rustls, none ]
         include:
-          - runtime: async-std
-            tls: rustls
+          - { runtime: async-std, tls: rustls }
+          - { runtime: tokio, tls: rustls-aws-lc-rs-native-roots }
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -378,6 +378,8 @@ jobs:
         postgres: [ 13, 17 ]
         runtime: [ async-std, tokio ]
         tls: [ native-tls, rustls-aws-lc-rs, rustls-ring ]
+        include:
+          - { postgres: 17, runtime: tokio, tls: rustls-aws-lc-rs-native-roots }
     needs: check
     timeout-minutes: 30
     steps:
