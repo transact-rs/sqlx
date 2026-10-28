@@ -13,6 +13,8 @@ use crate::message::{
     BackendMessage, BackendMessageFormat, EncodeMessage, FrontendMessage, Notice, Notification,
     ParameterStatus, ReceivedMessage,
 };
+#[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))]
+use crate::net::WithSocket;
 use crate::net::{self, BufferedSocket, Socket};
 use crate::{PgConnectOptions, PgDatabaseError, PgSeverity};
 
@@ -48,6 +50,21 @@ impl PgStream {
         };
 
         let socket = socket_result?;
+
+        Ok(Self {
+            inner: BufferedSocket::new(socket),
+            notifications: None,
+            parameter_statuses: BTreeMap::default(),
+            server_version_num: None,
+        })
+    }
+
+    #[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))]
+    pub(super) async fn with_socket<S: Socket>(
+        socket: S,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error> {
+        let socket = MaybeUpgradeTls(options).with_socket(socket).await?;
 
         Ok(Self {
             inner: BufferedSocket::new(socket),

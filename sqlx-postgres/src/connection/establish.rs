@@ -16,9 +16,67 @@ use super::PgConnectionInner;
 
 impl PgConnection {
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
-        // Upgrade to TLS if we were asked to and the server supports it
-        let mut stream = PgStream::connect(options).await?;
+        let stream = PgStream::connect(options).await?;
+        Self::establish_with_stream(stream, options).await
+    }
 
+    /// Connect to a PostgreSQL server over a pre-connected stream implementing
+    /// tokio's [`AsyncRead`][tokio::io::AsyncRead] + [`AsyncWrite`][tokio::io::AsyncWrite].
+    ///
+    /// This allows using custom transport layers (e.g., vsock for AWS Nitro Enclaves,
+    /// QUIC streams, simulation frameworks like `turmoil`, or proxied connections)
+    /// without forking sqlx.
+    ///
+    /// TLS upgrade is negotiated automatically based on `options.ssl_mode`.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use sqlx::postgres::{PgConnectOptions, PgConnection};
+    ///
+    /// # async fn example() -> Result<(), sqlx::Error> {
+    /// let stream = tokio::net::TcpStream::connect("127.0.0.1:5432").await?;
+    /// let options = PgConnectOptions::new()
+    ///     .username("postgres")
+    ///     .database("mydb");
+    /// let conn = PgConnection::connect_raw_tokio(stream, &options).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "_rt-tokio")]
+    pub async fn connect_raw_tokio<S>(stream: S, options: &PgConnectOptions) -> Result<Self, Error>
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + Unpin + 'static,
+    {
+        use crate::net::TokioStream;
+        let stream = PgStream::with_socket(TokioStream::new(stream), options).await?;
+        Self::establish_with_stream(stream, options).await
+    }
+
+    /// Connect to a PostgreSQL server over a pre-connected stream implementing
+    /// futures-io's [`AsyncRead`][futures_io::AsyncRead] + [`AsyncWrite`][futures_io::AsyncWrite].
+    ///
+    /// This allows using custom transport layers (e.g., vsock, QUIC streams,
+    /// simulation frameworks, or proxied connections) without forking sqlx.
+    ///
+    /// TLS upgrade is negotiated automatically based on `options.ssl_mode`.
+    #[cfg(feature = "_rt-async-io")]
+    pub async fn connect_raw_futures<S>(
+        stream: S,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error>
+    where
+        S: futures_io::AsyncRead + futures_io::AsyncWrite + Send + Sync + Unpin + 'static,
+    {
+        use crate::net::FuturesStream;
+        let stream = PgStream::with_socket(FuturesStream::new(stream), options).await?;
+        Self::establish_with_stream(stream, options).await
+    }
+
+    async fn establish_with_stream(
+        mut stream: PgStream,
+        options: &PgConnectOptions,
+    ) -> Result<Self, Error> {
         // To begin a session, a frontend opens a connection to the server
         // and sends a startup message.
 
