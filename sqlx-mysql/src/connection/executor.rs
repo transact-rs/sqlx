@@ -375,8 +375,20 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
             let nullable = columns
                 .iter()
                 .map(|col| {
-                    col.flags
-                        .map(|flags| !flags.contains(crate::protocol::text::ColumnFlags::NOT_NULL))
+                    use crate::protocol::text::{ColumnFlags, ColumnType};
+
+                    col.flags.map(|flags| {
+                        // A `NOT NULL` temporal column can still hold a "zero date"
+                        // (e.g. `0000-00-00 00:00:00`), which SQLx decodes as `NULL`/`None`
+                        // (see `MySqlValueRef::is_null`). Such a value would fail to decode
+                        // into a non-`Option` field, so we treat these columns as nullable
+                        // for compile-time inference regardless of the `NOT_NULL` flag.
+                        !flags.contains(ColumnFlags::NOT_NULL)
+                            || matches!(
+                                col.type_info.r#type,
+                                ColumnType::Date | ColumnType::Datetime | ColumnType::Timestamp
+                            )
+                    })
                 })
                 .collect();
 
