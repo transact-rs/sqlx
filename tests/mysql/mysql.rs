@@ -779,3 +779,52 @@ async fn test_client_found_rows() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Regression: a future cancelled while `BEGIN`'s round trip is in flight left the session
+// inside a transaction. `start_rollback` is a no-op while `transaction_depth` is zero, and the
+// depth was raised only after the await, so nothing queued a `ROLLBACK`, and the pool handed the
+// connection to the next borrower, whose autocommit statements then ran inside that transaction.
+#[sqlx_macros::test]
+async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<()> {
+    use std::time::Duration;
+
+    let mut conn = new::<MySql>().await?;
+    conn.execute("CREATE TABLE IF NOT EXISTS cancelled_begin_testing (id INT PRIMARY KEY)")
+        .await?;
+    conn.execute("DELETE FROM cancelled_begin_testing").await?;
+
+    let pool = MySqlPoolOptions::new()
+        .max_connections(1)
+        .min_connections(0)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    // A plain `BEGIN` answers too quickly to cancel reliably; the sleep widens the same
+    // round trip so the cancellation lands inside it.
+    let cancelled = sqlx_core::rt::timeout(
+        Duration::from_millis(300),
+        pool.begin_with(sqlx::AssertSqlSafe("BEGIN; SELECT SLEEP(2);".to_string())),
+    )
+    .await;
+    assert!(cancelled.is_err(), "the begin should not have completed");
+
+    // Outlast the sleep, so the abandoned statement has answered.
+    sqlx_core::rt::sleep(Duration::from_millis(3500)).await;
+
+    // An autocommit write through the pool must be visible to another connection.
+    pool.execute("INSERT INTO cancelled_begin_testing VALUES (1)")
+        .await?;
+    let visible: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM cancelled_begin_testing")
+        .fetch_one(&mut conn)
+        .await?;
+
+    pool.close().await;
+    conn.execute("DROP TABLE cancelled_begin_testing").await?;
+
+    assert_eq!(
+        visible, 1,
+        "the write ran inside a transaction left open by the cancelled begin"
+    );
+
+    Ok(())
+}
