@@ -108,6 +108,7 @@ impl WithSocket for MapStream {
             capabilities: self.capabilities,
             sequence_id: self.sequence_id,
             waiting: self.waiting,
+            close_pending: Vec::new(),
             is_tls: true,
         }
     }
