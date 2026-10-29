@@ -2,6 +2,7 @@ use crate::error::Error;
 use crate::pool::PoolOptions;
 use crate::testing::{FixtureSnapshot, TestArgs, TestContext, TestSupport};
 use crate::{Sqlite, SqliteConnectOptions};
+use sqlx_core::config::Config;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 
@@ -50,15 +51,27 @@ async fn test_context(args: &TestArgs) -> Result<TestContext<Sqlite>, Error> {
             .expect("failed to remove database from previous test run");
     }
 
-    Ok(TestContext {
-        connect_opts: SqliteConnectOptions::new()
+    let connect_opts = apply_sqlx_toml_config(
+        SqliteConnectOptions::new()
             .filename(&db_path)
             .create_if_missing(true),
+    )?;
+
+    Ok(TestContext {
+        connect_opts,
         // This doesn't really matter for SQLite as the databases are independent of each other.
         // The main limitation is going to be the number of concurrent running tests.
         pool_opts: PoolOptions::new().max_connections(1000),
         db_name: db_path,
     })
+}
+
+/// Apply `drivers.sqlite` config from `sqlx.toml` (e.g. `unsafe-load-extensions`)
+/// so that `#[sqlx::test]` databases behave the same as connections made via
+/// `sqlx::query!()` or `sqlx-cli`, which already read this configuration.
+fn apply_sqlx_toml_config(opts: SqliteConnectOptions) -> Result<SqliteConnectOptions, Error> {
+    let config = Config::try_from_crate_or_default().map_err(Error::config)?;
+    opts.apply_driver_config(&config.drivers.sqlite)
 }
 
 fn convert_path(test_path: &str) -> String {
@@ -80,4 +93,27 @@ fn test_convert_path() {
     let path = convert_path("foo::bar::baz::quux");
 
     assert_eq!(path, "target/sqlx/test-dbs/foo/bar/baz/quux.sqlite");
+}
+
+// Regression test for https://github.com/launchbadge/sqlx/issues/4372:
+// `test_context()` built `SqliteConnectOptions` directly and never applied
+// `drivers.sqlite` from `sqlx.toml`, unlike `sqlx::query!()` and `sqlx-cli`
+// (see `SqliteConnectOptions::apply_driver_config`).
+//
+// `sqlx-sqlite/sqlx.toml` (this crate's own, used only by this test) sets
+// `unsafe-load-extensions` to a marker name. Before the fix, this config was
+// never read at all; after the fix, `apply_sqlx_toml_config()` (used by
+// `test_context()`) applies it to the options `#[sqlx::test]` connects with.
+#[cfg(feature = "load-extension")]
+#[test]
+fn test_context_applies_sqlx_toml_driver_config() {
+    let opts = apply_sqlx_toml_config(SqliteConnectOptions::new())
+        .expect("applying sqlx-sqlite/sqlx.toml's `unsafe-load-extensions` should succeed regardless of whether the named extension actually exists, since SQLite only loads it lazily on connect");
+
+    assert!(
+        opts.extensions
+            .contains_key("sqlx-issue-4372-regression-test-marker"),
+        "expected `unsafe-load-extensions` from sqlx-sqlite/sqlx.toml to be applied, got: {:?}",
+        opts.extensions
+    );
 }
