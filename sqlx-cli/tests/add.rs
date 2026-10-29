@@ -1,7 +1,7 @@
 use anyhow::Context;
 use assert_cmd::cargo_bin_cmd;
 use std::cmp::Ordering;
-use std::fs::read_dir;
+use std::fs::{create_dir_all, read_dir, read_to_string, write};
 use std::ops::Index;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -177,6 +177,90 @@ fn recurse_files(path: impl AsRef<Path>) -> anyhow::Result<Vec<PathBuf>> {
     }
     buf.sort();
     Ok(buf)
+}
+
+fn find_migration(migrations: &Path, suffix: &str) -> anyhow::Result<PathBuf> {
+    read_dir(migrations)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(suffix))
+        })
+        .with_context(|| format!("migration ending in {suffix:?} was not created"))
+}
+
+#[test]
+fn add_migration_uses_simple_template() -> anyhow::Result<()> {
+    let tempdir = TempDir::new()?;
+    let migrations = tempdir.path().join("migrations");
+    let template = "-- Explain why this migration is necessary.\n";
+
+    create_dir_all(&migrations)?;
+    write(migrations.join(".template.sql"), template)?;
+
+    cargo_bin_cmd!("cargo-sqlx")
+        .current_dir(&tempdir)
+        .args(["sqlx", "migrate", "add", "create users", "--sequential"])
+        .assert()
+        .success();
+
+    let migration = find_migration(&migrations, "_create_users.sql")?;
+
+    assert_eq!(read_to_string(migration)?, template);
+
+    Ok(())
+}
+
+#[test]
+fn add_migration_uses_reversible_templates() -> anyhow::Result<()> {
+    let tempdir = TempDir::new()?;
+    let migrations = tempdir.path().join("migrations");
+    let up_template = "-- Explain how to apply this migration.\n";
+    let down_template = "-- Explain how to revert this migration.\n";
+
+    create_dir_all(&migrations)?;
+    write(migrations.join(".template.up.sql"), up_template)?;
+    write(migrations.join(".template.down.sql"), down_template)?;
+
+    cargo_bin_cmd!("cargo-sqlx")
+        .current_dir(&tempdir)
+        .args([
+            "sqlx",
+            "migrate",
+            "add",
+            "create users",
+            "--reversible",
+            "--sequential",
+        ])
+        .assert()
+        .success();
+
+    let up_migration = find_migration(&migrations, "_create_users.up.sql")?;
+    let down_migration = find_migration(&migrations, "_create_users.down.sql")?;
+
+    assert_eq!(read_to_string(up_migration)?, up_template);
+    assert_eq!(read_to_string(down_migration)?, down_template);
+
+    Ok(())
+}
+
+#[test]
+fn add_migration_uses_default_content_without_template() -> anyhow::Result<()> {
+    let tempdir = TempDir::new()?;
+
+    cargo_bin_cmd!("cargo-sqlx")
+        .current_dir(&tempdir)
+        .args(["sqlx", "migrate", "add", "create users", "--sequential"])
+        .assert()
+        .success();
+
+    let migration = find_migration(&tempdir.path().join("migrations"), "_create_users.sql")?;
+
+    assert_eq!(read_to_string(migration)?, "-- Add migration script here\n");
+
+    Ok(())
 }
 
 #[test]
