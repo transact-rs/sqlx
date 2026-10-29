@@ -453,6 +453,10 @@ impl<DB: Database> PoolOptions<DB> {
     /// and the connection is closed, allowing a task waiting on [`Pool::acquire`] to
     /// open a new one in its place.
     ///
+    /// Returning a connection to the pool, including this callback and the subsequent
+    /// health check or connection shutdown, has a five-second timeout. If it expires,
+    /// the operation is cancelled and the connection is discarded.
+    ///
     /// # Example (Postgres): Close Memory-Hungry Connections
     /// Instead of relying on [`max_lifetime`][Self::max_lifetime] to close connections,
     /// we can monitor their memory usage directly and close any that have allocated too much.
