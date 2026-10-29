@@ -87,6 +87,40 @@ impl BackendMessage for Authentication {
     }
 }
 
+/// The server's reply to an `OAUTHBEARER` initial client response.
+///
+/// The OAUTHBEARER exchange does not reuse [`AuthenticationSaslContinue`], whose body is a set
+/// of SCRAM attributes: on failure the server sends a JSON error document instead, and it must
+/// be read verbatim.
+#[derive(Debug)]
+pub enum OAuthBearerResponse {
+    /// The token was accepted. OAUTHBEARER carries no server signature, so the server sends no
+    /// SASL final message and `AuthenticationOk` arrives directly.
+    Ok,
+
+    /// The token was rejected. The body is the server's JSON status document, which names the
+    /// issuer and the required scope.
+    Failure(Bytes),
+}
+
+impl BackendMessage for OAuthBearerResponse {
+    const FORMAT: BackendMessageFormat = BackendMessageFormat::Authentication;
+
+    fn decode_body(mut buf: Bytes) -> Result<Self, Error> {
+        Ok(match buf.get_u32() {
+            0 => OAuthBearerResponse::Ok,
+            11 => OAuthBearerResponse::Failure(buf),
+
+            ty => {
+                return Err(err_protocol!(
+                    "unexpected authentication message {} during OAUTHBEARER exchange",
+                    ty
+                ));
+            }
+        })
+    }
+}
+
 /// Body of [Authentication::Md5Password].
 #[derive(Debug)]
 pub struct AuthenticationMd5Password {
