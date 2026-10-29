@@ -147,6 +147,33 @@ impl PgConnection {
         }
     }
 
+    /// The transaction status the server reported in the most recent
+    /// [`ReadyForQuery`][crate::message::ReadyForQuery] message.
+    ///
+    /// This is the *server's* view of the session, which is not always the
+    /// client's: [`Connection::is_in_transaction`] reports the client-side
+    /// transaction depth, and that depth can be zero while the server is
+    /// inside a block. A future cancelled while `BEGIN` is in flight, or a
+    /// statement that fails inside a block opened by a multi-statement
+    /// [`raw_sql`][crate::raw_sql] query, both leave the session in
+    /// [`TransactionStatus::Transaction`] or [`TransactionStatus::Error`]
+    /// with a depth of zero.
+    ///
+    /// Reading this costs no round trip: the status byte rides along on every
+    /// `ReadyForQuery`, so it is already in memory.
+    ///
+    /// ```rust,no_run
+    /// # use sqlx_postgres::{PgConnection, TransactionStatus};
+    /// # fn example(conn: &PgConnection) {
+    /// if conn.transaction_status() != TransactionStatus::Idle {
+    ///     // the session is inside a transaction block, open or failed
+    /// }
+    /// # }
+    /// ```
+    pub fn transaction_status(&self) -> TransactionStatus {
+        self.inner.transaction_status
+    }
+
     pub(crate) async fn invalidate_cached_statement(
         &mut self,
         sql: &str,
@@ -209,7 +236,27 @@ impl Connection for PgConnection {
 
         // The simplest call-and-response that's possible.
         self.write_sync();
-        self.wait_until_ready().await
+        self.wait_until_ready().await?;
+
+        // `wait_until_ready` has just refreshed `transaction_status` from the server's own
+        // `ReadyForQuery`, so this is free -- and it is the only view that catches a session
+        // left inside a block with a client-side depth of zero. `Pool` pings on release, which
+        // makes this the point where such a connection is cleaned up instead of being handed
+        // to the next borrower. See `transaction_status` for how the depth comes to disagree.
+        if self.inner.transaction_depth == 0
+            && self.inner.transaction_status != TransactionStatus::Idle
+        {
+            // The depth guard above matters: `ping` is public and a caller may well use it
+            // inside a transaction they are deliberately holding. A non-zero depth means the
+            // client knows about the block and owns its lifetime, so it is left alone; only a
+            // block the client has no record of is ended here. That also means there is never
+            // a savepoint to restore to, hence a plain `ROLLBACK`.
+            self.queue_simple_query("ROLLBACK")?;
+            self.inner.stream.flush().await?;
+            self.wait_until_ready().await?;
+        }
+
+        Ok(())
     }
 
     fn begin(
