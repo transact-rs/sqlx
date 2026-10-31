@@ -163,6 +163,9 @@ uuid = ["sqlx-core/uuid", "sqlx-macros?/uuid", "sqlx-mysql?/uuid", "sqlx-postgre
 regexp = ["sqlx-sqlite?/regexp"]
 bstr = ["sqlx-core/bstr"]
 
+# authentication
+gssapi-auth-cross-krb5 = ["sqlx-postgres/gssapi-auth-cross-krb5"]
+
 [workspace.dependencies]
 # Core Crates
 sqlx-core = { version = "=0.9.0", path = "sqlx-core" }

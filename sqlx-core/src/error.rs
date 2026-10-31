@@ -84,6 +84,9 @@ pub enum Error {
         source: BoxDynError,
     },
 
+    #[error("GSSAPI authentication failed: {0}")]
+    GSSAPI(#[source] BoxDynError),
+
     /// Error occurred while encoding a value.
     #[error("error occurred while encoding a value: {0}")]
     Encode(#[source] BoxDynError),

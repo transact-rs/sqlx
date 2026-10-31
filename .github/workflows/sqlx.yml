@@ -51,6 +51,9 @@ jobs:
           rustup toolchain install beta
           rustup component add --toolchain beta clippy
 
+      - name: Install Kerberos development libraries
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev pkg-config
+
       - uses: Swatinem/rust-cache@v2
 
       - run: >
@@ -77,6 +80,8 @@ jobs:
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustup toolchain install nightly
+      - name: Install Kerberos development libraries
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev pkg-config
       - run: cargo +nightly generate-lockfile -Z minimal-versions
       - run: cargo build --all-features
 
@@ -90,6 +95,9 @@ jobs:
       # https://blog.rust-lang.org/2025/03/02/Rustup-1.28.0.html
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
+      
+      - name: Install Kerberos development libraries
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev pkg-config
 
       - uses: Swatinem/rust-cache@v2
 
@@ -267,6 +275,9 @@ jobs:
 
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
+      
+      - name: Install Kerberos development libraries
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev pkg-config
 
       - uses: Swatinem/rust-cache@v2
 
@@ -386,6 +397,9 @@ jobs:
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
 
+      - name: Install Kerberos development libraries
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev pkg-config
+
       - uses: Swatinem/rust-cache@v2
 
       - run: |
@@ -418,6 +432,9 @@ jobs:
 
       - name: Setup Rust
         run: rustup show active-toolchain || rustup toolchain install
+      
+      - name: Install Kerberos development libraries
+        run: sudo apt-get update && sudo apt-get install -y libkrb5-dev pkg-config
 
       - uses: Swatinem/rust-cache@v2
 

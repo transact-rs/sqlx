@@ -14,6 +14,8 @@ mod data_row;
 mod describe;
 mod execute;
 mod flush;
+#[cfg(feature = "gssapi-auth-cross-krb5")]
+mod gssapi;
 mod notification;
 mod parameter_description;
 mod parameter_status;
@@ -41,6 +43,8 @@ pub use describe::Describe;
 pub use execute::Execute;
 #[allow(unused_imports)]
 pub use flush::Flush;
+#[cfg(feature = "gssapi-auth-cross-krb5")]
+pub use gssapi::GssResponse;
 pub use notification::Notification;
 pub use parameter_description::ParameterDescription;
 pub use parameter_status::ParameterStatus;

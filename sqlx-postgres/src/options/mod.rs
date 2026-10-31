@@ -24,6 +24,7 @@ pub struct PgConnectOptions {
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
     pub(crate) ssl_options: SslOptions,
+    pub(crate) gssapi_options: GssApiOptions,
     pub(crate) statement_cache_capacity: usize,
     pub(crate) application_name: Option<String>,
     pub(crate) log_settings: LogSettings,
@@ -44,6 +45,12 @@ pub(crate) struct SslOptions {
     pub(crate) ssl_client_cert: Option<CertificateInput>,
     pub(crate) ssl_client_key: Option<CertificateInput>,
     pub(crate) cached_connector: Arc<OnceLock<TlsConnector>>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct GssApiOptions {
+    pub(crate) gssapi_client_principal: Option<String>,
+    pub(crate) gssapi_target_principal: Option<String>,
 }
 
 impl PgConnectOptions {
@@ -103,6 +110,7 @@ impl PgConnectOptions {
                     .unwrap_or_default(),
                 cached_connector: Arc::new(OnceLock::new()),
             },
+            gssapi_options: GssApiOptions::default(),
             statement_cache_capacity: 100,
             application_name: var("PGAPPNAME").ok(),
             extra_float_digits: Some("2".into()),
@@ -361,6 +369,36 @@ impl PgConnectOptions {
     /// ```
     pub fn ssl_root_cert_from_pem(mut self, pem_certificate: Vec<u8>) -> Self {
         self.ssl_options_mut().ssl_root_cert = Some(CertificateInput::Inline(pem_certificate));
+        self
+    }
+
+    /// Sets the client principal for which the GSSAPI credentials are acquired
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::{PgSslMode, PgConnectOptions};
+    /// let options = PgConnectOptions::new()
+    ///     .gssapi_client_principal("user@example.com");
+    /// ```
+    pub fn gssapi_client_principal(mut self, principal: &str) -> Self {
+        self.gssapi_options.gssapi_client_principal = Some(principal.to_owned());
+        self
+    }
+
+    /// Sets the server principal for which the GSSAPI ticket is acquired
+    ///
+    /// default value is postgres/{hostname}
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # use sqlx_postgres::{PgSslMode, PgConnectOptions};
+    /// let options = PgConnectOptions::new()
+    ///     .gssapi_target_principal("postgres/database.example.com");
+    /// ```
+    pub fn gssapi_target_principal(mut self, principal: &str) -> Self {
+        self.gssapi_options.gssapi_target_principal = Some(principal.to_owned());
         self
     }
 
