@@ -35,15 +35,28 @@ impl ConnectOptions for SqliteConnectOptions {
     {
         let mut conn = SqliteConnection::establish(self).await?;
 
-        // Execute PRAGMAs
-        conn.execute(AssertSqlSafe(self.pragma_string())).await?;
+        let init = async {
+            // Execute PRAGMAs
+            conn.execute(AssertSqlSafe(self.pragma_string())).await?;
 
-        if !self.collations.is_empty() {
-            let mut locked = conn.lock_handle().await?;
+            if !self.collations.is_empty() {
+                let mut locked = conn.lock_handle().await?;
 
-            for collation in &self.collations {
-                collation.create(&mut locked.guard.handle)?;
+                for collation in &self.collations {
+                    collation.create(&mut locked.guard.handle)?;
+                }
             }
+
+            Ok::<_, Error>(())
+        }
+        .await;
+
+        if let Err(error) = init {
+            // Dropping the connection does not wait for its worker to release
+            // the SQLite handle. Skip optional optimization, which could fail
+            // before close reaches shutdown, and preserve the startup error.
+            let _ = conn.shutdown().await;
+            return Err(error);
         }
 
         Ok(conn)
