@@ -196,6 +196,15 @@ impl SqliteConnection {
         })
     }
 
+    /// Close the connection without running optional shutdown commands.
+    pub(crate) async fn shutdown(mut self) -> Result<(), Error> {
+        let shutdown = self.worker.shutdown();
+        // Drop all references to the connection handle outside the worker.
+        drop(self);
+        // Wait for the worker to release the SQLite handle.
+        shutdown.await
+    }
+
     /// Lock the SQLite database handle out from the worker thread so direct SQLite API calls can
     /// be made safely.
     ///
@@ -230,12 +239,7 @@ impl Connection for SqliteConnection {
             pragma_string.push_str("PRAGMA optimize;");
             self.execute(AssertSqlSafe(pragma_string)).await?;
         }
-        let shutdown = self.worker.shutdown();
-        // Drop the statement worker, which should
-        // cover all references to the connection handle outside of the worker thread
-        drop(self);
-        // Ensure the worker thread has terminated
-        shutdown.await
+        self.shutdown().await
     }
 
     async fn close_hard(self) -> Result<(), Error> {
