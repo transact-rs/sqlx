@@ -1,11 +1,9 @@
 services:
     #
-    # MySQL 8.x, 5.7.x
+    # MySQL 8.x
     # https://www.mysql.com/support/supportedplatforms/database.html
-    #
-
     mysql_8:
-        image: mysql:8.0
+        image: mysql:8
         volumes:
             - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
         ports:
@@ -20,35 +18,7 @@ services:
             context: .
             dockerfile: mysql/Dockerfile
             args:
-                IMAGE: mysql:8.0
-        volumes:
-            - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
-        ports:
-            - 3306
-        environment:
-            MYSQL_ROOT_HOST: '%'
-            MYSQL_DATABASE: sqlx
-            MYSQL_ALLOW_EMPTY_PASSWORD: 1
-
-    mysql_5_7:
-        image: mysql:5.7
-        volumes:
-            - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
-        ports:
-            - 3306
-        environment:
-            MYSQL_ROOT_HOST: '%'
-            MYSQL_ROOT_PASSWORD: password
-            MYSQL_DATABASE: sqlx
-
-    mysql_5_7_client_ssl:
-        build:
-            context: .
-            dockerfile: mysql/Dockerfile
-            args:
-                IMAGE: mysql:5.7
-                SSL_CERT_DIR: certs/rsa
-                SSL_KEY_DIR: certs/rsa/keys
+                IMAGE: mysql:8
         volumes:
             - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
         ports:

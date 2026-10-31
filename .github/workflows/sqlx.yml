@@ -388,6 +388,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
+
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_${{ matrix.postgres }}_client_ssl postgres_${{ matrix.postgres }}_client_ssl
 
@@ -406,6 +410,21 @@ jobs:
             "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: postgres://postgres@localhost:5432/sqlx?sslmode=verify-ca&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
+
+      # Test with `hostaddr` and `verify-full`
+      - run: |
+          SKIP_ARGS=()
+          for test in $PG_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            -- \
+            "${SKIP_ARGS[@]}"
+        env:
+          DATABASE_URL: postgres://postgres@sqlx.test:5432/sqlx?hostaddr=127.0.0.1&sslmode=verify-full&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
   postgres-isolated:
