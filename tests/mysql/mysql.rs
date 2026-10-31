@@ -41,6 +41,31 @@ async fn it_connects_without_password() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_connects_without_password_after_auth_switch() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let mut url = Url::parse(&env::var("DATABASE_URL").context("expected DATABASE_URL")?)
+        .context("error parsing DATABASE_URL")?;
+
+    url.set_username("no_password_native").unwrap();
+    url.set_password(None).unwrap();
+
+    let options = MySqlConnectOptions::from_url(&url)?;
+
+    for options in [options.clone(), options.password("")] {
+        let mut conn = options.connect().await?;
+
+        let vars = sqlx::raw_sql("SHOW VARIABLES").fetch_all(&mut conn).await?;
+
+        assert!(!vars.is_empty());
+
+        conn.close().await?;
+    }
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_maths() -> anyhow::Result<()> {
     let mut conn = new::<MySql>().await?;
 
