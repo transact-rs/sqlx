@@ -39,15 +39,57 @@ pub struct Config {
     pub external: ExternalDriverConfig,
 }
 
-/// Configuration for the MySQL database driver.
-#[derive(Debug, Default)]
+/// Configuration for the MySQL database driver (**applies to macros and `sqlx-cli` only**).
+///
+/// # Note: Does Not Apply at Application Run-Time
+/// As of writing, these configuration parameters do *not* have any bearing on
+/// the runtime configuration of the MySQL driver.
+///
+/// Any parameters which overlap with runtime configuration
+/// (e.g. [`drivers.mysql.pipes-as-concat`][MySqlConfig::pipes_as_concat])
+/// _must_ be configured their normal ways at runtime (e.g. `MySqlConnectOptions::pipes_as_concat()`).
+///
+/// See the documentation of individual fields for details.
+#[derive(Debug)]
 #[cfg_attr(
     feature = "sqlx-toml",
     derive(serde::Deserialize),
     serde(default, rename_all = "kebab-case", deny_unknown_fields)
 )]
 pub struct MySqlConfig {
-    // No fields implemented yet. This key is only used to validate parsing.
+    /// Whether to enable the `PIPES_AS_CONCAT` connection setting.
+    ///
+    /// Defaults to `true`.
+    ///
+    /// Some MySql databases such as PlanetScale error out with this connection setting
+    /// so it needs to be set `false` in such cases.
+    ///
+    /// # Note: Does Not Configure Runtime Connection Settings
+    /// The `PIPES_AS_CONCAT` setting at runtime *must* be separately configured with
+    /// `MySqlConnectOptions::pipes_as_concat()`.
+    pub pipes_as_concat: bool,
+    /// Whether to enable the `NO_ENGINE_SUBSTITUTION` sql_mode setting after connection.
+    ///
+    /// Defaults to `true` (`NO_ENGINE_SUBSTITUTION` is passed, forbidding engine substitution.)
+    ///
+    /// If not set, if the available storage engine specified by a `CREATE TABLE` is not available,
+    /// a warning is given and the default storage engine is used instead.
+    ///
+    /// <https://mariadb.com/kb/en/sql-mode/>
+    ///
+    /// # Note: Does Not Configure Runtime Connection Settings
+    /// The `NO_ENGINE_SUBSTITUTION` setting at runtime *must* be separately configured with
+    /// `MySqlConnectOptions::no_engine_substitution()`.
+    pub no_engine_substitution: bool,
+}
+
+impl Default for MySqlConfig {
+    fn default() -> Self {
+        Self {
+            pipes_as_concat: true,
+            no_engine_substitution: true,
+        }
+    }
 }
 
 /// Configuration for the Postgres database driver.
