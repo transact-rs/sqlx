@@ -28,6 +28,23 @@ async fn it_connects() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[ignore = "requires a PostgreSQL instance listening on the abstract Unix socket @pg_data"]
+#[sqlx_macros::test]
+async fn it_connects_via_abstract_socket() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let opts: PgConnectOptions = env::var("DATABASE_URL")?.parse().unwrap();
+    let opts = opts.socket("@pg_data");
+
+    let mut conn = PgConnection::connect_with(&opts).await?;
+
+    let value: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&mut conn).await?;
+    assert_eq!(1, value);
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_can_select_void() -> anyhow::Result<()> {
     let mut conn = new::<Postgres>().await?;
