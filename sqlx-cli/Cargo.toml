@@ -62,7 +62,7 @@ native-tls = ["sqlx/tls-native-tls"]
 # databases
 mysql = ["sqlx/mysql"]
 mysql-rsa = ["sqlx/mysql-rsa"]
-postgres = ["sqlx/postgres"]
+postgres = ["sqlx/postgres", "sqlx/whoami"]
 sqlite = ["sqlx/sqlite", "_sqlite"]
 sqlite-unbundled = ["sqlx/sqlite-unbundled", "_sqlite"]
 
