@@ -3,6 +3,7 @@ use crate::{PgConnectOptions, PgSslMode};
 use sqlx_core::percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use sqlx_core::Url;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 impl PgConnectOptions {
@@ -86,6 +87,8 @@ impl PgConnectOptions {
                 "user" => options = options.username(&value),
 
                 "password" => options = options.password(&value),
+
+                "passfile" => options.passfile_paths.insert(0, PathBuf::from(&*value)),
 
                 "application_name" => options = options.application_name(&value),
 
@@ -240,6 +243,20 @@ fn it_parses_password_correctly_from_parameter() {
 
     assert_eq!(None, opts.socket);
     assert_eq!(Some("some_pass"), opts.password.as_deref());
+}
+
+#[test]
+fn it_parses_passfile_correctly_from_parameter() {
+    let url = "postgres:///?passfile=/non%20default/pgpass&passfile=.pgpass";
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(
+        vec![
+            PathBuf::from(".pgpass"),
+            PathBuf::from("/non default/pgpass"),
+        ],
+        opts.passfile_paths
+    );
 }
 
 #[test]
