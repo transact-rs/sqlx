@@ -1,0 +1,17 @@
+[package]
+name = "sqlx-example-sqlite-regexp"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors.workspace = true
+
+[dependencies]
+sqlx = { path = "../../../", features = [ "sqlite", "runtime-tokio", "tls-native-tls", "sqlx-toml", "regexp"] }
+tokio = { version = "1.25.0", features = ["rt", "macros"]}
+anyhow = "1.0.58"
+
+[lints]
+workspace = true

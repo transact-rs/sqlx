@@ -54,6 +54,8 @@ rust_decimal = ["sqlx-core/rust_decimal", "sqlx-mysql?/rust_decimal", "sqlx-post
 time = ["sqlx-core/time", "sqlx-mysql?/time", "sqlx-postgres?/time", "sqlx-sqlite?/time"]
 uuid = ["sqlx-core/uuid", "sqlx-mysql?/uuid", "sqlx-postgres?/uuid", "sqlx-sqlite?/uuid"]
 
+regexp = ["sqlx-sqlite?/regexp"]
+
 [dependencies]
 sqlx-core = { workspace = true, features = ["offline"] }
 sqlx-mysql = { workspace = true, features = ["offline", "migrate"], optional = true, default-features = false }
