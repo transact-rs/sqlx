@@ -453,7 +453,15 @@ impl TypeResolver {
 
                         self.push_type("NULL", missing_oid.0);
 
-                        continue 'outer;
+                        // Keep draining rows whose dependency was just resolved;
+                        // abandoning them here would leave them unresolved forever.
+                        match resolved_dependencies.pop_back() {
+                            Some(next_row) => {
+                                type_row = next_row;
+                                continue;
+                            }
+                            None => continue 'outer,
+                        }
                     }
 
                     resolved_dependencies.extend(
