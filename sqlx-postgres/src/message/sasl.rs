@@ -4,19 +4,9 @@ use sqlx_core::Error;
 use std::num::Saturating;
 
 pub struct SaslInitialResponse<'a> {
+    /// The name of the SASL mechanism the client selected.
+    pub mechanism: &'a str,
     pub response: &'a str,
-    pub plus: bool,
-}
-
-impl SaslInitialResponse<'_> {
-    #[inline(always)]
-    fn selected_mechanism(&self) -> &'static str {
-        if self.plus {
-            "SCRAM-SHA-256-PLUS"
-        } else {
-            "SCRAM-SHA-256"
-        }
-    }
 }
 
 impl FrontendMessage for SaslInitialResponse<'_> {
@@ -26,7 +16,7 @@ impl FrontendMessage for SaslInitialResponse<'_> {
     fn body_size_hint(&self) -> Saturating<usize> {
         let mut size = Saturating(0);
 
-        size += self.selected_mechanism().len();
+        size += self.mechanism.len();
         size += 1; // NUL terminator
 
         size += 4; // response_len
@@ -37,7 +27,7 @@ impl FrontendMessage for SaslInitialResponse<'_> {
 
     fn encode_body(&self, buf: &mut Vec<u8>) -> Result<(), Error> {
         // name of the SASL authentication mechanism that the client selected
-        buf.put_str_nul(self.selected_mechanism());
+        buf.put_str_nul(self.mechanism);
 
         let response_len = i32::try_from(self.response.len()).map_err(|_| {
             err_protocol!(

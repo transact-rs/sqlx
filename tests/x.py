@@ -287,6 +287,19 @@ for runtime in RUNTIMES:
                     tag=f"postgres_{version}_client_ssl_no_password_{runtime}",
                 )
 
+        ## +oauth
+        # The OAUTHBEARER tests are ignored by default: the mechanism is the server's
+        # choice, and only this service asks for a token. See tests/postgres/oauth.rs.
+        run(
+            f"cargo test --no-default-features "
+            f"--features postgres,macros,runtime-{runtime},tls-{tls} "
+            f"--test postgres-oauth -- --include-ignored",
+            comment="test postgres 18 oauth",
+            env=postgres_env("18"),
+            service="postgres_18_oauth",
+            tag=f"postgres_18_oauth_{runtime}",
+        )
+
         #
         # mysql
         #
