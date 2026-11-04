@@ -26,6 +26,7 @@ enum QuerySrc {
     File(String),
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum RecordType {
     Given(Type),
     Scalar,

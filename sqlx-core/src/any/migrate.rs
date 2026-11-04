@@ -99,4 +99,12 @@ impl Migrate for AnyConnection {
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
         Box::pin(async { self.get_migrate()?.revert(table_name, migration).await })
     }
+
+    fn skip<'e>(
+        &'e mut self,
+        table_name: &'e str,
+        migration: &'e Migration,
+    ) -> BoxFuture<'e, Result<(), MigrateError>> {
+        Box::pin(async { self.get_migrate()?.skip(table_name, migration).await })
+    }
 }

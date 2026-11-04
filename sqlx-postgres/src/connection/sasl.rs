@@ -4,11 +4,12 @@ use crate::message::{Authentication, AuthenticationSasl, SaslInitialResponse, Sa
 use crate::rt;
 use crate::PgConnectOptions;
 use hmac::{Hmac, Mac};
-use rand::Rng;
+use hmac::{HmacReset, KeyInit};
 use sha2::{Digest, Sha256};
 use stringprep::saslprep;
 
 use base64::prelude::{Engine as _, BASE64_STANDARD};
+use rand::RngExt;
 
 const GS2_HEADER: &str = "n,,";
 const CHANNEL_ATTR: &str = "c";
@@ -56,8 +57,11 @@ pub(crate) async fn authenticate(
     let username = format!("{}={}", USERNAME_ATTR, options.username);
     let username = match saslprep(&username) {
         Ok(v) => v,
-        // TODO(danielakhterov): Remove panic when we have proper support for configuration errors
-        Err(_) => panic!("Failed to saslprep username"),
+        Err(error) => {
+            return Err(Error::Configuration(
+                format!("Failed to saslprep username: {:?}", error).into(),
+            ))
+        }
     };
 
     // nonce = "r=" c-nonce [s-nonce] ;; Second part provided by server.
@@ -86,13 +90,19 @@ pub(crate) async fn authenticate(
         }
     };
 
+    // Normalize(password):
+    let password = options.password.as_deref().unwrap_or_default();
+    let password = match saslprep(password) {
+        Ok(v) => v,
+        Err(error) => {
+            return Err(Error::Configuration(
+                format!("Failed to saslprep password: {:?}", error).into(),
+            ))
+        }
+    };
+
     // SaltedPassword := Hi(Normalize(password), salt, i)
-    let salted_password = hi(
-        options.password.as_deref().unwrap_or_default(),
-        &cont.salt,
-        cont.iterations,
-    )
-    .await?;
+    let salted_password = hi(&password, &cont.salt, cont.iterations).await?;
 
     // ClientKey := HMAC(SaltedPassword, "Client Key")
     let mut mac = Hmac::<Sha256>::new_from_slice(&salted_password).map_err(Error::protocol)?;
@@ -163,8 +173,8 @@ pub(crate) async fn authenticate(
 
 // nonce is a sequence of random printable bytes
 fn gen_nonce() -> String {
-    let mut rng = rand::thread_rng();
-    let count = rng.gen_range(64..128);
+    let mut rng = rand::rng();
+    let count = rng.random_range(64..128);
 
     // printable = %x21-2B / %x2D-7E
     // ;; Printable ASCII except ",".
@@ -172,10 +182,10 @@ fn gen_nonce() -> String {
     // ;; a valid "value".
     let nonce: String = std::iter::repeat(())
         .map(|()| {
-            let mut c = rng.gen_range(0x21u8..0x7F);
+            let mut c = rng.random_range(0x21u8..0x7F);
 
             while c == 0x2C {
-                c = rng.gen_range(0x21u8..0x7F);
+                c = rng.random_range(0x21u8..0x7F);
             }
 
             c
@@ -184,13 +194,12 @@ fn gen_nonce() -> String {
         .map(|c| c as char)
         .collect();
 
-    rng.gen_range(32..128);
     format!("{NONCE_ATTR}={nonce}")
 }
 
 // Hi(str, salt, i):
 async fn hi<'a>(s: &'a str, salt: &'a [u8], iter_count: u32) -> Result<[u8; 32], Error> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(s.as_bytes()).map_err(Error::protocol)?;
+    let mut mac = HmacReset::<Sha256>::new_from_slice(s.as_bytes()).map_err(Error::protocol)?;
 
     mac.update(salt);
     mac.update(&1u32.to_be_bytes());

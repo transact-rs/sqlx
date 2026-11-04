@@ -65,7 +65,7 @@ impl<V> IntMap<V> {
     pub(crate) fn insert(&mut self, idx: i64, value: V) -> Option<V> {
         let idx: usize = self.expand(idx);
 
-        std::mem::replace(&mut self.0[idx], Some(value))
+        self.0[idx].replace(value)
     }
 
     pub(crate) fn remove(&mut self, idx: &i64) -> Option<V> {

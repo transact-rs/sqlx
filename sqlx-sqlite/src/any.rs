@@ -7,7 +7,7 @@ use futures_core::stream::BoxStream;
 use futures_util::{FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 
 use sqlx_core::any::{
-    Any, AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
+    AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
     AnyStatement, AnyTypeInfo, AnyTypeInfoKind, AnyValueKind,
 };
 use sqlx_core::sql_str::SqlStr;
@@ -16,7 +16,6 @@ use crate::arguments::SqliteArgumentsBuffer;
 use crate::type_info::DataType;
 use sqlx_core::connection::{ConnectOptions, Connection};
 use sqlx_core::database::Database;
-use sqlx_core::describe::Describe;
 use sqlx_core::executor::Executor;
 use sqlx_core::transaction::TransactionManager;
 use std::pin::pin;
@@ -96,7 +95,7 @@ impl AnyConnectionBackend for SqliteConnection {
                 .try_flatten_stream()
                 .map(
                     move |res: sqlx_core::Result<Either<SqliteQueryResult, SqliteRow>>| match res? {
-                        Either::Left(result) => Ok(Either::Left(map_result(result))),
+                        Either::Left(result) => Ok(Either::Left(result.into())),
                         Either::Right(row) => Ok(Either::Right(AnyRow::try_from(&row)?)),
                     },
                 ),
@@ -140,7 +139,11 @@ impl AnyConnectionBackend for SqliteConnection {
         })
     }
 
-    fn describe(&mut self, sql: SqlStr) -> BoxFuture<'_, sqlx_core::Result<Describe<Any>>> {
+    #[cfg(feature = "offline")]
+    fn describe(
+        &mut self,
+        sql: SqlStr,
+    ) -> BoxFuture<'_, sqlx_core::Result<sqlx_core::describe::Describe<sqlx_core::any::Any>>> {
         Box::pin(async move { Executor::describe(self, sql).await?.try_into_any() })
     }
 }
@@ -231,9 +234,16 @@ fn map_arguments(args: AnyArguments) -> SqliteArguments {
     }
 }
 
-fn map_result(res: SqliteQueryResult) -> AnyQueryResult {
-    AnyQueryResult {
-        rows_affected: res.rows_affected(),
-        last_insert_id: None,
+impl From<SqliteQueryResult> for AnyQueryResult {
+    fn from(done: SqliteQueryResult) -> Self {
+        // logic as per: https://www.sqlite.org/c3ref/last_insert_rowid.html
+        let last_insert_id = match done.last_insert_rowid() {
+            0 => None,
+            n => Some(n),
+        };
+        AnyQueryResult {
+            rows_affected: done.rows_affected(),
+            last_insert_id,
+        }
     }
 }

@@ -18,7 +18,16 @@ fn assert_common_config(config: &config::common::Config) {
 }
 
 fn assert_drivers_config(config: &config::drivers::Config) {
-    assert_eq!(config.sqlite.unsafe_load_extensions, ["uuid", "vsv"]);
+    assert_eq!(
+        config.sqlite.unsafe_load_extensions,
+        vec![
+            config::drivers::SqliteExtension::Path("uuid".to_string()),
+            config::drivers::SqliteExtension::PathWithEntrypoint {
+                path: "vsv_renamed".to_string(),
+                entrypoint: "sqlite3_vsv_init".to_string()
+            }
+        ]
+    );
 
     #[derive(Debug, Eq, PartialEq, serde::Deserialize)]
     #[serde(rename_all = "kebab-case")]
@@ -101,6 +110,8 @@ fn assert_migrate_config(config: &config::migrate::Config) {
     let ignored_chars = BTreeSet::from([' ', '\t', '\r', '\n', '\u{FEFF}']);
 
     assert_eq!(config.ignored_chars, ignored_chars);
+
+    assert_eq!(config.unrecognized_sql_files, UnrecognizedSqlFiles::Warn);
 
     assert_eq!(
         config.defaults.migration_type,

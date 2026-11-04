@@ -1,16 +1,15 @@
-use crate::describe::Describe;
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::io::{PortalId, StatementId};
 use crate::logger::QueryLogger;
 use crate::message::{
     self, BackendMessageFormat, Bind, Close, CommandComplete, DataRow, ParameterDescription, Parse,
-    ParseComplete, Query, RowDescription,
+    ParseComplete, RowDescription,
 };
 use crate::statement::PgStatementMetadata;
 use crate::{
-    statement::PgStatement, PgArguments, PgConnection, PgQueryResult, PgRow, PgTypeInfo,
-    PgValueFormat, Postgres,
+    statement::PgStatement, PgArguments, PgConnection, PgDatabaseError, PgQueryResult, PgRow,
+    PgTypeInfo, PgValueFormat, Postgres,
 };
 use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
@@ -24,12 +23,14 @@ use std::{pin::pin, sync::Arc};
 async fn prepare(
     conn: &mut PgConnection,
     sql: &str,
-    parameters: &[PgTypeInfo],
+    arg_types: &[PgTypeInfo],
     metadata: Option<Arc<PgStatementMetadata>>,
     persistent: bool,
-    fetch_column_origin: bool,
+    resolve_column_origin: bool,
 ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
-    let id = if persistent {
+    // if cache is disabled, persistent statements get an id but are never evicted
+    // which causes a memory leak
+    let id = if persistent && conn.inner.cache_statement.is_enabled() {
         let id = conn.inner.next_statement_id;
         conn.inner.next_statement_id = id.next();
         id
@@ -40,12 +41,7 @@ async fn prepare(
     // build a list of type OIDs to send to the database in the PARSE command
     // we have not yet started the query sequence, so we are *safe* to cleanly make
     // additional queries here to get any missing OIDs
-
-    let mut param_types = Vec::with_capacity(parameters.len());
-
-    for ty in parameters {
-        param_types.push(conn.resolve_type_id(&ty.0).await?);
-    }
+    let param_types = conn.resolve_types(arg_types).await?;
 
     // flush and wait until we are re-ready
     conn.wait_until_ready().await?;
@@ -71,36 +67,45 @@ async fn prepare(
     // indicates that the SQL query string is now successfully parsed and has semantic validity
     conn.inner.stream.recv_expect::<ParseComplete>().await?;
 
-    let metadata = if let Some(metadata) = metadata {
+    let (metadata, ran_catalog_query) = if let Some(metadata) = metadata {
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
 
         // we already have metadata
-        metadata
+        (metadata, false)
     } else {
         let parameters = recv_desc_params(conn).await?;
 
-        let rows = recv_desc_rows(conn).await?;
+        let row_desc = recv_desc_rows(conn).await?;
 
         // each SYNC produces one READY FOR QUERY
         conn.recv_ready_for_query().await?;
 
-        let parameters = conn.handle_parameter_description(parameters).await?;
-
-        let (columns, column_names) = conn
-            .handle_row_description(rows, true, fetch_column_origin)
+        let (metadata, ran_catalog_query) = conn
+            .resolve_statement_metadata::<true>(Some(parameters), row_desc, resolve_column_origin)
             .await?;
 
         // ensure that if we did fetch custom data, we wait until we are fully ready before
         // continuing
         conn.wait_until_ready().await?;
 
-        Arc::new(PgStatementMetadata {
-            parameters,
-            columns,
-            column_names: Arc::new(column_names),
-        })
+        (metadata, ran_catalog_query)
     };
+
+    // Resolving custom-type OIDs above goes through the simple query protocol, which
+    // destroys the unnamed prepared statement. Re-parse it so the Bind that follows can
+    // reference it; named (persistent) statements are unaffected. See #4305.
+    if !persistent && ran_catalog_query {
+        conn.inner.stream.write_msg(Parse {
+            param_types: &param_types,
+            query: sql,
+            statement: id,
+        })?;
+        conn.write_sync();
+        conn.inner.stream.flush().await?;
+        conn.inner.stream.recv_expect::<ParseComplete>().await?;
+        conn.recv_ready_for_query().await?;
+    }
 
     Ok((id, metadata))
 }
@@ -177,7 +182,7 @@ impl PgConnection {
         // optional metadata that was provided by the user, this means they are reusing
         // a statement object
         metadata: Option<Arc<PgStatementMetadata>>,
-        fetch_column_origin: bool,
+        resolve_column_origin: bool,
     ) -> Result<(StatementId, Arc<PgStatementMetadata>), Error> {
         if let Some(statement) = self.inner.cache_statement.get_mut(sql) {
             return Ok((*statement).clone());
@@ -189,7 +194,7 @@ impl PgConnection {
             parameters,
             metadata,
             persistent,
-            fetch_column_origin,
+            resolve_column_origin,
         )
         .await?;
 
@@ -208,22 +213,16 @@ impl PgConnection {
         Ok(statement)
     }
 
-    pub(crate) async fn run<'e, 'c: 'e, 'q: 'e>(
+    async fn try_get_or_prepare<'e, 'c: 'e, 'q: 'e>(
         &'c mut self,
-        query: SqlStr,
-        arguments: Option<PgArguments>,
+        sql: &str,
+        arguments: Option<&mut PgArguments>,
         persistent: bool,
         metadata_opt: Option<Arc<PgStatementMetadata>>,
-    ) -> Result<impl Stream<Item = Result<Either<PgQueryResult, PgRow>, Error>> + 'e, Error> {
-        let mut logger = QueryLogger::new(query, self.inner.log_settings.clone());
-        let sql = logger.sql().as_str();
+    ) -> Result<(PgValueFormat, Arc<PgStatementMetadata>), Error> {
+        let metadata: Arc<PgStatementMetadata>;
 
-        // before we continue, wait until we are "ready" to accept more queries
-        self.wait_until_ready().await?;
-
-        let mut metadata: Arc<PgStatementMetadata>;
-
-        let format = if let Some(mut arguments) = arguments {
+        let format = if let Some(arguments) = arguments {
             // Check this before we write anything to the stream.
             //
             // Note: Postgres actually interprets this value as unsigned,
@@ -293,8 +292,7 @@ impl PgConnection {
             PgValueFormat::Binary
         } else {
             // Query will trigger a ReadyForQuery
-            self.inner.stream.write_msg(Query(sql))?;
-            self.inner.pending_ready_for_query_count += 1;
+            self.queue_simple_query(sql)?;
 
             // metadata starts out as "nothing"
             metadata = Arc::new(PgStatementMetadata::default());
@@ -305,10 +303,62 @@ impl PgConnection {
 
         self.inner.stream.flush().await?;
 
+        Ok((format, metadata))
+    }
+
+    pub(crate) async fn run<'e, 'c: 'e, 'q: 'e>(
+        &'c mut self,
+        query: SqlStr,
+        mut arguments: Option<PgArguments>,
+        persistent: bool,
+        metadata_opt: Option<Arc<PgStatementMetadata>>,
+    ) -> Result<impl Stream<Item = Result<Either<PgQueryResult, PgRow>, Error>> + 'e, Error> {
+        let mut logger = QueryLogger::new(query, self.inner.log_settings.clone());
+        let sql = logger.sql().as_str();
+
+        // before we continue, wait until we are "ready" to accept more queries
+        self.wait_until_ready().await?;
+
+        let (mut format, mut metadata) = self
+            .try_get_or_prepare(sql, arguments.as_mut(), persistent, metadata_opt.clone())
+            .await?;
+
+        let mut message = match self.inner.stream.recv().await {
+            Ok(msg) => msg,
+            Err(err) => {
+                if let Some(clear_backend_cache) = check_stale_plan(&err) {
+                    // Save transaction mode. It will be lost after invalidating
+                    let is_in_tx = self.in_transaction();
+
+                    self.invalidate_cached_statement(sql, clear_backend_cache)
+                        .await?;
+
+                    // If we were in transaction mode we can't retry statement,
+                    //    so we can immediately return err
+                    if is_in_tx {
+                        return Err(err);
+                    }
+
+                    // Otherwise we can retry statement in hope everything is ok.
+                    (format, metadata) = self
+                        .try_get_or_prepare(
+                            sql,
+                            // It should be safe to retry `patch` on the same arguments
+                            arguments.as_mut(),
+                            persistent,
+                            metadata_opt.clone(),
+                        )
+                        .await?;
+
+                    self.inner.stream.recv().await?
+                } else {
+                    return Err(err);
+                }
+            }
+        };
+
         Ok(try_stream! {
             loop {
-                let message = self.inner.stream.recv().await?;
-
                 match message.format {
                     BackendMessageFormat::BindComplete
                     | BackendMessageFormat::ParseComplete
@@ -344,17 +394,15 @@ impl PgConnection {
                     // incomplete query execution has finished
                     BackendMessageFormat::PortalSuspended => {}
 
+                    // indicates that a *new* set of rows are about to be returned
                     BackendMessageFormat::RowDescription => {
-                        // indicates that a *new* set of rows are about to be returned
-                        let (columns, column_names) = self
-                            .handle_row_description(Some(message.decode()?), false, false)
-                            .await?;
+                        let (new_metadata, _) = self.resolve_statement_metadata::<false>(
+                            None,
+                            Some(message.decode()?),
+                            false,
+                        ).await?;
 
-                        metadata = Arc::new(PgStatementMetadata {
-                            column_names: Arc::new(column_names),
-                            columns,
-                            parameters: Vec::default(),
-                        });
+                        metadata = new_metadata;
                     }
 
                     BackendMessageFormat::DataRow => {
@@ -384,6 +432,8 @@ impl PgConnection {
                         ));
                     }
                 }
+
+                message = self.inner.stream.recv().await?;
             }
 
             Ok(())
@@ -475,7 +525,11 @@ impl<'c> Executor<'c> for &'c mut PgConnection {
         })
     }
 
-    fn describe<'e>(self, sql: SqlStr) -> BoxFuture<'e, Result<Describe<Self::Database>, Error>>
+    #[cfg(feature = "offline")]
+    fn describe<'e>(
+        self,
+        sql: SqlStr,
+    ) -> BoxFuture<'e, Result<crate::describe::Describe<Self::Database>, Error>>
     where
         'c: 'e,
     {
@@ -488,11 +542,31 @@ impl<'c> Executor<'c> for &'c mut PgConnection {
 
             let nullable = self.get_nullable_for_columns(stmt_id, &metadata).await?;
 
-            Ok(Describe {
+            Ok(crate::describe::Describe {
                 columns: metadata.columns.clone(),
                 nullable,
                 parameters: Some(Either::Left(metadata.parameters.clone())),
             })
         })
+    }
+}
+
+// Returns:
+// - `None`        - if not 'stale query plan'
+// - `Some(false)` - if it is stale plan, but we don't need to deallocate objects on backend.
+//                   It can happen because of `DISCARD ALL`, `DEALLOCATE` or due to pgbouncer in
+//                      transaction pooling mode
+// - `Some(true)`  - if we should invalidate both backend and frontend caches
+fn check_stale_plan(error: &Error) -> Option<bool> {
+    let error = error
+        .as_database_error()?
+        .try_downcast_ref::<PgDatabaseError>()?;
+
+    match (error.code(), error.routine()) {
+        // "cached plan must not change result type"
+        ("0A000", Some("RevalidateCachedQuery")) => Some(true),
+        // DISCARD ALL / DEALLOCATE / pgbouncer
+        ("26000", _) => Some(false),
+        _ => None,
     }
 }

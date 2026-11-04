@@ -52,6 +52,14 @@ test_type!(bytes<Vec<u8>>(MySql,
         == vec![0_u8, 0, 0, 0, 0x52]
 ));
 
+test_type!(byte_array_empty<[u8; 0]>(MySql,
+    "X''" == [0_u8; 0],
+));
+
+test_type!(byte_array<[u8; 4]>(MySql,
+    "X'DEADBEEF'" == [0xDE_u8, 0xAD, 0xBE, 0xEF],
+));
+
 #[cfg(feature = "uuid")]
 test_type!(uuid<sqlx::types::Uuid>(MySql,
     "x'b731678f636f4135bc6f19440c13bd19'"

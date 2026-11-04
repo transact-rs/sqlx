@@ -4,7 +4,7 @@ use crate::error::Error;
 use crate::io::BufExt;
 use crate::message::{BackendMessage, BackendMessageFormat};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Notification {
     pub(crate) process_id: u32,
     pub(crate) channel: Bytes,

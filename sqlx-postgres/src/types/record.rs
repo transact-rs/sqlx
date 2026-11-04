@@ -41,13 +41,10 @@ impl<'a> PgRecordEncoder<'a> {
     {
         let ty = value.produces().unwrap_or_else(T::type_info);
 
-        match ty.0 {
-            // push a hole for this type ID
-            // to be filled in on query execution
-            PgType::DeclareWithName(name) => self.buf.patch_type_by_name(&name),
-            PgType::DeclareArrayOf(array) => self.buf.patch_array_type(array),
-            // write type id
-            pg_type => self.buf.extend(&pg_type.oid().0.to_be_bytes()),
+        if let Some(oid) = ty.oid() {
+            self.buf.extend(oid.0.to_be_bytes())
+        } else {
+            self.buf.push_hole(ty);
         }
 
         self.buf.encode(value)?;

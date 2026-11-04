@@ -130,17 +130,41 @@
 /// * MySQL/SQLite: `?` which matches arguments in order that it appears in the query
 ///
 /// ## Nullability: Bind Parameters
-/// For a given expected type `T`, both `T` and `Option<T>` are allowed (as well as either
-/// behind references). `Option::None` will be bound as `NULL`, so if binding a type behind `Option`
-/// be sure your query can support it.
+/// **The nullability of bind parameters is _not_ verified at compile time.** Unlike output
+/// columns (see the [next section](#nullability-output-columns)), the `query!()` family of
+/// macros does not check whether an `Option<T>` bound to a parameter is compatible with the
+/// nullability of the target column. This is a fundamental limitation, not an oversight:
+/// determining which parameter maps to which column would require the macros to parse and
+/// analyze the SQL themselves, which SQLx explicitly does not do
+/// (see [the FAQ][faq-parse-sql] for the reasoning).
 ///
-/// Note, however, if binding in a `where` clause, that equality comparisons with `NULL` may not
-/// work as expected; instead you must use `IS NOT NULL` or `IS NULL` to check if a column is not
+/// For any bind parameter, both `T` and `Option<T>` are accepted (as well as either behind
+/// references). `Option::None` is bound as SQL `NULL`. If the target column has a `NOT NULL`
+/// constraint, binding `None` will compile successfully but fail **at runtime** with a
+/// database error, for example:
+///
+/// ```rust,ignore
+/// // Schema: `CREATE TABLE foo (data TEXT NOT NULL);`
+/// // Compiles fine, fails at runtime:
+/// sqlx::query!("INSERT INTO foo (data) VALUES ($1)", None::<String>)
+///     .execute(&pool)
+///     .await?;
+/// ```
+///
+/// If you need this kind of safety, encode the constraint in your Rust types (e.g. use `String`
+/// instead of `Option<String>` for the field that feeds the bind parameter) or cover the
+/// invariant with an integration test against a real database.
+///
+/// ### Bind parameters in `WHERE` clauses
+/// If binding in a `WHERE` clause, note that equality comparisons with `NULL` may not work
+/// as expected; instead you must use `IS NOT NULL` or `IS NULL` to check if a column is not
 /// null or is null, respectively.
 ///
 /// In Postgres and MySQL you may also use `IS [NOT] DISTINCT FROM` to compare with a possibly
 /// `NULL` value. In MySQL `IS NOT DISTINCT FROM` can be shortened to `<=>`.
 /// In SQLite you can use `IS` or `IS NOT`. Note that operator precedence may be different.
+///
+/// [faq-parse-sql]: https://github.com/transact-rs/sqlx/blob/main/FAQ.md#why-cant-sqlx-just-look-at-my-database-schemamigrations-and-parse-the-sql-itself
 ///
 /// ## Nullability: Output Columns
 /// In most cases, the database engine can tell us whether or not a column may be `NULL`, and

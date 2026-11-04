@@ -2,7 +2,7 @@ use sqlx::error::DatabaseError;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteError};
 use sqlx::TypeInfo;
 use sqlx::{sqlite::Sqlite, Column, Executor};
-use sqlx::{ConnectOptions, SqlSafeStr};
+use sqlx::{ConnectOptions, Connection, SqlSafeStr, SqliteConnection};
 use sqlx_test::new;
 use std::env;
 
@@ -591,6 +591,50 @@ async fn it_describes_table_order_by() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Regression test for https://github.com/launchbadge/sqlx/issues/4147
+// ORDER BY + LIMIT routes data through an ephemeral sorter table;
+// the NOT NULL constraint must survive the round-trip.
+#[sqlx_macros::test]
+async fn it_describes_order_by_with_limit() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    let info = conn
+        .describe("SELECT text FROM tweet ORDER BY id DESC LIMIT 10".into_sql_str())
+        .await?;
+    assert_eq!(info.column(0).type_info().name(), "TEXT");
+    assert_eq!(
+        info.nullable(0),
+        Some(false),
+        "NOT NULL column should stay NOT NULL with ORDER BY + LIMIT"
+    );
+
+    let info = conn
+        .describe("SELECT text, is_sent FROM tweet ORDER BY id DESC LIMIT 10000".into_sql_str())
+        .await?;
+    assert_eq!(
+        info.nullable(0),
+        Some(false),
+        "text should be NOT NULL with ORDER BY DESC + large LIMIT"
+    );
+    assert_eq!(
+        info.nullable(1),
+        Some(false),
+        "is_sent should be NOT NULL with ORDER BY DESC + large LIMIT"
+    );
+
+    // nullable column must remain nullable
+    let info = conn
+        .describe("SELECT owner_id FROM tweet ORDER BY id DESC LIMIT 10".into_sql_str())
+        .await?;
+    assert_eq!(
+        info.nullable(0),
+        Some(true),
+        "nullable column should stay nullable with ORDER BY + LIMIT"
+    );
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_describes_union() -> anyhow::Result<()> {
     async fn assert_union_described(
@@ -1048,6 +1092,39 @@ async fn it_describes_analytical_function() -> anyhow::Result<()> {
         .await?;
     assert_eq!(d.column(0).type_info().name(), "TEXT");
     assert_eq!(d.nullable(0), Some(true));
+
+    Ok(())
+}
+
+// A column declared with no type at all, e.g. `CREATE TABLE foo (bar PRIMARY KEY)`, is
+// legal SQLite. `sqlite3_table_column_metadata()` reports a NULL declared type for such a
+// column, which `column_nullable()` used to dereference unconditionally, segfaulting the
+// process, and thus rustc itself when the `query!()` macros describe a live database.
+#[sqlx_macros::test]
+async fn it_describes_columns_with_no_declared_type() -> anyhow::Result<()> {
+    let mut conn = SqliteConnection::connect(":memory:").await?;
+
+    conn.execute(
+        r#"
+        CREATE TABLE untyped (
+            id PRIMARY KEY,
+            typeless,
+            typed TEXT NOT NULL
+        );
+        "#
+        .into_sql_str(),
+    )
+    .await?;
+
+    let d = conn
+        .describe("SELECT id, typeless, typed FROM untyped".into_sql_str())
+        .await?;
+
+    // A `PRIMARY KEY` with no declared type is not an `INTEGER PRIMARY KEY`, so it is not a
+    // rowid alias and SQLite does permit NULLs in it.
+    assert_eq!(d.nullable(0), Some(true));
+    assert_eq!(d.nullable(1), Some(true));
+    assert_eq!(d.nullable(2), Some(false));
 
     Ok(())
 }

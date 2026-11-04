@@ -1,6 +1,6 @@
 use argon2::{password_hash, Argon2, PasswordHasher, PasswordVerifier};
-use password_hash::PasswordHashString;
-use rand::distributions::{Alphanumeric, DistString};
+use password_hash::phc::PasswordHash;
+use rand::distr::{Alphanumeric, SampleString};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -130,7 +130,7 @@ impl AccountsManager {
         })
     }
 
-    async fn hash_password(&self, password: String) -> Result<PasswordHashString, GeneralError> {
+    async fn hash_password(&self, password: String) -> Result<PasswordHash, GeneralError> {
         let guard = self
             .hashing_semaphore
             .clone()
@@ -141,13 +141,7 @@ impl AccountsManager {
         // We transfer ownership to the blocking task and back to ensure Tokio doesn't spawn
         // excess threads.
         let (_guard, res) = tokio::task::spawn_blocking(move || {
-            let salt = password_hash::SaltString::generate(rand::thread_rng());
-            (
-                guard,
-                Argon2::default()
-                    .hash_password(password.as_bytes(), &salt)
-                    .map(|hash| hash.serialize()),
-            )
+            (guard, Argon2::default().hash_password(password.as_bytes()))
         })
         .await?;
 
@@ -157,7 +151,7 @@ impl AccountsManager {
     async fn verify_password(
         &self,
         password: String,
-        hash: PasswordHashString,
+        hash: PasswordHash,
     ) -> Result<(), CreateSessionError> {
         let guard = self
             .hashing_semaphore
@@ -169,13 +163,13 @@ impl AccountsManager {
         let (_guard, res) = tokio::task::spawn_blocking(move || {
             (
                 guard,
-                Argon2::default().verify_password(password.as_bytes(), &hash.password_hash()),
+                Argon2::default().verify_password(password.as_bytes(), &hash),
             )
         })
         .await
         .map_err(GeneralError::from)?;
 
-        if let Err(password_hash::Error::Password) = res {
+        if let Err(password_hash::Error::PasswordInvalid) = res {
             return Err(CreateSessionError::InvalidPassword);
         }
 
@@ -200,7 +194,9 @@ impl AccountsManager {
              values ($1, $2) \
              returning account_id",
             email,
-            hash.as_str(),
+            // However, since arguments don't link back to the target column,
+            // SQLx doesn't know that `PasswordHash` would be a valid argument here.
+            hash.to_string(),
         )
         .fetch_one(&self.pool)
         .await
@@ -230,7 +226,7 @@ impl AccountsManager {
 
         // Thanks to `sqlx.toml`:
         // * `account_id` maps to `AccountId`
-        // * `password_hash` maps to `Text<PasswordHashString>`
+        // * `password_hash` maps to `Text<PasswordHash>`
         // * `session_token` maps to `SessionToken`
         let maybe_account = sqlx::query!(
             // language=PostgreSQL
@@ -288,6 +284,6 @@ impl SessionToken {
     const LEN: usize = 32;
 
     fn generate() -> Self {
-        SessionToken(Alphanumeric.sample_string(&mut rand::thread_rng(), Self::LEN))
+        SessionToken(Alphanumeric.sample_string(&mut rand::rng(), Self::LEN))
     }
 }

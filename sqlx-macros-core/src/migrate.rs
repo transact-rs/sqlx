@@ -1,6 +1,3 @@
-#[cfg(any(sqlx_macros_unstable, procmacro2_semver_exempt))]
-extern crate proc_macro;
-
 use std::path::{Path, PathBuf};
 
 use proc_macro2::{Span, TokenStream};
@@ -132,7 +129,7 @@ pub fn expand_with_path(config: &Config, path: &Path) -> crate::Result<TokenStre
             )
         })?;
 
-        proc_macro::tracked_path::path(path);
+        proc_macro::tracked::path(path);
     }
 
     Ok(quote! {

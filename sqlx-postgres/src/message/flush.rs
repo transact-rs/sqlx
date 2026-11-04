@@ -8,6 +8,7 @@ use std::num::Saturating;
 /// A Flush must be sent after any extended-query command except Sync, if the
 /// frontend wishes to examine the results of that command before issuing more commands.
 #[derive(Debug)]
+#[expect(dead_code)]
 pub struct Flush;
 
 impl FrontendMessage for Flush {

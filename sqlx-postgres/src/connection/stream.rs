@@ -134,9 +134,13 @@ impl PgStream {
                     if let Some(buffer) = &mut self.notifications {
                         let notification: Notification = message.decode()?;
                         let _ = buffer.send(notification).await;
-
-                        continue;
                     }
+
+                    // The server may send a notification at any time, e.g. to
+                    // a connection that ran `LISTEN` itself, or behind a
+                    // transaction-mode pooler that shares one that did.
+                    // A connection that isn't a `PgListener` drops it.
+                    continue;
                 }
 
                 BackendMessageFormat::ParameterStatus => {

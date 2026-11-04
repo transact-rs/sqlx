@@ -1,3 +1,5 @@
+doc-valid-idents = ["SQLite"]
+
 [[disallowed-methods]]
 path = "core::cmp::Ord::min"
 reason = '''

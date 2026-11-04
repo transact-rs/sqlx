@@ -1,5 +1,5 @@
-use axum::extract::Path;
-use axum::{Extension, Json, Router};
+use axum::extract::{Path, State};
+use axum::{Json, Router};
 
 use axum::routing::get;
 
@@ -15,9 +15,9 @@ use crate::http::Result;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
-pub fn router() -> Router {
+pub fn router() -> Router<PgPool> {
     Router::new().route(
-        "/v1/post/:postId/comment",
+        "/v1/post/{postId}/comment",
         get(get_post_comments).post(create_post_comment),
     )
 }
@@ -44,7 +44,7 @@ struct Comment {
 
 // #[axum::debug_handler] // very useful!
 async fn create_post_comment(
-    db: Extension<PgPool>,
+    db: State<PgPool>,
     Path(post_id): Path<Uuid>,
     Json(req): Json<CreateCommentRequest>,
 ) -> Result<Json<Comment>> {
@@ -76,7 +76,7 @@ async fn create_post_comment(
 
 /// Returns comments in ascending chronological order.
 async fn get_post_comments(
-    db: Extension<PgPool>,
+    db: State<PgPool>,
     Path(post_id): Path<Uuid>,
 ) -> Result<Json<Vec<Comment>>> {
     // Note: normally you'd want to put a `LIMIT` on this as well,

@@ -33,6 +33,27 @@ impl<'r> Decode<'r, Any> for &'r [u8] {
     }
 }
 
+impl<const N: usize> Type<Any> for [u8; N] {
+    fn type_info() -> AnyTypeInfo {
+        <[u8] as Type<Any>>::type_info()
+    }
+}
+
+impl<const N: usize> Encode<'_, Any> for [u8; N] {
+    fn encode_by_ref(
+        &self,
+        buf: &mut <Any as Database>::ArgumentBuffer,
+    ) -> Result<IsNull, BoxDynError> {
+        <&[u8] as Encode<'_, Any>>::encode(self.as_slice(), buf)
+    }
+}
+
+impl<const N: usize> Decode<'_, Any> for [u8; N] {
+    fn decode(value: <Any as Database>::ValueRef<'_>) -> Result<Self, BoxDynError> {
+        Ok(<&[u8] as Decode<'_, Any>>::decode(value)?.try_into()?)
+    }
+}
+
 impl Type<Any> for Vec<u8> {
     fn type_info() -> AnyTypeInfo {
         <[u8] as Type<Any>>::type_info()

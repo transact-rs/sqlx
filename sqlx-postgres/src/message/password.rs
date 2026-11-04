@@ -2,7 +2,6 @@ use crate::io::BufMutExt;
 use crate::message::{FrontendMessage, FrontendMessageFormat};
 use md5::{Digest, Md5};
 use sqlx_core::Error;
-use std::fmt::Write;
 use std::num::Saturating;
 
 #[derive(Debug)]
@@ -65,16 +64,15 @@ impl FrontendMessage for Password<'_> {
                 hasher.update(password);
                 hasher.update(username);
 
-                let mut output = String::with_capacity(35);
-
-                let _ = write!(output, "{:x}", hasher.finalize_reset());
+                let mut output = hex::encode(hasher.finalize_reset());
 
                 hasher.update(&output);
                 hasher.update(salt);
 
-                output.clear();
-
-                let _ = write!(output, "md5{:x}", hasher.finalize());
+                // This is not really optimal but hopefully this is an uncommon code path.
+                // MD5 password hashing should really be phased out anyway.
+                output = hex::encode(hasher.finalize());
+                output.insert_str(0, "md5");
 
                 buf.put_str_nul(&output);
             }

@@ -38,7 +38,10 @@ impl ChatApp {
         mut self,
         terminal: &mut Terminal<B>,
         mut listener: PgListener,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<(), Box<dyn Error>>
+    where
+        <B as Backend>::Error: 'static,
+    {
         // setup listener task
         let messages = self.messages.clone();
         tokio::spawn(async move {

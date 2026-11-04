@@ -24,8 +24,16 @@ impl ProtocolDecode<'_> for OkPacket {
             ));
         }
 
-        let affected_rows = buf.get_uint_lenenc();
-        let last_insert_id = buf.get_uint_lenenc();
+        let affected_rows = buf.get_uint_lenenc()?;
+        let last_insert_id = buf.get_uint_lenenc()?;
+
+        if buf.remaining() < 4 {
+            return Err(err_protocol!(
+                "OK_Packet too short: expected at least 4 more bytes for status+warnings, got {}",
+                buf.remaining()
+            ));
+        }
+
         let status = Status::from_bits_truncate(buf.get_u16_le());
         let warnings = buf.get_u16_le();
 
@@ -75,4 +83,12 @@ fn test_decode_ok_packet_with_extended_info() {
     assert_eq!(p.last_insert_id, 100);
     assert_eq!(p.warnings, 1);
     assert!(p.status.contains(Status::SERVER_STATUS_AUTOCOMMIT));
+}
+
+#[test]
+fn test_decode_ok_packet_truncated() {
+    const DATA: &[u8] = b"\x00\x00\x00\x01";
+
+    let err = OkPacket::decode(DATA.into()).unwrap_err();
+    assert!(matches!(err, Error::Protocol(_)), "{err}");
 }

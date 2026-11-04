@@ -27,7 +27,7 @@ use futures_util::TryFutureExt;
 use sqlx::AnyConnection;
 use tokio::{select, signal};
 
-use crate::opt::{Command, ConnectOpts, DatabaseCommand, MigrateCommand};
+use crate::opt::{Command, ConnectOpts, DatabaseCommand, MigrateCommand, OverrideCommand};
 
 pub mod database;
 pub mod metadata;
@@ -99,6 +99,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                     dry_run,
                     *ignore_missing,
                     target_version,
+                    false,
                 )
                 .await?
             }
@@ -124,6 +125,30 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                 )
                 .await?
             }
+            MigrateCommand::Override { command } => match command {
+                OverrideCommand::Skip {
+                    source,
+                    config,
+                    mut connect_opts,
+                    dry_run,
+                    ignore_missing,
+                    target_version,
+                } => {
+                    let config = config.load_config().await?;
+                    connect_opts.populate_db_url(&config)?;
+
+                    migrate::run(
+                        &config,
+                        &source,
+                        &connect_opts,
+                        dry_run,
+                        *ignore_missing,
+                        target_version,
+                        true,
+                    )
+                    .await?
+                }
+            },
             MigrateCommand::Info {
                 source,
                 config,

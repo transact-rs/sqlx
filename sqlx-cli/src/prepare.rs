@@ -41,8 +41,7 @@ pub async fn run(
     connect_opts: ConnectOpts,
     cargo_args: Vec<String>,
 ) -> anyhow::Result<()> {
-    let cargo = env::var_os("CARGO")
-        .context("failed to get value of `CARGO`; `prepare` subcommand may only be invoked as `cargo sqlx prepare`")?;
+    let cargo = cargo_command(env::var_os("CARGO"))?;
 
     anyhow::ensure!(
         Path::new("Cargo.toml").exists(),
@@ -66,6 +65,13 @@ hint: This command only works in the manifest directory of a Cargo package or wo
     } else {
         prepare(&ctx).await
     }
+}
+
+fn cargo_command(cargo: Option<OsString>) -> anyhow::Result<OsString> {
+    cargo.context(
+        "the `prepare` subcommand must be invoked as `cargo sqlx prepare`; \
+         running `sqlx prepare` directly is not supported",
+    )
 }
 
 async fn prepare(ctx: &PrepareCtx<'_>) -> anyhow::Result<()> {
@@ -161,7 +167,7 @@ fn run_prepare_step(ctx: &PrepareCtx, cache_dir: &Path) -> anyhow::Result<()> {
     let tmp_dir = ctx.metadata.target_directory().join("sqlx-tmp");
     fs::create_dir_all(&tmp_dir).context(format!(
         "Failed to create temporary query cache directory: {:?}",
-        cache_dir
+        tmp_dir
     ))?;
 
     // Only delete sqlx-*.json files to avoid accidentally deleting any user data.
@@ -371,6 +377,16 @@ async fn check_backend(config: &Config, opts: &ConnectOpts) -> anyhow::Result<()
 mod tests {
     use super::*;
     use std::assert_eq;
+
+    #[test]
+    fn missing_cargo_environment_explains_prepare_invocation() {
+        let error = cargo_command(None).expect_err("missing CARGO should fail");
+
+        assert_eq!(
+            error.to_string(),
+            "the `prepare` subcommand must be invoked as `cargo sqlx prepare`; running `sqlx prepare` directly is not supported"
+        );
+    }
 
     #[test]
     fn minimal_project_recompile_action_works() -> anyhow::Result<()> {

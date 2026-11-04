@@ -1,3 +1,6 @@
+-- Create extra user to be used on runner
+CREATE USER runner WITH SUPERUSER PASSWORD 'runner-password';
+
 -- https://www.postgresql.org/docs/current/ltree.html
 CREATE EXTENSION IF NOT EXISTS ltree;
 

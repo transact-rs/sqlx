@@ -213,3 +213,69 @@ impl_type_checking!(
         },
     },
 );
+
+#[cfg(all(
+    test,
+    feature = "time",
+    feature = "chrono",
+    feature = "bigdecimal",
+    feature = "rust_decimal"
+))]
+mod tests {
+    use super::*;
+    use crate::PgTypeInfo;
+    use sqlx_core::config::macros::{DateTimeCrate, NumericCrate, PreferredCrates};
+    use sqlx_core::type_checking::{Error, TypeChecking};
+
+    #[test]
+    fn test_preferred_crates_date_time() {
+        let timestamptz = PgTypeInfo::TIMESTAMPTZ;
+
+        // Inferred with both features enabled should return AmbiguousDateTimeType
+        let mut prefs = PreferredCrates::default();
+        assert!(matches!(
+            Postgres::param_type_for_id(&timestamptz, &prefs),
+            Err(Error::AmbiguousDateTimeType { .. })
+        ));
+        assert!(matches!(
+            Postgres::return_type_for_id(&timestamptz, &prefs),
+            Err(Error::AmbiguousDateTimeType { .. })
+        ));
+
+        // Explicit Time should succeed even with chrono enabled
+        prefs.date_time = DateTimeCrate::Time;
+        assert!(Postgres::param_type_for_id(&timestamptz, &prefs).is_ok());
+        assert!(Postgres::return_type_for_id(&timestamptz, &prefs).is_ok());
+
+        // Explicit Chrono should succeed even with time enabled
+        prefs.date_time = DateTimeCrate::Chrono;
+        assert!(Postgres::param_type_for_id(&timestamptz, &prefs).is_ok());
+        assert!(Postgres::return_type_for_id(&timestamptz, &prefs).is_ok());
+    }
+
+    #[test]
+    fn test_preferred_crates_numeric() {
+        let numeric = PgTypeInfo::NUMERIC;
+
+        // Inferred with both features enabled should return AmbiguousNumericType
+        let mut prefs = PreferredCrates::default();
+        assert!(matches!(
+            Postgres::param_type_for_id(&numeric, &prefs),
+            Err(Error::AmbiguousNumericType { .. })
+        ));
+        assert!(matches!(
+            Postgres::return_type_for_id(&numeric, &prefs),
+            Err(Error::AmbiguousNumericType { .. })
+        ));
+
+        // Explicit BigDecimal should succeed even with rust_decimal enabled
+        prefs.numeric = NumericCrate::BigDecimal;
+        assert!(Postgres::param_type_for_id(&numeric, &prefs).is_ok());
+        assert!(Postgres::return_type_for_id(&numeric, &prefs).is_ok());
+
+        // Explicit RustDecimal should succeed even with bigdecimal enabled
+        prefs.numeric = NumericCrate::RustDecimal;
+        assert!(Postgres::param_type_for_id(&numeric, &prefs).is_ok());
+        assert!(Postgres::return_type_for_id(&numeric, &prefs).is_ok());
+    }
+}

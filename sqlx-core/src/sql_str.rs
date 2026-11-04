@@ -35,6 +35,15 @@ use std::sync::Arc;
 /// [injection]: https://en.wikipedia.org/wiki/SQL_injection
 /// [`query()`]: crate::query::query
 /// [`raw_sql()`]: crate::raw_sql::raw_sql
+#[diagnostic::on_unimplemented(
+    label = "dynamic SQL string",
+    message = "dynamic SQL strings should be audited for possible injections",
+    note = "prefer literal SQL strings with bind parameters or `QueryBuilder` to add dynamic data to a query.
+
+To bypass this error, manually audit for potential injection vulnerabilities and wrap with `AssertSqlSafe()`.
+For details, see the docs for `SqlSafeStr`.\n",
+    note = "this trait is only implemented for `&'static str`, not all `&str` like the compiler error may suggest"
+)]
 pub trait SqlSafeStr {
     /// Convert `self` to a [`SqlStr`].
     fn into_sql_str(self) -> SqlStr;

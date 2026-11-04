@@ -8,15 +8,15 @@ use futures_core::future::BoxFuture;
 use futures_core::stream::BoxStream;
 use futures_util::{stream, FutureExt, StreamExt, TryFutureExt, TryStreamExt};
 use sqlx_core::any::{
-    Any, AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
+    AnyArguments, AnyColumn, AnyConnectOptions, AnyConnectionBackend, AnyQueryResult, AnyRow,
     AnyStatement, AnyTypeInfo, AnyTypeInfoKind,
 };
 use sqlx_core::connection::Connection;
 use sqlx_core::database::Database;
-use sqlx_core::describe::Describe;
 use sqlx_core::executor::Executor;
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::transaction::TransactionManager;
+use sqlx_core::types::Type;
 use std::{future, pin::pin};
 
 sqlx_core::declare_driver_with_optional_migrate!(DRIVER = MySql);
@@ -96,7 +96,7 @@ impl AnyConnectionBackend for MySqlConnection {
                 .try_flatten_stream()
                 .map(|res| {
                     Ok(match res? {
-                        Either::Left(result) => Either::Left(map_result(result)),
+                        Either::Left(result) => Either::Left(result.into()),
                         Either::Right(row) => Either::Right(AnyRow::try_from(&row)?),
                     })
                 }),
@@ -141,7 +141,11 @@ impl AnyConnectionBackend for MySqlConnection {
         })
     }
 
-    fn describe(&mut self, sql: SqlStr) -> BoxFuture<'_, sqlx_core::Result<Describe<Any>>> {
+    #[cfg(feature = "offline")]
+    fn describe(
+        &mut self,
+        sql: SqlStr,
+    ) -> BoxFuture<'_, sqlx_core::Result<sqlx_core::describe::Describe<sqlx_core::any::Any>>> {
         Box::pin(async move {
             let describe = Executor::describe(self, sql).await?;
             describe.try_into_any()
@@ -161,13 +165,9 @@ impl<'a> TryFrom<&'a MySqlTypeInfo> for AnyTypeInfo {
                 ColumnType::LongLong => AnyTypeInfoKind::BigInt,
                 ColumnType::Float => AnyTypeInfoKind::Real,
                 ColumnType::Double => AnyTypeInfoKind::Double,
-                ColumnType::Blob
-                | ColumnType::TinyBlob
-                | ColumnType::MediumBlob
-                | ColumnType::LongBlob => AnyTypeInfoKind::Blob,
-                ColumnType::String | ColumnType::VarString | ColumnType::VarChar => {
-                    AnyTypeInfoKind::Text
-                }
+                // Checks for any applicable type and compatible collations
+                _ if <str as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Text,
+                _ if <[u8] as Type<MySql>>::compatible(type_info) => AnyTypeInfoKind::Blob,
                 _ => {
                     return Err(sqlx_core::Error::AnyDriverError(
                         format!("Any driver does not support MySql type {type_info:?}").into(),
@@ -210,11 +210,12 @@ impl<'a> TryFrom<&'a AnyConnectOptions> for MySqlConnectOptions {
     }
 }
 
-fn map_result(result: MySqlQueryResult) -> AnyQueryResult {
-    AnyQueryResult {
-        rows_affected: result.rows_affected,
-        // Don't expect this to be a problem
-        #[allow(clippy::cast_possible_wrap)]
-        last_insert_id: Some(result.last_insert_id as i64),
+/// This conversion attempts to save last_insert_id by converting to i64.
+impl From<MySqlQueryResult> for AnyQueryResult {
+    fn from(done: MySqlQueryResult) -> Self {
+        AnyQueryResult {
+            rows_affected: done.rows_affected(),
+            last_insert_id: done.last_insert_id().try_into().ok(),
+        }
     }
 }

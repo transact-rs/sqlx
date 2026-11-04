@@ -220,6 +220,7 @@ pub async fn run(
     dry_run: bool,
     ignore_missing: bool,
     target_version: Option<i64>,
+    skip: bool,
 ) -> anyhow::Result<()> {
     let migrator = migration_source.resolve(config).await?;
 
@@ -277,18 +278,23 @@ pub async fn run(
                 }
             }
             None => {
-                let skip =
+                let exceeds_target =
                     target_version.is_some_and(|target_version| migration.version > target_version);
 
-                let elapsed = if dry_run || skip {
+                let elapsed = if dry_run || exceeds_target {
+                    Duration::new(0, 0)
+                } else if skip {
+                    conn.skip(config.migrate.table_name(), migration).await?;
                     Duration::new(0, 0)
                 } else {
                     conn.apply(config.migrate.table_name(), migration).await?
                 };
-                let text = if skip {
+                let text = if exceeds_target {
                     "Skipped"
                 } else if dry_run {
                     "Can apply"
+                } else if skip {
+                    "Skipped on request"
                 } else {
                     "Applied"
                 };

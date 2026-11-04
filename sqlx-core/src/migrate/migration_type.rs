@@ -1,7 +1,7 @@
 use super::Migrator;
 
 /// Migration Type represents the type of migration
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MigrationType {
     /// Simple migration are single file migrations with no up / down queries
     Simple,

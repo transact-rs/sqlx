@@ -16,8 +16,11 @@
 
 #![cfg_attr(
     any(sqlx_macros_unstable, procmacro2_semver_exempt),
-    feature(track_path)
+    feature(proc_macro_tracked_path, proc_macro_tracked_env)
 )]
+
+#[cfg(any(sqlx_macros_unstable, procmacro2_semver_exempt))]
+extern crate proc_macro;
 
 use cfg_if::cfg_if;
 use std::path::PathBuf;
@@ -96,7 +99,7 @@ pub fn env_opt(var: &str) -> Result<Option<String>> {
     use std::env::VarError;
 
     #[cfg(any(sqlx_macros_unstable, procmacro2_semver_exempt))]
-    let res: Result<String, VarError> = proc_macro::tracked_env::var(var);
+    let res: Result<String, VarError> = proc_macro::tracked::env_var(var);
 
     #[cfg(not(any(sqlx_macros_unstable, procmacro2_semver_exempt)))]
     let res: Result<String, VarError> = std::env::var(var);

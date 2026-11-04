@@ -108,7 +108,15 @@ impl Iterator for ExecuteIter<'_> {
             Ok(false) => {
                 let last_insert_rowid = self.handle.last_insert_rowid();
 
-                let changes = statement.handle.changes();
+                // `sqlite3_changes()` returns the row count for the most recently completed
+                // INSERT/UPDATE/DELETE on the connection, not necessarily this statement.
+                // For read-only statements (SELECT, BEGIN, COMMIT, etc.) we must report 0.
+                // See https://sqlite.org/c3ref/changes.html
+                let changes = if statement.handle.read_only() {
+                    0
+                } else {
+                    statement.handle.changes()
+                };
                 self.logger.increase_rows_affected(changes);
 
                 let done = SqliteQueryResult {

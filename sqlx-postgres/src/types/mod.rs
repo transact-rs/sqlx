@@ -211,7 +211,9 @@
 use crate::type_info::PgTypeKind;
 use crate::{PgTypeInfo, Postgres};
 
-pub(crate) use sqlx_core::types::{Json, Type};
+#[cfg(feature = "json")]
+pub(crate) use sqlx_core::types::Json;
+pub(crate) use sqlx_core::types::Type;
 
 mod array;
 mod bool;
@@ -221,10 +223,10 @@ mod float;
 mod hstore;
 mod int;
 mod interval;
+#[cfg(feature = "json")]
+mod json;
 mod lquery;
 mod ltree;
-// Not behind a Cargo feature because we require JSON in the driver implementation.
-mod json;
 mod money;
 mod oid;
 mod range;

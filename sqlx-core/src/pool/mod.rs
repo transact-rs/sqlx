@@ -531,12 +531,14 @@ impl<DB: Database> Pool<DB> {
         self.0.close_event()
     }
 
-    /// Returns the number of connections currently active. This includes idle connections.
+    /// Returns the total number of connections owned by the pool.
+    ///
+    /// This includes idle connections and ones still being opened.
     pub fn size(&self) -> u32 {
         self.0.size()
     }
 
-    /// Returns the number of connections active and idle (not in use).
+    /// Returns the number of idle connections (not checked out).
     pub fn num_idle(&self) -> usize {
         self.0.num_idle()
     }

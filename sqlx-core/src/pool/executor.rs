@@ -4,7 +4,6 @@ use futures_core::stream::BoxStream;
 use futures_util::TryStreamExt;
 
 use crate::database::Database;
-use crate::describe::Describe;
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::pool::Pool;
@@ -63,7 +62,11 @@ where
     }
 
     #[doc(hidden)]
-    fn describe<'e>(self, sql: SqlStr) -> BoxFuture<'e, Result<Describe<Self::Database>, Error>> {
+    #[cfg(feature = "offline")]
+    fn describe<'e>(
+        self,
+        sql: SqlStr,
+    ) -> BoxFuture<'e, Result<crate::describe::Describe<Self::Database>, Error>> {
         let pool = self.clone();
 
         Box::pin(async move { pool.acquire().await?.describe(sql).await })
@@ -127,6 +130,7 @@ where
 //     }
 //
 //     #[doc(hidden)]
+//     #[cfg(feature = "offline")]
 //     #[inline]
 //     fn describe<'e, 'q: 'e>(
 //         self,

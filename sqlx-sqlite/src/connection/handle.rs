@@ -71,10 +71,14 @@ impl ConnectionHandle {
         &mut self,
         call: impl FnOnce(*mut sqlite3) -> c_int,
     ) -> Result<(), SqliteError> {
-        if call(self.as_ptr()) == SQLITE_OK {
+        let res = call(self.as_ptr());
+
+        if res == SQLITE_OK {
             Ok(())
         } else {
-            Err(self.expect_error())
+            Err(self
+                .last_error()
+                .unwrap_or_else(|| SqliteError::from_code(res)))
         }
     }
 

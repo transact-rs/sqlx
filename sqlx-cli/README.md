@@ -22,7 +22,13 @@ $ cargo install sqlx-cli --no-default-features --features rustls
 
 # only for sqlite and use the system sqlite library
 $ cargo install sqlx-cli --no-default-features --features sqlite-unbundled
+
+# if you connect to MySQL/MariaDB without TLS and the server requires RSA auth
+$ cargo install sqlx-cli --features mysql-rsa
 ```
+
+Add `mysql-rsa` only for non-TLS MySQL/MariaDB connections that use
+`caching_sha2_password` or `sha256_password`. If you use TLS, it is not needed.
 
 ## Usage
 
@@ -51,7 +57,7 @@ sqlx database drop
 sqlx migrate add <name>
 ```
 
-Creates a new file in `migrations/<timestamp>-<name>.sql`. Add your database schema changes to
+Creates a new file in `migrations/<timestamp>_<name>.sql`. Add your database schema changes to
 this new file.
 
 ---

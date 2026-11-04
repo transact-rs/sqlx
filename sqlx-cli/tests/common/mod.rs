@@ -13,6 +13,22 @@ pub struct TestDatabase {
     pub config_path: Option<PathBuf>,
 }
 
+pub enum MigrateCommand {
+    Run,
+    Revert,
+    Skip,
+}
+
+impl AsRef<str> for MigrateCommand {
+    fn as_ref(&self) -> &str {
+        match self {
+            MigrateCommand::Run => "run",
+            MigrateCommand::Revert => "revert",
+            MigrateCommand::Skip => "override skip",
+        }
+    }
+}
+
 impl TestDatabase {
     pub fn new(name: &str, migrations: &str) -> Self {
         // Note: only set when _building_
@@ -58,19 +74,17 @@ impl TestDatabase {
         format!("sqlite://{}", self.file_path.display())
     }
 
-    pub fn run_migration(&self, revert: bool, version: Option<i64>, dry_run: bool) -> Assert {
+    pub fn run_migration(
+        &self,
+        migrate_command: MigrateCommand,
+        version: Option<i64>,
+        dry_run: bool,
+    ) -> Assert {
         let mut command = Command::cargo_bin("sqlx").unwrap();
         command
-            .args([
-                "migrate",
-                match revert {
-                    true => "revert",
-                    false => "run",
-                },
-                "--database-url",
-                &self.connection_string(),
-                "--source",
-            ])
+            .arg("migrate")
+            .args(migrate_command.as_ref().split_whitespace())
+            .args(["--database-url", &self.connection_string(), "--source"])
             .arg(&self.migrations_path);
 
         if let Some(config_path) = &self.config_path {

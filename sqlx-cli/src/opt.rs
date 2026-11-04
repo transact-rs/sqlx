@@ -16,7 +16,6 @@ use std::path::PathBuf;
 const HELP_STYLES: Styles = Styles::styled()
     .header(AnsiColor::Blue.on_default().bold())
     .usage(AnsiColor::Blue.on_default().bold())
-    .literal(AnsiColor::White.on_default())
     .placeholder(AnsiColor::Green.on_default());
 
 #[derive(Parser, Debug)]
@@ -247,6 +246,12 @@ pub enum MigrateCommand {
         target_version: Option<i64>,
     },
 
+    /// Override migration state, potentially dangerous operations.
+    Override {
+        #[clap(subcommand)]
+        command: OverrideCommand,
+    },
+
     /// Revert the latest migration with a down file.
     Revert {
         #[clap(flatten)]
@@ -297,6 +302,33 @@ pub enum MigrateCommand {
         /// Overwrite the build script if it already exists.
         #[clap(long)]
         force: bool,
+    },
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum OverrideCommand {
+    /// Skip all pending migrations without running them.
+    Skip {
+        #[clap(flatten)]
+        source: MigrationSourceOpt,
+
+        #[clap(flatten)]
+        config: ConfigOpt,
+
+        #[clap(flatten)]
+        connect_opts: ConnectOpts,
+
+        /// List all the migrations to be skipped without marking them as applied.
+        #[clap(long)]
+        dry_run: bool,
+
+        #[clap(flatten)]
+        ignore_missing: IgnoreMissing,
+
+        /// Apply migrations up to the specified version. If unspecified, apply all
+        /// pending migrations. If already at the target version, then no-op.
+        #[clap(long)]
+        target_version: Option<i64>,
     },
 }
 

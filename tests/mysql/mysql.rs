@@ -3,6 +3,7 @@ use futures_util::TryStreamExt;
 use sqlx::mysql::{MySql, MySqlConnection, MySqlPool, MySqlPoolOptions, MySqlRow};
 use sqlx::{Column, Connection, Executor, Row, SqlSafeStr, Statement, TypeInfo};
 use sqlx_core::connection::ConnectOptions;
+use sqlx_core::types::Type;
 use sqlx_mysql::MySqlConnectOptions;
 use sqlx_test::{new, setup_if_needed};
 use std::env;
@@ -35,6 +36,31 @@ async fn it_connects_without_password() -> anyhow::Result<()> {
     assert!(!vars.is_empty());
 
     conn.close().await?;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_connects_without_password_after_auth_switch() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let mut url = Url::parse(&env::var("DATABASE_URL").context("expected DATABASE_URL")?)
+        .context("error parsing DATABASE_URL")?;
+
+    url.set_username("no_password_native").unwrap();
+    url.set_password(None).unwrap();
+
+    let options = MySqlConnectOptions::from_url(&url)?;
+
+    for options in [options.clone(), options.password("")] {
+        let mut conn = options.connect().await?;
+
+        let vars = sqlx::raw_sql("SHOW VARIABLES").fetch_all(&mut conn).await?;
+
+        assert!(!vars.is_empty());
+
+        conn.close().await?;
+    }
 
     Ok(())
 }
@@ -633,6 +659,148 @@ async fn issue_3200() -> anyhow::Result<()> {
     .await?;
 
     assert!(result.is_none(), "{result:?}");
+
+    Ok(())
+}
+
+#[cfg(mariadb)]
+#[sqlx_macros::test]
+async fn it_can_name_columns_issue_2206() -> anyhow::Result<()> {
+    let mut conn = new::<MySql>().await?;
+
+    sqlx::raw_sql(
+        "\
+        CREATE TABLE IF NOT EXISTS issue_2206
+        (
+            `id`                     BIGINT AUTO_INCREMENT,
+            `name`                   VARCHAR(128) NOT NULL,
+            PRIMARY KEY (id)
+        );
+    ",
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let row = sqlx::query("INSERT INTO issue_2206 (name) VALUES (?) RETURNING *")
+        .bind("Alice")
+        .fetch_one(&mut conn)
+        .await?;
+    let _id: i64 = row.get("id");
+    let name: String = row.get("name");
+
+    assert_eq!(&name, "Alice");
+
+    Ok(())
+}
+
+#[cfg(feature = "any")]
+#[sqlx_macros::test]
+async fn any_blob_conversions() -> anyhow::Result<()> {
+    use sqlx::Any;
+    use sqlx::Decode;
+    use sqlx::ValueRef;
+
+    sqlx::any::install_default_drivers();
+
+    let mut conn = new::<Any>().await?;
+
+    sqlx::raw_sql(
+        r#"
+        CREATE TEMPORARY TABLE any_blob_conversions(
+            id INTEGER PRIMARY KEY,
+            regular_text TEXT NOT NULL,
+            text_binary TEXT COLLATE "utf8mb4_bin" NOT NULL,
+            binary_blob BLOB NOT NULL
+        );
+
+        INSERT INTO any_blob_conversions(id, regular_text, text_binary, binary_blob)
+        VALUES (1, 'Hello, world!', 'Lorem ipsum dolor sit amet', X'01020304DEADBEEF');
+   "#,
+    )
+    .execute(&mut conn)
+    .await?;
+
+    let row = sqlx::query("SELECT * FROM any_blob_conversions")
+        .fetch_one(&mut conn)
+        .await?;
+
+    let id = row.try_get_raw("id")?;
+    let regular_text = row.try_get_raw("regular_text")?;
+    let text_binary = row.try_get_raw("text_binary")?;
+    let binary_blob = row.try_get_raw("binary_blob")?;
+
+    assert_eq!(*id.type_info(), <i32 as Type<Any>>::type_info());
+    assert_eq!(<i32 as Decode<Any>>::decode(id).unwrap(), 1);
+
+    assert_eq!(*regular_text.type_info(), <str as Type<Any>>::type_info());
+    assert_eq!(
+        <&str as Decode<Any>>::decode(regular_text).unwrap(),
+        "Hello, world!"
+    );
+
+    assert_eq!(*text_binary.type_info(), <str as Type<Any>>::type_info());
+    assert_eq!(
+        <&str as Decode<Any>>::decode(text_binary).unwrap(),
+        "Lorem ipsum dolor sit amet"
+    );
+
+    assert_eq!(*binary_blob.type_info(), <[u8] as Type<Any>>::type_info());
+    assert_eq!(
+        <&[u8] as Decode<Any>>::decode(binary_blob).unwrap(),
+        [0x01, 0x02, 0x03, 0x04, 0xDE, 0xAD, 0xBE, 0xEF],
+    );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn test_client_found_rows() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let url = url::Url::parse(&env::var("DATABASE_URL")?)?;
+
+    // CLIENT_AFFECTED_ROWS unspecified = true by default.
+    let mut conn = MySqlConnectOptions::from_url(&url)?.connect().await?;
+    let mut tx = conn.begin().await?;
+
+    tx.execute(sqlx::query(
+        "CREATE TEMPORARY TABLE found_rows_testing (id INT PRIMARY KEY, field INT NOT NULL)",
+    ))
+    .await?;
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 20) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 2);
+
+    tx.rollback().await?;
+
+    // Explicitly unset CLIENT_AFFECTED_ROWS.
+    let mut conn = MySqlConnectOptions::from_url(&url)?
+        .found_rows(false)
+        .connect()
+        .await?;
+    let mut tx = conn.begin().await?;
+
+    tx.execute(sqlx::query(
+        "CREATE TEMPORARY TABLE found_rows_testing (id INT PRIMARY KEY, field INT NOT NULL)",
+    ))
+    .await?;
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 0);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 20) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 2);
+
+    tx.rollback().await?;
 
     Ok(())
 }

@@ -156,7 +156,11 @@ impl Debug for PgDatabaseError {
 
 impl Display for PgDatabaseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(self.message())
+        f.write_str(self.message())?;
+        if let Some(line) = self.line() {
+            write!(f, " at line {line}")?;
+        }
+        Ok(())
     }
 }
 

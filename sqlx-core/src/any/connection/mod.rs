@@ -101,7 +101,7 @@ impl Connection for AnyConnection {
     }
 
     fn close_hard(self) -> impl Future<Output = Result<(), Error>> + Send + 'static {
-        self.backend.close()
+        self.backend.close_hard()
     }
 
     fn ping(&mut self) -> impl Future<Output = Result<(), Error>> + Send + '_ {

@@ -87,10 +87,12 @@ impl<S: Socket> Socket for RustlsSocket<S> {
     }
 }
 
-pub async fn handshake<S>(socket: S, tls_config: TlsConfig<'_>) -> Result<RustlsSocket<S>, Error>
-where
-    S: Socket,
-{
+#[derive(Debug, Clone)]
+pub struct RustlsConnector {
+    config: Arc<ClientConfig>,
+}
+
+pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {
     #[cfg(all(
         feature = "_tls-rustls-aws-lc-rs",
         not(feature = "_tls-rustls-ring-webpki"),
@@ -180,11 +182,24 @@ where
         }
     };
 
-    let host = ServerName::try_from(tls_config.hostname.to_owned()).map_err(Error::tls)?;
+    Ok(RustlsConnector {
+        config: Arc::new(config),
+    })
+}
+
+pub async fn handshake<S>(
+    socket: S,
+    hostname: &str,
+    connector: &RustlsConnector,
+) -> Result<RustlsSocket<S>, Error>
+where
+    S: Socket,
+{
+    let host = ServerName::try_from(hostname.to_owned()).map_err(Error::tls)?;
 
     let mut socket = RustlsSocket {
         inner: StdSocket::new(socket),
-        state: ClientConnection::new(Arc::new(config), host).map_err(Error::tls)?,
+        state: ClientConnection::new(connector.config.clone(), host).map_err(Error::tls)?,
         close_notify_sent: false,
     };
 

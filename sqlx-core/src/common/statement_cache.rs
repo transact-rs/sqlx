@@ -21,6 +21,11 @@ impl<T> StatementCache<T> {
         self.inner.get_mut(k)
     }
 
+    /// Removes statement by key, returning removed statement if removed
+    pub fn remove(&mut self, k: &str) -> Option<T> {
+        self.inner.remove(k)
+    }
+
     /// Inserts a new statement to the cache, returning the least recently used
     /// statement id if the cache is full, or if inserting with an existing key,
     /// the replaced existing statement.

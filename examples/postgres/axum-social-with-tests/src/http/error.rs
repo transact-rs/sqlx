@@ -11,7 +11,7 @@ pub enum Error {
     /// A SQLx call returned an error.
     ///
     /// The exact error contents are not reported to the user in order to avoid leaking
-    /// information about databse internals.
+    /// information about database internals.
     #[error("an internal database error occurred")]
     Sqlx(#[from] sqlx::Error),
 

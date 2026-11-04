@@ -221,6 +221,29 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             Ok(elapsed)
         })
     }
+
+    fn skip<'e>(
+        &'e mut self,
+        table_name: &'e str,
+        migration: &'e Migration,
+    ) -> BoxFuture<'e, Result<(), MigrateError>> {
+        Box::pin(async move {
+            // language=SQLite
+            let _ = query(AssertSqlSafe(format!(
+                r#"
+    INSERT INTO {table_name} ( version, description, success, checksum, execution_time )
+    VALUES ( ?1, ?2, TRUE, ?3, -1 )
+        "#
+            )))
+            .bind(migration.version)
+            .bind(&*migration.description)
+            .bind(&*migration.checksum)
+            .execute(self)
+            .await?;
+
+            Ok(())
+        })
+    }
 }
 
 async fn execute_migration(

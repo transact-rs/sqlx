@@ -29,6 +29,7 @@ pub struct EstablishParams {
     busy_timeout: Duration,
     statement_cache_capacity: usize,
     log_settings: LogSettings,
+    pub(crate) thread_stack_size: Option<usize>,
     #[cfg(feature = "load-extension")]
     extensions: IndexMap<CString, Option<CString>>,
     pub(crate) thread_name: String,
@@ -93,10 +94,15 @@ impl EstablishParams {
 
         if !query_params.is_empty() {
             filename = format!(
-                "file:{}?{}",
+                "file:{}?",
                 percent_encoding::percent_encode(filename.as_bytes(), NON_ALPHANUMERIC),
-                serde_urlencoded::to_string(&query_params).unwrap()
             );
+
+            // Suffix serializer automatically handles `&` separators for us.
+            let filename_len = filename.len();
+            filename = form_urlencoded::Serializer::for_suffix(filename, filename_len)
+                .extend_pairs(query_params)
+                .finish();
         }
 
         let filename = CString::new(filename).map_err(|_| {
@@ -142,6 +148,7 @@ impl EstablishParams {
             busy_timeout: options.busy_timeout,
             statement_cache_capacity: options.statement_cache_capacity,
             log_settings: options.log_settings.clone(),
+            thread_stack_size: options.thread_stack_size,
             #[cfg(feature = "load-extension")]
             extensions,
             thread_name: (options.thread_name)(thread_id as u64),

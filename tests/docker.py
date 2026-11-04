@@ -12,6 +12,14 @@ dir_tests = path.join(dir_workspace, "tests")
 
 
 # start database server and return a URL to use to connect
+def docker_compose_command():
+    if shutil.which("docker-compose"):
+        return ["docker-compose"]
+    if shutil.which("docker"):
+        return ["docker", "compose"]
+    return None
+
+
 def start_database(driver, database, cwd):
     if driver == "sqlite":
         database = path.join(cwd, database)
@@ -22,8 +30,13 @@ def start_database(driver, database, cwd):
         # short-circuit for sqlite
         return f"sqlite://{path.join(cwd, new_database)}?mode=rwc"
 
+    compose_cmd = docker_compose_command()
+    if compose_cmd is None:
+        raise FileNotFoundError("docker-compose or docker compose not found")
+
+    compose_args = [*compose_cmd, "-p", "sqlx"]
     res = subprocess.run(
-        ["docker-compose", "up", "-d", driver],
+        [*compose_args, "up", "-d", driver],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=dir_tests,
@@ -34,6 +47,21 @@ def start_database(driver, database, cwd):
 
     if b"done" in res.stderr:
         time.sleep(30)
+
+    res = subprocess.run(
+        [*compose_args, "ps", "-q", driver],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=dir_tests,
+    )
+
+    if res.returncode != 0:
+        print(res.stderr, file=sys.stderr)
+        raise RuntimeError(f"failed to resolve container for {driver}")
+
+    container_id = res.stdout.strip().decode()
+    if not container_id:
+        raise RuntimeError(f"no container found for {driver}")
 
     # determine appropriate port for driver
     if driver.startswith("mysql") or driver.startswith("mariadb"):
@@ -46,9 +74,9 @@ def start_database(driver, database, cwd):
         raise NotImplementedError
 
     # find port
+    format_arg = f"{{{{(index (index .NetworkSettings.Ports \"{port}/tcp\") 0).HostPort}}}}"
     res = subprocess.run(
-        ["docker", "inspect", f"-f='{{{{(index (index .NetworkSettings.Ports \"{port}/tcp\") 0).HostPort}}}}'",
-         f"sqlx_{driver}_1"],
+        ["docker", "inspect", "-f", format_arg, container_id],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=dir_tests,
@@ -57,18 +85,23 @@ def start_database(driver, database, cwd):
     if res.returncode != 0:
         print(res.stderr, file=sys.stderr)
 
-    port = int(res.stdout[1:-2].decode())
+    port = int(res.stdout.decode().strip())
 
     # need additional permissions to connect to MySQL when using SSL
-    res = subprocess.run(
-        ["docker", "exec", f"sqlx_{driver}_1", "mysql", "-u", "root", "-e", "GRANT ALL PRIVILEGES ON *.* TO 'root' WITH GRANT OPTION;"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        cwd=dir_tests,
-    )
+    if driver.startswith("mysql") or driver.startswith("mariadb"):
+        mysql_args = ["docker", "exec", container_id, "mysql", "-u", "root"]
+        if not driver.endswith("client_ssl"):
+            mysql_args.append("-ppassword")
+        mysql_args.extend(["-e", "GRANT ALL PRIVILEGES ON *.* TO 'root' WITH GRANT OPTION;"])
+        res = subprocess.run(
+            mysql_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=dir_tests,
+        )
 
-    if res.returncode != 0:
-        print(res.stderr, file=sys.stderr)
+        if res.returncode != 0:
+            print(res.stderr, file=sys.stderr)
 
     # do not set password in URL if authenticating using SSL key file
     if driver.endswith("client_ssl"):

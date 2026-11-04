@@ -1,4 +1,4 @@
 # Note: should NOT increase during a minor/patch release cycle
 [toolchain]
-channel = "1.86"
+channel = "1.94"
 profile = "minimal"

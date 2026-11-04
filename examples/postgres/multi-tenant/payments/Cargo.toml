@@ -7,7 +7,7 @@ edition = "2021"
 
 rust_decimal = "1.36.0"
 
-time = "0.3.37"
+time = "0.3.48"
 uuid = "1.12.1"
 
 [dependencies.sqlx]

@@ -1,10 +1,11 @@
 // This is imported by different tests that use different functions.
 #![allow(dead_code)]
 
-use axum::body::{Body, BoxBody, HttpBody};
+use axum::body::Body;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{request, Request};
 use axum::response::Response;
+use http_body_util::BodyExt;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -27,7 +28,7 @@ impl RequestBuilderExt for request::Builder {
     }
 }
 
-pub async fn response_json(resp: &mut Response<BoxBody>) -> serde_json::Value {
+pub async fn response_json(resp: &mut Response) -> serde_json::Value {
     assert_eq!(
         resp.headers()
             .get(CONTENT_TYPE)
@@ -35,15 +36,11 @@ pub async fn response_json(resp: &mut Response<BoxBody>) -> serde_json::Value {
         "application/json"
     );
 
-    let body = resp.body_mut();
-
-    let mut bytes = Vec::new();
-
-    while let Some(res) = body.data().await {
-        let chunk = res.expect("error reading response body");
-
-        bytes.extend_from_slice(&chunk[..]);
-    }
+    let bytes = resp
+        .collect()
+        .await
+        .expect("error reading response body")
+        .to_bytes();
 
     serde_json::from_slice(&bytes).expect("failed to read response body as json")
 }

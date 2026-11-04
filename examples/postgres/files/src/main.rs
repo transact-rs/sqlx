@@ -30,7 +30,7 @@ impl Display for PostWithAuthorQuery {
 async fn main() -> anyhow::Result<()> {
     let pool = PgPool::connect(&dotenvy::var("DATABASE_URL")?).await?;
 
-    // we can use a tranditional wrapper around the `query!()` macro using files
+    // we can use a traditional wrapper around the `query!()` macro using files
     query_file!("queries/insert_seed_data.sql")
         .execute(&pool)
         .await?;

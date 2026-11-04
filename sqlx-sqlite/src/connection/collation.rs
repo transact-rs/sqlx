@@ -3,7 +3,6 @@ use std::ffi::CString;
 use std::fmt::{self, Debug, Formatter};
 use std::os::raw::{c_int, c_void};
 use std::slice;
-use std::str::from_utf8_unchecked;
 use std::sync::Arc;
 
 use libsqlite3_sys::{sqlite3_create_collation_v2, SQLITE_OK, SQLITE_UTF8};
@@ -137,15 +136,19 @@ where
     let right_len = usize::try_from(right_len)
         .unwrap_or_else(|_| panic!("right_len out of range: {right_len}"));
 
+    // SQLite explicitly documents that invalid UTF-8 may be passed into
+    // application-defined collating sequences. The safe `Fn(&str, &str)`
+    // signature exposed to users must never observe invalid UTF-8, so
+    // lossily coerce the raw bytes here.
     let s1 = {
         let c_slice = slice::from_raw_parts(left_ptr as *const u8, left_len);
-        from_utf8_unchecked(c_slice)
+        String::from_utf8_lossy(c_slice)
     };
     let s2 = {
         let c_slice = slice::from_raw_parts(right_ptr as *const u8, right_len);
-        from_utf8_unchecked(c_slice)
+        String::from_utf8_lossy(c_slice)
     };
-    let t = (*boxed_f)(s1, s2);
+    let t = (*boxed_f)(&s1, &s2);
 
     match t {
         Ordering::Less => -1,

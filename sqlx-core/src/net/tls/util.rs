@@ -2,7 +2,7 @@ use crate::net::Socket;
 
 use std::future;
 use std::io::{self, Read, Write};
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll};
 
 pub struct StdSocket<S> {
     pub socket: S,
@@ -19,20 +19,35 @@ impl<S: Socket> StdSocket<S> {
         }
     }
 
+    /// Returns `Ready` if a previously blocked read _or_ write may now proceed.
+    ///
+    /// If both a read and a write were attempted, to avoid deadlocks this returns `Ready`
+    /// when _either_ direction is ready, not necessarily both.
     pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        if self.wants_write {
-            ready!(self.socket.poll_write_ready(cx))?;
+        // Return `Ready` without waiting if the caller hasn't tried to do I/O in either direction.
+        let mut ready = !(self.wants_read || self.wants_write);
+
+        if self.wants_write && self.socket.poll_write_ready(cx)?.is_ready() {
             self.wants_write = false;
+            ready |= true;
         }
 
-        if self.wants_read {
-            ready!(self.socket.poll_read_ready(cx))?;
+        if self.wants_read && self.socket.poll_read_ready(cx)?.is_ready() {
             self.wants_read = false;
+            ready |= true;
         }
 
-        Poll::Ready(Ok(()))
+        if ready {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 
+    /// Returns successfully if a previously blocked read _or_ write may now proceed.
+    ///
+    /// If both a read and a write were attempted, to avoid deadlocks this returns when _either_
+    /// direction is ready, not necessarily both.
     pub async fn ready(&mut self) -> io::Result<()> {
         future::poll_fn(|cx| self.poll_ready(cx)).await
     }
