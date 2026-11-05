@@ -61,6 +61,11 @@ impl PgConnectOptions {
 
                 "sslkey" | "ssl-key" => options = options.ssl_client_key(&*value),
 
+                "danger-custom-ssl-config" => {
+                    options.ssl_options.custom_config_expected =
+                        value.parse().map_err(Error::config)?;
+                }
+
                 "statement-cache-capacity" => {
                     options =
                         options.statement_cache_capacity(value.parse().map_err(Error::config)?);
@@ -158,6 +163,11 @@ impl PgConnectOptions {
         if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
             url.query_pairs_mut()
                 .append_pair("sslkey", &ssl_client_key.to_string());
+        }
+
+        if self.ssl_options.custom_connector.is_some() || self.ssl_options.custom_config_expected {
+            url.query_pairs_mut()
+                .append_pair("danger-custom-ssl-config", "true");
         }
 
         url.query_pairs_mut().append_pair(

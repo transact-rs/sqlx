@@ -17,10 +17,34 @@ impl WithSocket for MaybeUpgradeTls<'_> {
     }
 }
 
+/// Fails when the options came from a URL marked `danger-custom-ssl-config` but no TLS config
+/// has been supplied since.
+pub(crate) fn check_custom_config(options: &PgConnectOptions) -> Result<(), Error> {
+    if options.ssl_options.custom_config_expected && options.ssl_options.custom_connector.is_none()
+    {
+        return Err(Error::Configuration(
+            "`danger-custom-ssl-config` is set but no TLS config was supplied; \
+             call `PgConnectOptions::ssl_client_config()`"
+                .into(),
+        ));
+    }
+
+    Ok(())
+}
+
 async fn maybe_upgrade<S: Socket>(
     mut socket: S,
     options: &PgConnectOptions,
 ) -> Result<Box<dyn Socket>, Error> {
+    if let Some(connector) = &options.ssl_options.custom_connector {
+        // Fail closed: a caller-supplied TLS config never falls back to plaintext.
+        if !request_upgrade(&mut socket, options).await? {
+            return Err(Error::Tls("server does not support TLS".into()));
+        }
+
+        return tls::handshake(socket, &options.host, connector, SocketIntoBox).await;
+    }
+
     // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
     match options.ssl_options.ssl_mode {
         // FIXME: Implement ALLOW
@@ -240,5 +264,25 @@ mod tests {
                 other => panic!("expected Error::Protocol, but got: {:?}", other),
             }
         });
+    }
+
+    #[test]
+    fn test_custom_config_marker_without_config_fails() {
+        let options: PgConnectOptions =
+            "postgres://localhost/?sslmode=disable&danger-custom-ssl-config=true"
+                .parse()
+                .unwrap();
+
+        match check_custom_config(&options) {
+            Err(Error::Configuration(_)) => {}
+            other => panic!("expected Error::Configuration, but got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_no_custom_config_marker_passes() {
+        let options: PgConnectOptions = "postgres://localhost/?sslmode=disable".parse().unwrap();
+
+        check_custom_config(&options).unwrap();
     }
 }

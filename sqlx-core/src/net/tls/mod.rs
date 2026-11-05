@@ -65,20 +65,43 @@ pub struct TlsConfig<'a> {
     pub client_key_path: Option<&'a CertificateInput>,
 }
 
-#[cfg(feature = "_tls-native-tls")]
-pub use self::tls_native_tls::NativeTlsConnector as TlsConnector;
-#[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
-pub use self::tls_rustls::RustlsConnector as TlsConnector;
-#[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
+/// A TLS client setup that can be reused across connection attempts.
+///
+/// [`connector()`] builds one from a driver's SSL options. A caller can also supply their own
+/// configuration through a `From` impl:
+///
+/// * `Arc<rustls::ClientConfig>`, when a `tls-rustls-*` feature is enabled. The config is used
+///   as given: its crypto provider, protocol versions, and certificate verifier all apply.
 #[derive(Debug, Clone)]
-pub struct TlsConnector(std::convert::Infallible);
+pub struct TlsConnector(ConnectorKind);
+
+#[derive(Debug, Clone)]
+enum ConnectorKind {
+    #[cfg(feature = "_tls-native-tls")]
+    NativeTls(tls_native_tls::NativeTlsConnector),
+    #[cfg(feature = "_tls-rustls")]
+    Rustls(tls_rustls::RustlsConnector),
+}
+
+#[cfg(feature = "_tls-rustls")]
+impl From<std::sync::Arc<rustls::ClientConfig>> for TlsConnector {
+    fn from(config: std::sync::Arc<rustls::ClientConfig>) -> Self {
+        Self(ConnectorKind::Rustls(tls_rustls::RustlsConnector {
+            config,
+        }))
+    }
+}
 
 pub async fn connector(config: TlsConfig<'_>) -> crate::Result<TlsConnector> {
     #[cfg(feature = "_tls-native-tls")]
-    return tls_native_tls::connector(config).await;
+    return Ok(TlsConnector(ConnectorKind::NativeTls(
+        tls_native_tls::connector(config).await?,
+    )));
 
     #[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
-    return tls_rustls::connector(config).await;
+    return Ok(TlsConnector(ConnectorKind::Rustls(
+        tls_rustls::connector(config).await?,
+    )));
 
     #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
     {
@@ -97,20 +120,18 @@ where
     S: Socket,
     Ws: WithSocket,
 {
-    #[cfg(feature = "_tls-native-tls")]
-    return Ok(with_socket
-        .with_socket(tls_native_tls::handshake(socket, hostname, connector).await?)
-        .await);
-
-    #[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
-    return Ok(with_socket
-        .with_socket(tls_rustls::handshake(socket, hostname, connector).await?)
-        .await);
-
     #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
-    {
-        drop((socket, hostname, with_socket));
-        match connector.0 {}
+    drop((socket, hostname, with_socket));
+
+    match connector.0 {
+        #[cfg(feature = "_tls-native-tls")]
+        ConnectorKind::NativeTls(ref native) => Ok(with_socket
+            .with_socket(tls_native_tls::handshake(socket, hostname, native).await?)
+            .await),
+        #[cfg(feature = "_tls-rustls")]
+        ConnectorKind::Rustls(ref rustls) => Ok(with_socket
+            .with_socket(tls_rustls::handshake(socket, hostname, rustls).await?)
+            .await),
     }
 }
 

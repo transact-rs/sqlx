@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::ops::{ControlFlow, Deref, DerefMut};
 use std::str::FromStr;
 
-use crate::connection::tls::MaybeUpgradeTls;
+use crate::connection::tls::{check_custom_config, MaybeUpgradeTls};
 use crate::error::Error;
 use crate::message::{
     BackendMessage, BackendMessageFormat, EncodeMessage, FrontendMessage, Notice, Notification,
@@ -42,6 +42,8 @@ pub struct PgStream {
 
 impl PgStream {
     pub(super) async fn connect(options: &PgConnectOptions) -> Result<Self, Error> {
+        check_custom_config(options)?;
+
         let socket_result = match options.make_socket_path() {
             Some(ref path) => net::connect_uds(path, MaybeUpgradeTls(options)).await?,
             None => {
