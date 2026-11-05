@@ -103,7 +103,7 @@ impl<S: Socket> Socket for RustlsSocket<S> {
 
 #[derive(Debug, Clone)]
 pub struct RustlsConnector {
-    config: Arc<ClientConfig>,
+    pub(super) config: Arc<ClientConfig>,
 }
 
 pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {

@@ -90,7 +90,8 @@ _unstable-all-types = [
 _unstable-docs = [
     "all-databases",
     "_unstable-all-types",
-    "sqlx-sqlite/_unstable-docs"
+    "sqlx-sqlite/_unstable-docs",
+    "tls-rustls-ring-webpki"
 ]
 
 # Base runtime features without TLS
@@ -102,11 +103,11 @@ runtime-tokio = ["_rt-tokio", "sqlx-core/_rt-tokio", "sqlx-macros?/_rt-tokio"]
 # TLS features
 tls-native-tls = ["sqlx-core/_tls-native-tls", "sqlx-macros?/_tls-native-tls"]
 tls-rustls = ["tls-rustls-ring"] # For backwards compatibility
-tls-rustls-aws-lc-rs = ["sqlx-core/_tls-rustls-aws-lc-rs", "sqlx-macros?/_tls-rustls-aws-lc-rs"]
-tls-rustls-aws-lc-rs-native-roots = ["sqlx-core/_tls-rustls-aws-lc-rs-native-roots", "sqlx-macros?/_tls-rustls-aws-lc-rs-native-roots"]
+tls-rustls-aws-lc-rs = ["sqlx-core/_tls-rustls-aws-lc-rs", "sqlx-macros?/_tls-rustls-aws-lc-rs", "sqlx-postgres?/_tls-rustls-aws-lc-rs"]
+tls-rustls-aws-lc-rs-native-roots = ["sqlx-core/_tls-rustls-aws-lc-rs-native-roots", "sqlx-macros?/_tls-rustls-aws-lc-rs-native-roots", "sqlx-postgres?/_tls-rustls-aws-lc-rs-native-roots"]
 tls-rustls-ring = ["tls-rustls-ring-webpki"] # For backwards compatibility
-tls-rustls-ring-webpki = ["sqlx-core/_tls-rustls-ring-webpki", "sqlx-macros?/_tls-rustls-ring-webpki"]
-tls-rustls-ring-native-roots = ["sqlx-core/_tls-rustls-ring-native-roots", "sqlx-macros?/_tls-rustls-ring-native-roots"]
+tls-rustls-ring-webpki = ["sqlx-core/_tls-rustls-ring-webpki", "sqlx-macros?/_tls-rustls-ring-webpki", "sqlx-postgres?/_tls-rustls-ring-webpki"]
+tls-rustls-ring-native-roots = ["sqlx-core/_tls-rustls-ring-native-roots", "sqlx-macros?/_tls-rustls-ring-native-roots", "sqlx-postgres?/_tls-rustls-ring-native-roots"]
 
 # No-op feature used by the workflows to compile without TLS enabled. Not meant for general use.
 tls-none = []
@@ -479,3 +480,8 @@ required-features = ["postgres", "macros", "migrate"]
 name = "postgres-any"
 path = "tests/postgres/any.rs"
 required-features = ["postgres", "any"]
+
+[[test]]
+name = "postgres-tls"
+path = "tests/postgres/tls.rs"
+required-features = ["postgres"]
