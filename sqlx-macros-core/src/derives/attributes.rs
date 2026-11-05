@@ -127,8 +127,13 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
             let list: Punctuated<Meta, Token![,]> =
                 attr.parse_args_with(<Punctuated<Meta, Token![,]>>::parse_terminated)?;
 
-            if let Some(path) = list.iter().find_map(|f| f.require_path_only().ok()) {
-                try_set!(repr, path.get_ident().unwrap().clone(), list);
+            // Only integer reprs determine the encoded type; ignore `C`, `transparent`, etc.
+            if let Some(ident) = list
+                .iter()
+                .filter_map(|f| f.require_path_only().ok()?.get_ident())
+                .find(|ident| is_integer_repr(ident))
+            {
+                try_set!(repr, ident.clone(), list);
             }
         }
     }
@@ -221,6 +226,23 @@ pub fn check_transparent_attributes(
     );
 
     Ok(attributes)
+}
+
+fn is_integer_repr(ident: &Ident) -> bool {
+    matches!(
+        ident.to_string().as_str(),
+        "u8" | "u16"
+            | "u32"
+            | "u64"
+            | "u128"
+            | "usize"
+            | "i8"
+            | "i16"
+            | "i32"
+            | "i64"
+            | "i128"
+            | "isize"
+    )
 }
 
 pub fn check_enum_attributes(input: &DeriveInput) -> syn::Result<SqlxContainerAttributes> {

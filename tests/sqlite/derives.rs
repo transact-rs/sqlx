@@ -13,6 +13,20 @@ test_type!(origin_enum<Origin>(Sqlite,
     "2" == Origin::Bar,
 ));
 
+// `repr(C)` is not an integer type and must not be used as one (#4366).
+#[derive(Debug, PartialEq, sqlx::Type)]
+#[repr(C)]
+#[sqlx(rename_all = "lowercase")]
+enum ReprCStrong {
+    Foo,
+    Bar,
+}
+
+test_type!(repr_c_strong_enum<ReprCStrong>(Sqlite,
+    "'foo'" == ReprCStrong::Foo,
+    "'bar'" == ReprCStrong::Bar,
+));
+
 #[derive(PartialEq, Eq, Debug, sqlx::Type)]
 #[sqlx(transparent)]
 struct TransparentTuple(i64);
