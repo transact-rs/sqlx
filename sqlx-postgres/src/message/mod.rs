@@ -48,7 +48,7 @@ pub use parse::Parse;
 pub use parse_complete::ParseComplete;
 pub use password::Password;
 pub use query::Query;
-pub use ready_for_query::{ReadyForQuery, TransactionStatus};
+pub use ready_for_query::{PgTransactionStatus, ReadyForQuery};
 pub use response::{Notice, PgSeverity};
 pub use row_description::RowDescription;
 pub use sasl::{SaslInitialResponse, SaslResponse};

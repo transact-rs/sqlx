@@ -1469,3 +1469,25 @@ async fn issue_4300() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn it_reports_autocommit_from_the_handle() -> anyhow::Result<()> {
+    let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
+    assert!(conn.lock_handle().await?.is_autocommit());
+
+    conn.execute("BEGIN").await?;
+    assert!(!conn.lock_handle().await?.is_autocommit());
+    // SQLx did not begin this transaction, so it does not count it.
+    assert!(!conn.is_in_transaction());
+
+    // A conflict with OR ROLLBACK ends the whole transaction.
+    conn.execute("CREATE TABLE t (v TEXT UNIQUE)").await?;
+    conn.execute("INSERT INTO t VALUES ('a')").await?;
+    assert!(conn
+        .execute("INSERT OR ROLLBACK INTO t VALUES ('a')")
+        .await
+        .is_err());
+    assert!(conn.lock_handle().await?.is_autocommit());
+
+    Ok(())
+}

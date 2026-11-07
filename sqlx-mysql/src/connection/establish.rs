@@ -8,6 +8,7 @@ use crate::net::{Socket, WithSocket};
 use crate::protocol::connect::{
     AuthSwitchRequest, AuthSwitchResponse, Handshake, HandshakeResponse,
 };
+use crate::protocol::response::Status;
 use crate::protocol::Capabilities;
 use crate::{MySqlConnectOptions, MySqlConnection, MySqlSslMode};
 
@@ -20,13 +21,13 @@ impl MySqlConnection {
             None => crate::net::connect_tcp(&options.host, options.port, do_handshake).await?,
         };
 
-        let stream = handshake?;
+        let (stream, status_flags) = handshake?;
 
         Ok(Self {
             inner: Box::new(MySqlConnectionInner {
                 stream,
                 transaction_depth: 0,
-                status_flags: Default::default(),
+                status_flags,
                 cache_statement: StatementCache::new(options.statement_cache_capacity),
                 log_settings: options.log_settings.clone(),
             }),
@@ -52,7 +53,9 @@ impl<'a> DoHandshake<'a> {
         Ok(Self { options })
     }
 
-    async fn do_handshake<S: Socket>(self, socket: S) -> Result<MySqlStream, Error> {
+    /// Connects and authenticates, returning the stream and the server status it reported
+    /// last, so the connection knows whether autocommit is on before its first query.
+    async fn do_handshake<S: Socket>(self, socket: S) -> Result<(MySqlStream, Status), Error> {
         let DoHandshake { options } = self;
 
         let mut stream = MySqlStream::with_socket(options, socket);
@@ -61,6 +64,7 @@ impl<'a> DoHandshake<'a> {
         // https://mariadb.com/kb/en/connection/
 
         let handshake: Handshake = stream.recv_packet().await?.decode()?;
+        let mut status = handshake.status;
 
         let mut plugin = handshake.auth_plugin;
         // `mut`: an AuthSwitchRequest carries a fresh nonce, and the plugin's follow-up
@@ -122,7 +126,7 @@ impl<'a> DoHandshake<'a> {
             let packet = stream.recv_packet().await?;
             match packet[0] {
                 0x00 => {
-                    let _ok = packet.ok()?;
+                    status = packet.ok()?.status;
 
                     break;
                 }
@@ -165,12 +169,12 @@ impl<'a> DoHandshake<'a> {
             }
         }
 
-        Ok(stream)
+        Ok((stream, status))
     }
 }
 
 impl WithSocket for DoHandshake<'_> {
-    type Output = Result<MySqlStream, Error>;
+    type Output = Result<(MySqlStream, Status), Error>;
 
     async fn with_socket<S: Socket>(self, socket: S) -> Self::Output {
         self.do_handshake(socket).await
