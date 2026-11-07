@@ -30,6 +30,7 @@ use crate::options::OptimizeOnClose;
 use crate::statement::VirtualStatement;
 use crate::{Sqlite, SqliteConnectOptions, SqliteError};
 
+pub(crate) mod batch;
 pub(crate) mod collation;
 pub(crate) mod describe;
 pub(crate) mod establish;

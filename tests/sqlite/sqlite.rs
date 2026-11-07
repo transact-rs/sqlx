@@ -1469,3 +1469,114 @@ async fn issue_4300() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn it_executes_a_batch() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute("CREATE TEMPORARY TABLE batch_item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+        .await?;
+    conn.clear_cached_statements().await?;
+
+    let names = ["a", "b", "c"];
+    let results = conn
+        .execute_batch(names.iter().map(|name| {
+            sqlx::query("INSERT INTO batch_item (name) VALUES (?) RETURNING id").bind(*name)
+        }))
+        .await?;
+
+    assert_eq!(results.len(), 3);
+    for (i, result) in results.iter().enumerate() {
+        assert_eq!(result.rows_affected(), 1);
+        assert_eq!(result.last_insert_rowid(), i as i64 + 1);
+        assert_eq!(result.rows().len(), 1);
+        assert_eq!(result.rows()[0].get::<i64, _>(0), i as i64 + 1);
+    }
+
+    // The same SQL with different arguments reuses one prepared statement.
+    assert_eq!(conn.cached_statements_size(), 1);
+
+    // Queries of different kinds, including a raw multi-statement string, run in order.
+    let results = conn
+        .execute_batch([
+            sqlx::query("UPDATE batch_item SET name = ? WHERE id = ?")
+                .bind("z")
+                .bind(1_i64),
+            sqlx::query("SELECT name FROM batch_item ORDER BY id"),
+            sqlx::query("DELETE FROM batch_item WHERE id = 3; DELETE FROM batch_item WHERE id = 2"),
+        ])
+        .await?;
+
+    assert_eq!(results[0].rows_affected(), 1);
+    assert!(results[0].rows().is_empty());
+    let names: Vec<String> = results[1].rows().iter().map(|row| row.get(0)).collect();
+    assert_eq!(names, ["z", "b", "c"]);
+    assert_eq!(results[2].rows_affected(), 2);
+
+    assert!(conn
+        .execute_batch(std::iter::empty::<&str>())
+        .await?
+        .is_empty());
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_stops_a_batch_at_the_first_error() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute("CREATE TEMPORARY TABLE batch_item (id INTEGER PRIMARY KEY)")
+        .await?;
+
+    let error = conn
+        .execute_batch([
+            sqlx::query("INSERT INTO batch_item (id) VALUES (?)").bind(1_i64),
+            sqlx::query("INSERT INTO batch_item (id) VALUES (?)").bind(1_i64),
+            sqlx::query("INSERT INTO batch_item (id) VALUES (?)").bind(2_i64),
+        ])
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.index(), 1);
+    assert!(matches!(error.error(), sqlx::Error::Database(_)));
+
+    // Earlier queries are not rolled back, and later ones did not run.
+    let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM batch_item")
+        .fetch_all(&mut conn)
+        .await?;
+    assert_eq!(ids, [1]);
+
+    // The connection is still usable.
+    let results = conn
+        .execute_batch([sqlx::query("INSERT INTO batch_item (id) VALUES (?)").bind(2_i64)])
+        .await?;
+    assert_eq!(results[0].rows_affected(), 1);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_executes_a_batch_in_a_transaction() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    conn.execute("CREATE TEMPORARY TABLE batch_item (id INTEGER PRIMARY KEY)")
+        .await?;
+
+    let mut tx = conn.begin().await?;
+    let error = tx
+        .execute_batch([
+            sqlx::query("INSERT INTO batch_item (id) VALUES (?)").bind(1_i64),
+            sqlx::query("INSERT INTO missing_table (id) VALUES (?)").bind(2_i64),
+        ])
+        .await
+        .unwrap_err();
+    assert_eq!(error.index(), 1);
+    tx.rollback().await?;
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM batch_item")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(count, 0);
+
+    Ok(())
+}
