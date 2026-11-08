@@ -23,3 +23,12 @@ openssl req -batch -newkey ed25519 -keyout keys/server.key -nodes -new -out serv
 openssl x509 -req -CA ca.crt -CAkey keys/ca.key -in server.csr -out server.crt -days 7 -CAcreateserial -copy_extensions copyall
 
 rm keys/ca.key ca.srl client.csr server.csr
+
+echo '================ CA Certificate ================'
+openssl x509 -text -in ca.crt
+
+echo '================ Server Certificate ================'
+openssl x509 -text -in server.crt
+
+echo '================ Client Certificate ================'
+openssl x509 -text -in client.crt
