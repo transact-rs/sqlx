@@ -202,7 +202,8 @@ fn it_parses_hostaddr_correctly_from_parameter() {
     let opts = PgConnectOptions::from_str(url).unwrap();
 
     assert_eq!(None, opts.socket);
-    assert_eq!("8.8.8.8", &opts.host);
+    assert_eq!("localhost", &opts.host);
+    assert_eq!(Some("8.8.8.8".parse().unwrap()), opts.hostaddr);
 }
 
 #[test]
