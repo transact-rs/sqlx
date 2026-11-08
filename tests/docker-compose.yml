@@ -4,6 +4,8 @@ services:
     # https://www.mysql.com/support/supportedplatforms/database.html
     mysql_8:
         image: mysql:8
+        # Re-enable `mysql_native_password` plugin on MySQL 8.4+
+        command: mysqld --mysql-native-password=ON
         volumes:
             - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
         ports:
@@ -19,6 +21,8 @@ services:
             dockerfile: mysql/Dockerfile
             args:
                 IMAGE: mysql:8
+        # Re-enable `mysql_native_password` plugin on MySQL 8.4+
+        command: mysqld --mysql-native-password=ON
         volumes:
             - "./mysql/setup.sql:/docker-entrypoint-initdb.d/setup.sql:z"
         ports:
