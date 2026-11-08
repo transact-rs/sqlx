@@ -75,8 +75,7 @@ impl PgConnectOptions {
                 }
 
                 "hostaddr" => {
-                    value.parse::<IpAddr>().map_err(Error::config)?;
-                    options = options.host(&value)
+                    options = options.hostaddr(value.parse::<IpAddr>().map_err(Error::config)?);
                 }
 
                 "port" => options = options.port(value.parse().map_err(Error::config)?),

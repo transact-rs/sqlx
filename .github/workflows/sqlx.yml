@@ -277,6 +277,10 @@ jobs:
           --no-default-features
           --features postgres,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }},macros,migrate
 
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
+
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_${{ matrix.postgres }} postgres_${{ matrix.postgres }}
 
@@ -440,6 +444,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
+
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_17 postgres_17
           docker exec postgres_17 bash -c "until pg_isready; do sleep 1; done"
@@ -478,6 +486,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - run: cargo build --features mysql,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
 
       - run: docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_${{ matrix.mysql }} mysql_${{ matrix.mysql }}
       - name: Wait for MySQL
@@ -614,6 +626,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
+
       - run: docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_8 mysql_8
       - name: Wait for MySQL
         run: |
@@ -658,6 +674,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - run: cargo build --features mysql,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
 
       - run: docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mariadb_${{ matrix.mariadb }} mariadb_${{ matrix.mariadb }}
       - name: Wait for MariaDB

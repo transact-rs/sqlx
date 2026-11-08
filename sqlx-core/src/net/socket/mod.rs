@@ -1,5 +1,7 @@
+use std::fmt::Display;
 use std::future::Future;
 use std::io;
+use std::net::{AddrParseError, IpAddr};
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
@@ -181,14 +183,45 @@ impl<S: Socket + ?Sized> Socket for Box<S> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum SocketHost<'a> {
+    Name(&'a str),
+    Addr(IpAddr),
+}
+
+impl TryFrom<SocketHost<'_>> for IpAddr {
+    type Error = AddrParseError;
+
+    fn try_from(host: SocketHost<'_>) -> Result<Self, Self::Error> {
+        match host {
+            // IPv6 addresses in URLs will be wrapped in brackets and the `url` crate doesn't trim those.
+            SocketHost::Name(name) => name.trim_matches(&['[', ']'][..]).parse(),
+            SocketHost::Addr(addr) => Ok(addr),
+        }
+    }
+}
+
+impl Display for SocketHost<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SocketHost::Name(name) => name.fmt(f),
+            SocketHost::Addr(addr) => addr.fmt(f),
+        }
+    }
+}
+
 pub async fn connect_tcp<Ws: WithSocket>(
-    host: &str,
+    host: SocketHost<'_>,
     port: u16,
     with_socket: Ws,
 ) -> crate::Result<Ws::Output> {
     #[cfg(feature = "_rt-tokio")]
     if crate::rt::rt_tokio::available() {
-        let socket = tokio::net::TcpStream::connect((host, port)).await?;
+        let socket = match host {
+            SocketHost::Name(name) => tokio::net::TcpStream::connect((name, port)).await?,
+            SocketHost::Addr(addr) => tokio::net::TcpStream::connect((addr, port)).await?,
+        };
+
         socket.set_nodelay(true)?;
         return Ok(with_socket.with_socket(socket).await);
     }
@@ -208,14 +241,11 @@ pub async fn connect_tcp<Ws: WithSocket>(
 ///
 /// This implements the same behavior as [`tokio::net::TcpStream::connect()`] and additionally sets the `TCP_NODELAY` flag.
 #[cfg(feature = "_rt-async-io")]
-async fn connect_tcp_async_io(host: &str, port: u16) -> crate::Result<impl Socket> {
+async fn connect_tcp_async_io(host: SocketHost<'_>, port: u16) -> crate::Result<impl Socket> {
     use async_io::Async;
     use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 
-    // IPv6 addresses in URLs will be wrapped in brackets and the `url` crate doesn't trim those.
-    let host = host.trim_matches(&['[', ']'][..]);
-
-    if let Ok(addr) = host.parse::<IpAddr>() {
+    if let Ok(addr) = IpAddr::try_from(host) {
         let socket = Async::<TcpStream>::connect((addr, port)).await?;
         socket.get_ref().set_nodelay(true)?;
         return Ok(socket);
