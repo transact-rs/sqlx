@@ -1172,7 +1172,7 @@ async fn test_listener_try_recv_buffered() -> anyhow::Result<()> {
     assert!(listener.next_buffered().is_none());
 
     // Activate connection.
-    sqlx::query!("SELECT 1 AS one")
+    sqlx::query("SELECT 1 AS one")
         .fetch_all(&mut listener)
         .await?;
 
