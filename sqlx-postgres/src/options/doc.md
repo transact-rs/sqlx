@@ -29,7 +29,7 @@ if a parameter is not passed in via URL, it is populated by reading
 | `password`         | `PGPASSWORD`         | Read from [`passfile`], if it exists.                       |
 | [`passfile`]       | `PGPASSFILE`         | `~/.pgpass` or `%APPDATA%\postgresql\pgpass.conf` (Windows) |
 | `host`             | `PGHOST`             | See [Note: Default Host](#note-default-host).               |
-| `hostaddr`         | `PGHOSTADDR`         | See [Note: Default Host](#note-default-host).               |
+| `hostaddr`         | `PGHOSTADDR`         | Unset.               |
 | `port`             | `PGPORT`             | `5432`                                                      |
 | `dbname`           | `PGDATABASE`         | Unset; defaults to the username server-side.                |
 | `sslmode`          | `PGSSLMODE`          | `prefer`. See [`PgSslMode`] for details.                    |

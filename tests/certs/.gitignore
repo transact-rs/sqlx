@@ -1,4 +1,15 @@
-# Certificate-signing request does not need to be committed
+# Directories
+keys/
+rsa/
+
+# Keys
+*.key
+
+# Certificates
+*.crt
+
+# Certificate-signing requests
 *.csr
-# Test certificates aren't meant to be permanent, so tracking what serial number to use is unnecessary.
-ca.srl
+
+# Serial number files
+*.srl
