@@ -3,7 +3,7 @@ set -ex
 mkdir -p keys
 
 # Create self-signed CA certificate
-openssl req -batch -x509 -sha256 -days 7 -newkey ed25519 -keyout keys/ca.key -nodes -out ca.crt -subj "/C=US/ST=CA/O=transact-rs/CN=sqlx.ca.test"
+openssl req -batch -x509 -sha256 -days 7 -newkey ed25519 -keyout keys/ca.key -nodes -out ca.crt -subj "/C=US/ST=CA/O=transact-rs/CN=ca.sql.test"
 
 # Generate client key + CSR
 # Postgres expects the Common Name (`CN`) field of the certificate to match the database username:
