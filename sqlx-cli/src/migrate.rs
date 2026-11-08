@@ -232,6 +232,11 @@ pub async fn run(
 
     let mut conn = crate::connect(config, connect_opts).await?;
 
+    // lock the database for exclusive access by the migrator
+    if !dry_run {
+        conn.lock().await?;
+    }
+
     for schema_name in &config.migrate.create_schemas {
         conn.create_schema_if_not_exists(schema_name).await?;
     }
@@ -311,6 +316,10 @@ pub async fn run(
         }
     }
 
+    if !dry_run {
+        conn.unlock().await?;
+    }
+
     // Close the connection before exiting:
     // * For MySQL and Postgres this should ensure timely cleanup on the server side,
     //   including decrementing the open connection count.
@@ -338,6 +347,12 @@ pub async fn revert(
     }
 
     let mut conn = crate::connect(config, connect_opts).await?;
+
+    // lock the database for exclusive access by the migrator
+    //
+    if !dry_run {
+        conn.lock().await?;
+    }
 
     // FIXME: we should not be creating anything here if it doesn't exist
     for schema_name in &config.migrate.create_schemas {
@@ -418,6 +433,10 @@ pub async fn revert(
     }
     if !is_applied {
         println!("No migrations available to revert");
+    }
+
+    if !dry_run {
+        conn.unlock().await?;
     }
 
     let _ = conn.close().await;
