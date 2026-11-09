@@ -1396,6 +1396,46 @@ async fn it_can_recover_from_bad_transaction_begin() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[sqlx_macros::test]
+async fn it_can_recover_from_automatic_rollback() -> anyhow::Result<()> {
+    let mut conn = SqliteConnectOptions::new()
+        .in_memory(true)
+        .connect()
+        .await
+        .unwrap();
+
+    sqlx::query("CREATE TABLE t (data BLOB)")
+        .execute(&mut conn)
+        .await?;
+    sqlx::query("PRAGMA max_page_count = 2")
+        .execute(&mut conn)
+        .await?;
+
+    // SQLITE_FULL makes SQLite roll back the transaction on its own.
+    let mut tx = conn.begin().await?;
+    let mut nested = tx.begin().await?;
+    let err = sqlx::query("INSERT INTO t VALUES (zeroblob(65536))")
+        .execute(&mut *nested)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.as_database_error().and_then(|e| e.code()).as_deref(),
+        Some("13")
+    );
+    drop(nested);
+    drop(tx);
+
+    // Transaction state bookkeeping should match SQLite again.
+    let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;
+    let value = sqlx::query_scalar::<_, i32>("SELECT 1")
+        .fetch_one(&mut *tx)
+        .await?;
+    assert_eq!(value, 1);
+    tx.rollback().await?;
+
+    Ok(())
+}
+
 fn transaction_state(handle: &mut LockedSqliteHandle) -> SqliteTransactionState {
     use libsqlite3_sys::{sqlite3_txn_state, SQLITE_TXN_NONE, SQLITE_TXN_READ, SQLITE_TXN_WRITE};
 
