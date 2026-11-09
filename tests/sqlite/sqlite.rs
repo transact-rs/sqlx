@@ -1423,7 +1423,9 @@ async fn it_can_recover_from_automatic_rollback() -> anyhow::Result<()> {
         Some("13")
     );
     drop(nested);
-    drop(tx);
+
+    // The outer transaction was rolled back as well, so it must not commit.
+    tx.commit().await.unwrap_err();
 
     // Transaction state bookkeeping should match SQLite again.
     let mut tx = conn.begin_with("BEGIN IMMEDIATE").await?;

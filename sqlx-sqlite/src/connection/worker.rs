@@ -295,7 +295,9 @@ impl ConnectionWorker {
                         let res = if depth > 0 && !conn.handle.in_transaction() {
                             // SQLite already rolled back the whole transaction on its own
                             // (e.g. after `SQLITE_FULL`), so there is nothing left to roll back.
-                            shared.transaction_depth.store(0, Ordering::Release);
+                            // Only this level is closed: an outer `Transaction` is still open
+                            // and must not be able to commit as if nothing had happened.
+                            shared.transaction_depth.fetch_sub(1, Ordering::Release);
                             Ok(())
                         } else if depth > 0 {
                             conn.handle
