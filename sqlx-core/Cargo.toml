@@ -29,6 +29,7 @@ _rt-tokio = ["tokio", "tokio-stream"]
 
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
+_tls-rustls-aws-lc-rs-native-roots = ["_tls-rustls", "rustls/aws-lc-rs", "rustls-native-certs"]
 _tls-rustls-ring-webpki = ["_tls-rustls", "rustls/ring", "webpki-roots"]
 _tls-rustls-ring-native-roots = ["_tls-rustls", "rustls/ring", "rustls-native-certs"]
 _tls-rustls = ["rustls"]
