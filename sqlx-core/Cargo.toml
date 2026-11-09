@@ -29,8 +29,9 @@ _rt-tokio = ["tokio", "tokio-stream"]
 
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
+_tls-rustls-aws-lc-rs-platform-verifier = ["_tls-rustls", "rustls/aws-lc-rs", "rustls-platform-verifier"]
 _tls-rustls-ring-webpki = ["_tls-rustls", "rustls/ring", "webpki-roots"]
-_tls-rustls-ring-native-roots = ["_tls-rustls", "rustls/ring", "rustls-native-certs"]
+_tls-rustls-ring-platform-verifier = ["_tls-rustls", "rustls/ring", "rustls-platform-verifier"]
 _tls-rustls = ["rustls"]
 _tls-none = []
 
@@ -57,7 +58,7 @@ native-tls = { version = "0.2.10", optional = true }
 
 rustls = { version = "0.23.24", default-features = false, features = ["std", "tls12"], optional = true }
 webpki-roots = { version = "1", optional = true }
-rustls-native-certs = { version = "0.8.0", optional = true }
+rustls-platform-verifier = { version = "0.7", optional = true }
 
 # Type Integrations
 bit-vec = { workspace = true, optional = true }
