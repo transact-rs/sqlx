@@ -57,6 +57,8 @@ pub struct SqlxContainerAttributes {
     pub type_name: Option<TypeName>,
     pub rename_all: Option<RenameAll>,
     pub repr: Option<Ident>,
+    /// Set when `#[repr(C)]` is present; enums reject this (see `check_enum_attributes`).
+    pub repr_c: Option<Ident>,
     pub no_pg_array: bool,
     pub default: bool,
 }
@@ -78,6 +80,7 @@ pub struct SqlxChildAttributes {
 pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContainerAttributes> {
     let mut transparent = None;
     let mut repr = None;
+    let mut repr_c = None;
     let mut type_name = None;
     let mut rename_all = None;
     let mut no_pg_array = None;
@@ -127,13 +130,17 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
             let list: Punctuated<Meta, Token![,]> =
                 attr.parse_args_with(<Punctuated<Meta, Token![,]>>::parse_terminated)?;
 
-            // Only integer reprs determine the encoded type; ignore `C`, `transparent`, etc.
-            if let Some(ident) = list
+            for ident in list
                 .iter()
                 .filter_map(|f| f.require_path_only().ok()?.get_ident())
-                .find(|ident| is_integer_repr(ident))
             {
-                try_set!(repr, ident.clone(), list);
+                if is_integer_repr(ident) {
+                    try_set!(repr, ident.clone(), list);
+                } else if ident == "C" {
+                    repr_c = Some(ident.clone());
+                }
+                // Other reprs (`Rust`, `transparent`, `align(..)`, `packed`) only affect
+                // layout and say nothing about how the enum is encoded, so they're ignored.
             }
         }
     }
@@ -141,6 +148,7 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
     Ok(SqlxContainerAttributes {
         transparent: transparent.unwrap_or(false),
         repr,
+        repr_c,
         type_name,
         rename_all,
         no_pg_array: no_pg_array.unwrap_or(false),
@@ -254,6 +262,16 @@ pub fn check_enum_attributes(input: &DeriveInput) -> syn::Result<SqlxContainerAt
         input
     );
 
+    if let Some(ident) = &attributes.repr_c {
+        if attributes.repr.is_none() {
+            fail!(
+                ident,
+                "#[repr(C)] is ambiguous for #[derive(sqlx::Type)]: use an explicit integer repr \
+                 like #[repr(i32)] to encode as an integer, or remove #[repr(C)] to encode as a string"
+            );
+        }
+    }
+
     Ok(attributes)
 }
 
@@ -326,4 +344,42 @@ pub fn check_struct_attributes(
     }
 
     Ok(attributes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enum_input(attrs: TokenStream) -> DeriveInput {
+        syn::parse2(quote::quote! {
+            #attrs
+            enum Foo { A, B }
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn enum_repr_c_is_rejected() {
+        let input = enum_input(quote::quote!(#[repr(C)]));
+        let err = check_enum_attributes(&input)
+            .err()
+            .expect("repr(C) should be rejected");
+        assert!(err.to_string().contains("#[repr(i32)]"), "{err}");
+    }
+
+    #[test]
+    fn enum_repr_c_with_integer_is_accepted() {
+        let input = enum_input(quote::quote!(#[repr(C, u8)]));
+        let attrs = check_enum_attributes(&input).unwrap();
+        assert_eq!(attrs.repr.unwrap(), "u8");
+    }
+
+    #[test]
+    fn enum_layout_only_reprs_are_ignored() {
+        let input = enum_input(quote::quote!(#[repr(align(8))]));
+        assert!(check_enum_attributes(&input).unwrap().repr.is_none());
+
+        let input = enum_input(quote::quote!(#[repr(i16, align(8))]));
+        assert_eq!(check_enum_attributes(&input).unwrap().repr.unwrap(), "i16");
+    }
 }
