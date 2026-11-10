@@ -14,6 +14,7 @@ use sqlx_core::transaction::{
 };
 use sqlx_core::Either;
 
+use crate::connection::batch::{self, BatchQuery, SqliteBatchError, SqliteBatchResult};
 use crate::connection::establish::EstablishParams;
 use crate::connection::execute;
 use crate::connection::ConnectionState;
@@ -66,6 +67,10 @@ enum Command {
         persistent: bool,
         tx: flume::Sender<Result<Either<SqliteQueryResult, SqliteRow>, Error>>,
         limit: Option<usize>,
+    },
+    ExecuteBatch {
+        queries: Vec<BatchQuery>,
+        tx: oneshot::Sender<Result<Vec<SqliteBatchResult>, SqliteBatchError>>,
     },
     #[cfg(feature = "deserialize")]
     Serialize {
@@ -208,6 +213,13 @@ impl ConnectionWorker {
                                     }
                                 }
                             }
+                        }
+
+                        update_cached_statements_size(&conn, &shared.cached_statements_size);
+                    }
+                    Command::ExecuteBatch { queries, tx } => {
+                        if let Some(result) = batch::run(&mut conn, queries, &tx) {
+                            tx.send(result).ok();
                         }
 
                         update_cached_statements_size(&conn, &shared.cached_statements_size);
@@ -444,6 +456,15 @@ impl ConnectionWorker {
     ) -> Result<SqliteOwnedBuf, Error> {
         self.oneshot_cmd(|tx| Command::Serialize { schema, tx })
             .await?
+    }
+
+    pub(crate) async fn execute_batch(
+        &mut self,
+        queries: Vec<BatchQuery>,
+    ) -> Result<Vec<SqliteBatchResult>, SqliteBatchError> {
+        self.oneshot_cmd(|tx| Command::ExecuteBatch { queries, tx })
+            .await
+            .map_err(|error| SqliteBatchError::new(0, error))?
     }
 
     async fn oneshot_cmd<F, T>(&mut self, command: F) -> Result<T, Error>

@@ -76,6 +76,7 @@ use std::sync::atomic::AtomicBool;
 
 pub use arguments::{SqliteArgumentValue, SqliteArguments, SqliteArgumentsBuffer};
 pub use column::SqliteColumn;
+pub use connection::batch::{SqliteBatchError, SqliteBatchResult};
 #[cfg(feature = "deserialize")]
 #[cfg_attr(docsrs, doc(cfg(feature = "deserialize")))]
 pub use connection::deserialize::SqliteOwnedBuf;
