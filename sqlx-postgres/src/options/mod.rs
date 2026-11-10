@@ -46,6 +46,8 @@ pub(crate) struct SslOptions {
     pub(crate) ssl_client_cert: Option<CertificateInput>,
     pub(crate) ssl_client_key: Option<CertificateInput>,
     pub(crate) cached_connector: Arc<OnceLock<TlsConnector>>,
+    pub(crate) custom_connector: Option<TlsConnector>,
+    pub(crate) custom_config_expected: bool,
 }
 
 impl PgConnectOptions {
@@ -104,6 +106,8 @@ impl PgConnectOptions {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or_default(),
                 cached_connector: Arc::new(OnceLock::new()),
+                custom_connector: None,
+                custom_config_expected: false,
             },
             statement_cache_capacity: 100,
             application_name: var("PGAPPNAME").ok(),
@@ -380,6 +384,30 @@ impl PgConnectOptions {
     /// ```
     pub fn ssl_root_cert_from_pem(mut self, pem_certificate: Vec<u8>) -> Self {
         self.ssl_options_mut().ssl_root_cert = Some(CertificateInput::Inline(pem_certificate));
+        self
+    }
+
+    /// Sets a rustls client configuration that replaces all other SSL settings.
+    ///
+    /// Requires one of the `tls-rustls-*` features. The config's crypto provider, protocol
+    /// versions, root certificates, and verifier are used as given. SQLx adds no root
+    /// certificates of its own.
+    ///
+    /// Once set, every connection requires TLS, and [`ssl_mode`](Self::ssl_mode) and the
+    /// certificate and key settings are ignored. The certificate is checked against
+    /// [`host`](Self::host).
+    ///
+    /// The configuration can't be written to a URL. [`to_url_lossy()`] writes
+    /// `danger-custom-ssl-config=true` in its place, and options parsed from that URL fail to
+    /// connect until a configuration is set again.
+    ///
+    /// [`to_url_lossy()`]: sqlx_core::connection::ConnectOptions::to_url_lossy
+    #[cfg(feature = "_tls-rustls")]
+    pub fn ssl_client_config(
+        mut self,
+        config: impl Into<std::sync::Arc<sqlx_core::rustls::ClientConfig>>,
+    ) -> Self {
+        self.ssl_options.custom_connector = Some(TlsConnector::from(config.into()));
         self
     }
 

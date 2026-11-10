@@ -105,6 +105,9 @@ pub use url::{self, Url};
 
 pub use bytes;
 
+#[cfg(feature = "_tls-rustls")]
+pub use rustls;
+
 /// Helper module to get drivers compiling again that used to be in this crate,
 /// to avoid having to replace tons of `use crate::<...>` imports.
 ///
