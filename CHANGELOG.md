@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+* [[#4283]]: MySQL: infer `DATE`/`DATETIME`/`TIMESTAMP` columns as nullable in `query!`/`query_as!`
+  * SQLx decodes a MySQL "zero date" (e.g. `0000-00-00 00:00:00`) as `NULL`/`None` (see `MySqlValueRef::is_null`),
+    so a `NOT NULL` temporal column can still yield `None` at runtime. The macros previously inferred these columns
+    as non-nullable, causing an `UnexpectedNullError` at runtime when a zero date was returned.
+  * **Behavior change:** `DATE`/`DATETIME`/`TIMESTAMP` columns now produce `Option<T>` in `query!`/`query_as!`.
+    Use the `!` column override (e.g. ``SELECT created_at AS "created_at!"``) to force the non-nullable type when you
+    know the column cannot contain a zero date. `TIME` and non-temporal columns are unaffected.
+
+[#4283]: https://github.com/launchbadge/sqlx/issues/4283
+
 ## 0.9.0 - 2026-05-06
 
 ### Important Announcements
