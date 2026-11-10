@@ -24,11 +24,18 @@ impl TransactionManager for MySqlTransactionManager {
             Some(statement) => statement,
             None => begin_ansi_transaction_sql(depth),
         };
-        conn.execute(statement).await?;
-        if !conn.in_transaction() {
+        // Claim the depth before the round trip, not after. `start_rollback` is a no-op while
+        // the depth is zero, so a future cancelled during the await below would otherwise leave
+        // the server in a transaction with nothing queued to end it, and `Pool` would hand that
+        // connection to the next borrower. Unwound just below if the BEGIN did not take.
+        conn.inner.transaction_depth += 1;
+        let rollback = Rollback::new(conn);
+        rollback.conn.execute(statement).await?;
+        if !rollback.conn.in_transaction() {
+            rollback.conn.inner.transaction_depth -= 1;
             return Err(Error::BeginFailed);
         }
-        conn.inner.transaction_depth += 1;
+        rollback.defuse();
 
         Ok(())
     }
@@ -72,5 +79,30 @@ impl TransactionManager for MySqlTransactionManager {
 
     fn get_transaction_depth(conn: &MySqlConnection) -> usize {
         conn.inner.transaction_depth
+    }
+}
+
+struct Rollback<'c> {
+    conn: &'c mut MySqlConnection,
+    defuse: bool,
+}
+
+impl Drop for Rollback<'_> {
+    fn drop(&mut self) {
+        if !self.defuse {
+            MySqlTransactionManager::start_rollback(self.conn)
+        }
+    }
+}
+
+impl<'c> Rollback<'c> {
+    fn new(conn: &'c mut MySqlConnection) -> Self {
+        Self {
+            conn,
+            defuse: false,
+        }
+    }
+    fn defuse(mut self) {
+        self.defuse = true;
     }
 }
