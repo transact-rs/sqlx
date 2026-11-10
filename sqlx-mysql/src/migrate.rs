@@ -92,6 +92,17 @@ impl Migrate for MySqlConnection {
         table_name: &'e str,
     ) -> BoxFuture<'e, Result<(), MigrateError>> {
         Box::pin(async move {
+            let table_exists =
+                // language=SQL
+                self.execute(AssertSqlSafe(format!(
+                    r#"SELECT 1 FROM {table_name};"#
+                )))
+                .await;
+
+            if table_exists.is_ok() {
+                return Ok(());
+            }
+
             // language=MySQL
             self.execute(AssertSqlSafe(format!(
                 r#"
