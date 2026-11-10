@@ -133,6 +133,13 @@ to generate a single `.sqlx` directory at the root of the workspace.
 cargo sqlx prepare --workspace
 ```
 
+When `--workspace` is used, SQLx also checks every workspace member. Cargo options such as
+`--all-targets` and `--all-features` can still be forwarded after `--`:
+
+```bash
+cargo sqlx prepare --workspace -- --all-targets --all-features
+```
+
 Check this directory into version control and an active database connection will 
 no longer be needed to build your project.
 
