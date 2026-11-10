@@ -213,6 +213,7 @@ fn validate_applied_migrations(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     config: &Config,
     migration_source: &MigrationSourceOpt,
@@ -221,6 +222,7 @@ pub async fn run(
     ignore_missing: bool,
     target_version: Option<i64>,
     skip: bool,
+    no_lock: bool,
 ) -> anyhow::Result<()> {
     let migrator = migration_source.resolve(config).await?;
 
@@ -232,8 +234,10 @@ pub async fn run(
 
     let mut conn = crate::connect(config, connect_opts).await?;
 
+    let locking = !dry_run && !no_lock;
+
     // lock the database for exclusive access by the migrator
-    if !dry_run {
+    if locking {
         conn.lock().await?;
     }
 
@@ -316,7 +320,7 @@ pub async fn run(
         }
     }
 
-    if !dry_run {
+    if locking {
         conn.unlock().await?;
     }
 
@@ -337,6 +341,7 @@ pub async fn revert(
     dry_run: bool,
     ignore_missing: bool,
     target_version: Option<i64>,
+    no_lock: bool,
 ) -> anyhow::Result<()> {
     let migrator = migration_source.resolve(config).await?;
 
@@ -348,9 +353,10 @@ pub async fn revert(
 
     let mut conn = crate::connect(config, connect_opts).await?;
 
+    let locking = !dry_run && !no_lock;
+
     // lock the database for exclusive access by the migrator
-    //
-    if !dry_run {
+    if locking {
         conn.lock().await?;
     }
 
@@ -435,7 +441,7 @@ pub async fn revert(
         println!("No migrations available to revert");
     }
 
-    if !dry_run {
+    if locking {
         conn.unlock().await?;
     }
 

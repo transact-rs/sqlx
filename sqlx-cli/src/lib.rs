@@ -87,6 +87,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                 ignore_missing,
                 mut connect_opts,
                 target_version,
+                no_lock,
             } => {
                 let config = config.load_config().await?;
 
@@ -100,6 +101,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                     *ignore_missing,
                     target_version,
                     false,
+                    *no_lock,
                 )
                 .await?
             }
@@ -110,6 +112,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                 ignore_missing,
                 mut connect_opts,
                 target_version,
+                no_lock,
             } => {
                 let config = config.load_config().await?;
 
@@ -122,6 +125,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                     dry_run,
                     *ignore_missing,
                     target_version,
+                    *no_lock,
                 )
                 .await?
             }
@@ -133,6 +137,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                     dry_run,
                     ignore_missing,
                     target_version,
+                    no_lock,
                 } => {
                     let config = config.load_config().await?;
                     connect_opts.populate_db_url(&config)?;
@@ -145,6 +150,7 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                         *ignore_missing,
                         target_version,
                         true,
+                        *no_lock,
                     )
                     .await?
                 }
@@ -198,21 +204,31 @@ async fn do_run(opt: Opt) -> anyhow::Result<()> {
                 config,
                 mut connect_opts,
                 force,
+                no_lock,
             } => {
                 let config = config.load_config().await?;
 
                 connect_opts.populate_db_url(&config)?;
-                database::reset(&config, &source, &connect_opts, !confirmation.yes, force).await?
+                database::reset(
+                    &config,
+                    &source,
+                    &connect_opts,
+                    !confirmation.yes,
+                    force,
+                    *no_lock,
+                )
+                .await?
             }
             DatabaseCommand::Setup {
                 source,
                 config,
                 mut connect_opts,
+                no_lock,
             } => {
                 let config = config.load_config().await?;
 
                 connect_opts.populate_db_url(&config)?;
-                database::setup(&config, &source, &connect_opts).await?
+                database::setup(&config, &source, &connect_opts, *no_lock).await?
             }
         },
 
