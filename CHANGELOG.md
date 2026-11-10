@@ -82,6 +82,7 @@ See also [#4472] for motivation and discussion.
 * [[#4463]]: fix(macros): only report Ambiguous{DateTime,Numeric}Type when preferred crate is Inferred [[@rscorer]]
 * [[#4477]]: fix(postgres): Bind encodes result-format count from the wrong field [[@prostomarkeloff]]
 * [[#4485]]: fix(postgres): ignore notifications on connections that aren't listening.  fixes #4484. [[@luketpeterson]]
+* [[#4488]]: fix(postgres): preserve quoted "NULL" elements when decoding text arrays [[@MinJaeRun]]
 * [[#4493]]: fix(mysql): handle empty passwords during authentication switches. [[@lmont19]]
 * [[#4496]]: fix(mysql): quote charset/collation/time_zone in connect-time SET [[@Nacl-HCl]]
 * [[#4498]]: fix(postgres): keep draining resolved type dependencies in fill_cache [[@ducnhan123-co]]
@@ -137,6 +138,7 @@ See also [#4472] for motivation and discussion.
 [#4477]: https://github.com/transact-rs/sqlx/pull/4477
 [#4478]: https://github.com/transact-rs/sqlx/pull/4478
 [#4485]: https://github.com/transact-rs/sqlx/pull/4485
+[#4488]: https://github.com/transact-rs/sqlx/pull/4488
 [#4493]: https://github.com/transact-rs/sqlx/pull/4493
 [#4496]: https://github.com/transact-rs/sqlx/pull/4496
 [#4498]: https://github.com/transact-rs/sqlx/pull/4498
@@ -3514,3 +3516,4 @@ Fix docs.rs build by enabling a runtime feature in the docs.rs metadata in `Carg
 [@ducnhan123-co]: https://github.com/ducnhan123-co
 [@Map130]: https://github.com/Map130
 [@thelastbackspace]: https://github.com/thelastbackspace
+[@MinJaeRun]: https://github.com/MinJaeRun
