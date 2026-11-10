@@ -103,8 +103,7 @@ pub trait Connection: Send {
     where
         for<'c> F: FnOnce(&'c mut Transaction<'_, Self::Database>) -> BoxFuture<'c, Result<R, E>>
             + 'a
-            + Send
-            + Sync,
+            + Send,
         Self: Sized,
         R: Send,
         E: From<Error> + Send,

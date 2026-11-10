@@ -1,5 +1,5 @@
 use sqlx::pool::PoolOptions;
-use sqlx::{Connection, Database, Error, Pool};
+use sqlx::{Connection, Database, Error, Executor, Pool};
 use std::env;
 
 pub fn setup_if_needed() {
@@ -36,6 +36,59 @@ where
         .await?;
 
     Ok(pool)
+}
+
+/// Check that Send-only transaction callbacks can commit and roll back.
+pub async fn test_send_only_transaction_callbacks<C>(conn: &mut C) -> anyhow::Result<()>
+where
+    C: Connection,
+    for<'c> &'c mut C: Executor<'c, Database = C::Database>,
+{
+    fn assert_send(_: &(impl std::future::Future + Send)) {}
+
+    sqlx::raw_sql("CREATE TEMPORARY TABLE transaction_test (value BIGINT)")
+        .execute(&mut *conn)
+        .await?;
+
+    for commit in [true, false] {
+        // A Receiver is Send but not Sync.
+        let (sender, receiver) = std::sync::mpsc::channel();
+        sender.send(42_i64)?;
+
+        let future = conn.transaction(move |tx| {
+            Box::pin(async move {
+                sqlx::raw_sql("INSERT INTO transaction_test (value) VALUES (42)")
+                    .execute(&mut **tx)
+                    .await?;
+
+                // Keep the receiver across an await in the callback future, too.
+                let value = receiver.try_recv().unwrap();
+
+                if commit {
+                    Ok(value)
+                } else {
+                    Err(sqlx::Error::RowNotFound)
+                }
+            })
+        });
+
+        assert_send(&future);
+        let result = future.await;
+
+        if commit {
+            assert_eq!(result?, 42);
+        } else {
+            assert!(matches!(result, Err(sqlx::Error::RowNotFound)));
+        }
+
+        assert!(!conn.is_in_transaction());
+        let rows = sqlx::raw_sql("SELECT value FROM transaction_test")
+            .fetch_all(&mut *conn)
+            .await?;
+        assert_eq!(rows.len(), 1);
+    }
+
+    Ok(())
 }
 
 // Test type encoding and decoding
