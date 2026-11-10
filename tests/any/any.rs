@@ -24,6 +24,14 @@ async fn it_connects() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_accepts_send_only_transaction_callbacks() -> anyhow::Result<()> {
+    sqlx::any::install_default_drivers();
+    let mut conn = new::<Any>().await?;
+
+    sqlx_test::test_send_only_transaction_callbacks(&mut conn).await
+}
+
+#[sqlx_macros::test]
 async fn it_pings() -> anyhow::Result<()> {
     sqlx::any::install_default_drivers();
 
