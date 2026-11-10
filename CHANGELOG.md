@@ -5,6 +5,146 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.9.1 - 2026-11-09
+
+### AI Policy Announcement
+
+Prompted by  a recent uptick in AI-generated pull requests, we added an [`AI_POLICY.md`](./AI_POLICY.md) to clarify our position
+on AI-generated contributions. This is not strictly a new policy, but a codification of existing sentiment among the
+maintainers and community.
+
+TL;DR: the use of generative AI is **not** expressly prohibited, but there's a few big things that will not be accepted 
+(note that this list is not exhaustive):
+
+* Issues and pull requests authored primarily or entirely by agents like Claude Code.
+* Comments and interactions that are clearly AI generated.
+* Commits authored by or attributed to Claude or other agents.
+* PRs that duplicate the effort of other existing pull requests without acknowledging them.
+
+See also [#4472] for motivation and discussion.
+
+### Added
+* [[#4080]]: feat(sqlite): expose thread_stack_size option [[@ZenasSong]]
+* [[#4130]]: mysql: add TLS server name override for SNI [[@mingley]]
+* [[#4295]]: Add Infinity check functions to `PgInterval` [[@firebladed]]
+* [[#4334]]: feat: add ability to set or unset the CLIENT_FOUND_ROWS flag [[@andreastedile]]
+* [[#4475]]: feat(tls): support native roots with the rustls AWS-LC backend [[@markuskobler]]
+  * Adds `tls-rustls-aws-lc-rs-native-roots` feature.
+* [[#4478]]: feat: add Type for MySQL, Sqlite, and Any byte arrays [[@daimond113]]
+
+### Changed
+* [[#4242]]: Reuse the TLS connector across connection attempts [[@goffrie]]
+* [[#4263]]: sqlx-cli: drop the literal style override that was invisible on light terminals [[@c-tonneslan]]
+* [[#4264]]: chore: Add README to examples [[@szabgab]]
+* [[#4278]]: docs: document sqlx test connection limits [[@angelnereira]]
+* [[#4344]]: docs(postgres): document default TimeZone=UTC session behavior [[@jeremie0342]]
+* [[#4345]]: docs(macros): document that bind parameter nullability is not compile-checked [[@jeremie0342]]
+* [[#4367]]: Error on .sql migration files that don't match the expected filename format [[@teddytennant]]
+* [[#4377]]: Update README.md versions to 0.9 [[@Voklen]]
+* [[#4388]]: Replace license symlinks with copies [[@WaterWhisperer]]
+* [[#4392]]: Improve sqlx prepare invocation error [[@mameikagou]]
+* [[#4398]]: docs: clarify `Pool::size` and `Pool::num_idle` [[@valentynkit]]
+* [[#4402]]: sqlx-sqlite: relax libsqlite3-sys constraint to allow 0.38.x [[@dtolnay]]
+* [[#4472]]: doc: add `AI_POLICY.md` [[@abonander]]
+* [[#4502]]: Bump the upper bound on libsqlite3-sys to allow 0.39.x [[@joshtriplett]]
+* [[#4514]]: fix(postgres): make `hostaddr` semantics match `libpq` [[@abonander]]
+  * Minor breaking behavior change: `hostaddr`(env: `PGHOSTADDR`) is no longer treated as a simple alias for `host`.
+  * It bypasses DNS resolution but `host` is still used for TLS Server Name Identification (SNI), if applicable. 
+  * This is considered a bugfix because this now matches `libpq`'s behavior as promised in the docs.
+
+### Fixed
+* [[#4016]]: Fix PgListener::try_recv [[@PonasKovas]]
+* [[#4205]]: bugfix: streamline and fix AnyQueryResult::last_insert_id() for SQLite [[@migus-rs]]
+* [[#4282]]: fix(macros): don't look for `.env` outside workspace [[@abonander]]
+* [[#4286]]: Fix query macros against CockroachDB by gating plan_cache_mode on EXPLAIN support [[@BastienClement]]
+* [[#4289]]: fix(pool): prevent num_idle underflow that wedges maintenance in a CPU spin [[@nipunn1313]]
+* [[#4301]]: fix(deps): align sqlx-core and sqlx-macros-core on workspace sha2 [[@waamm]]
+* [[#4303]]: fix: whoami regression to anonymous user [[@lsunsi]]
+* [[#4306]]: fix(sqlite): return 0 for changes if statement is read-only [[@waamm]]
+* [[#4317]]: fix(sqlite): migrate datetime format builders off time 0.3.48-depreca… [[@LiamCarPer]]
+* [[#4336]]: perf: enable TCP_NODELAY on sockets [[@dmitryvk]]
+* [[#4337]]: Fix PostgreSQL memory leak when statement cache is disabled [[@deathlesz]]
+* [[#4340]]: fix(sqlite): correct sub-second decoding of pre-epoch REAL datetimes [[@zelinewang]]
+* [[#4359]]: Fix Any type/close handling, MySQL time signs, SQLite plans, and macro docs [[@WaterWhisperer]]
+* [[#4361]]: fix(postgres): re-parse unnamed statement after resolving custom-type OIDs [[@DoTuanAnh2k1]]
+* [[#4371]]: fix(macros): tolerate unreadable dotenv with query source [[@Boulea7]]
+* [[#4374]]: fix(sqlite): don't dereference a NULL declared type in column_nullable [[@msdrigg]]
+* [[#4375]]: [PostgreSQL] Invalided stale prepared statements [[@Flassie]]
+* [[#4394]]: fix(postgres): roll back a transaction cancelled during BEGIN [[@rubenfiszel]]
+* [[#4406]]: fix(postgres): return UnexpectedEof when server closes connection at SSLRequest [[@zfaustk]]
+* [[#4413]]: Fix incorrect example path and migration filename in docs [[@toyeshhm]]
+* [[#4433]]: fix(sqlite): return an error instead of panicking when decoding an out-of-range INTEGER as PrimitiveDateTime [[@breken-ai]]
+* [[#4436]]: fix(mysql): use the AuthSwitchRequest nonce for caching_sha2_password full auth [[@LeandroDettmer]]
+* [[#4439]]: fix(macros-core): only track paths rustc can checksum [[@varunshahdev]]
+* [[#4441]]: fix(mysql): decode MySQL 9 VECTOR columns (type 0xf2) [[@anderson-andres-dev]]
+* [[#4442]]: fix(sqlite): await SQLCipher test connection cleanup before exit [[@shuvroroy]]
+* [[#4458]]: fix(mysql): harden protocol decoders against malformed packets from hostile servers [[@portlandhodl]]
+* [[#4463]]: fix(macros): only report Ambiguous{DateTime,Numeric}Type when preferred crate is Inferred [[@rscorer]]
+* [[#4477]]: fix(postgres): Bind encodes result-format count from the wrong field [[@prostomarkeloff]]
+* [[#4485]]: fix(postgres): ignore notifications on connections that aren't listening.  fixes #4484. [[@luketpeterson]]
+* [[#4493]]: fix(mysql): handle empty passwords during authentication switches. [[@lmont19]]
+* [[#4496]]: fix(mysql): quote charset/collation/time_zone in connect-time SET [[@Nacl-HCl]]
+* [[#4498]]: fix(postgres): keep draining resolved type dependencies in fill_cache [[@ducnhan123-co]]
+* [[#4503]]: fix(mysql): decode DECIMAL columns into integer types correctly [[@Map130]]
+* [[#4508]]: fix(macros): reject `#[repr(C)]` on enums in `derive(Type)` [[@thelastbackspace]]
+
+[#4016]: https://github.com/transact-rs/sqlx/pull/4016
+[#4080]: https://github.com/transact-rs/sqlx/pull/4080
+[#4130]: https://github.com/transact-rs/sqlx/pull/4130
+[#4205]: https://github.com/transact-rs/sqlx/pull/4205
+[#4242]: https://github.com/transact-rs/sqlx/pull/4242
+[#4256]: https://github.com/transact-rs/sqlx/pull/4256
+[#4263]: https://github.com/transact-rs/sqlx/pull/4263
+[#4264]: https://github.com/transact-rs/sqlx/pull/4264
+[#4278]: https://github.com/transact-rs/sqlx/pull/4278
+[#4282]: https://github.com/transact-rs/sqlx/pull/4282
+[#4286]: https://github.com/transact-rs/sqlx/pull/4286
+[#4289]: https://github.com/transact-rs/sqlx/pull/4289
+[#4295]: https://github.com/transact-rs/sqlx/pull/4295
+[#4301]: https://github.com/transact-rs/sqlx/pull/4301
+[#4303]: https://github.com/transact-rs/sqlx/pull/4303
+[#4306]: https://github.com/transact-rs/sqlx/pull/4306
+[#4317]: https://github.com/transact-rs/sqlx/pull/4317
+[#4334]: https://github.com/transact-rs/sqlx/pull/4334
+[#4336]: https://github.com/transact-rs/sqlx/pull/4336
+[#4337]: https://github.com/transact-rs/sqlx/pull/4337
+[#4340]: https://github.com/transact-rs/sqlx/pull/4340
+[#4344]: https://github.com/transact-rs/sqlx/pull/4344
+[#4345]: https://github.com/transact-rs/sqlx/pull/4345
+[#4359]: https://github.com/transact-rs/sqlx/pull/4359
+[#4361]: https://github.com/transact-rs/sqlx/pull/4361
+[#4367]: https://github.com/transact-rs/sqlx/pull/4367
+[#4371]: https://github.com/transact-rs/sqlx/pull/4371
+[#4374]: https://github.com/transact-rs/sqlx/pull/4374
+[#4375]: https://github.com/transact-rs/sqlx/pull/4375
+[#4377]: https://github.com/transact-rs/sqlx/pull/4377
+[#4388]: https://github.com/transact-rs/sqlx/pull/4388
+[#4392]: https://github.com/transact-rs/sqlx/pull/4392
+[#4394]: https://github.com/transact-rs/sqlx/pull/4394
+[#4398]: https://github.com/transact-rs/sqlx/pull/4398
+[#4402]: https://github.com/transact-rs/sqlx/pull/4402
+[#4406]: https://github.com/transact-rs/sqlx/pull/4406
+[#4413]: https://github.com/transact-rs/sqlx/pull/4413
+[#4433]: https://github.com/transact-rs/sqlx/pull/4433
+[#4436]: https://github.com/transact-rs/sqlx/pull/4436
+[#4439]: https://github.com/transact-rs/sqlx/pull/4439
+[#4441]: https://github.com/transact-rs/sqlx/pull/4441
+[#4442]: https://github.com/transact-rs/sqlx/pull/4442
+[#4458]: https://github.com/transact-rs/sqlx/pull/4458
+[#4463]: https://github.com/transact-rs/sqlx/pull/4463
+[#4472]: https://github.com/transact-rs/sqlx/pull/4472
+[#4475]: https://github.com/transact-rs/sqlx/pull/4475
+[#4477]: https://github.com/transact-rs/sqlx/pull/4477
+[#4478]: https://github.com/transact-rs/sqlx/pull/4478
+[#4485]: https://github.com/transact-rs/sqlx/pull/4485
+[#4493]: https://github.com/transact-rs/sqlx/pull/4493
+[#4496]: https://github.com/transact-rs/sqlx/pull/4496
+[#4498]: https://github.com/transact-rs/sqlx/pull/4498
+[#4502]: https://github.com/transact-rs/sqlx/pull/4502
+[#4503]: https://github.com/transact-rs/sqlx/pull/4503
+[#4508]: https://github.com/transact-rs/sqlx/pull/4508
+[#4514]: https://github.com/transact-rs/sqlx/pull/4514
+
 ## 0.9.0 - 2026-05-06
 
 ### Important Announcements
@@ -3327,3 +3467,50 @@ Fix docs.rs build by enabling a runtime feature in the docs.rs metadata in `Carg
 [@Miesvanderlippe]: https://github.com/Miesvanderlippe
 [@altmannmarcelo]: https://github.com/altmannmarcelo
 [@sobolevn]: https://github.com/sobolevn
+[@PonasKovas]: https://github.com/PonasKovas
+[@ZenasSong]: https://github.com/ZenasSong
+[@mingley]: https://github.com/mingley
+[@migus-rs]: https://github.com/migus-rs
+[@goffrie]: https://github.com/goffrie
+[@c-tonneslan]: https://github.com/c-tonneslan
+[@szabgab]: https://github.com/szabgab
+[@angelnereira]: https://github.com/angelnereira
+[@BastienClement]: https://github.com/BastienClement
+[@firebladed]: https://github.com/firebladed
+[@waamm]: https://github.com/waamm
+[@lsunsi]: https://github.com/lsunsi
+[@LiamCarPer]: https://github.com/LiamCarPer
+[@andreastedile]: https://github.com/andreastedile
+[@dmitryvk]: https://github.com/dmitryvk
+[@deathlesz]: https://github.com/deathlesz
+[@zelinewang]: https://github.com/zelinewang
+[@jeremie0342]: https://github.com/jeremie0342
+[@WaterWhisperer]: https://github.com/WaterWhisperer
+[@DoTuanAnh2k1]: https://github.com/DoTuanAnh2k1
+[@teddytennant]: https://github.com/teddytennant
+[@Boulea7]: https://github.com/Boulea7
+[@msdrigg]: https://github.com/msdrigg
+[@Flassie]: https://github.com/Flassie
+[@Voklen]: https://github.com/Voklen
+[@mameikagou]: https://github.com/mameikagou
+[@rubenfiszel]: https://github.com/rubenfiszel
+[@valentynkit]: https://github.com/valentynkit
+[@dtolnay]: https://github.com/dtolnay
+[@zfaustk]: https://github.com/zfaustk
+[@toyeshhm]: https://github.com/toyeshhm
+[@breken-ai]: https://github.com/breken-ai
+[@LeandroDettmer]: https://github.com/LeandroDettmer
+[@varunshahdev]: https://github.com/varunshahdev
+[@anderson-andres-dev]: https://github.com/anderson-andres-dev
+[@shuvroroy]: https://github.com/shuvroroy
+[@portlandhodl]: https://github.com/portlandhodl
+[@rscorer]: https://github.com/rscorer
+[@markuskobler]: https://github.com/markuskobler
+[@prostomarkeloff]: https://github.com/prostomarkeloff
+[@daimond113]: https://github.com/daimond113
+[@luketpeterson]: https://github.com/luketpeterson
+[@lmont19]: https://github.com/lmont19
+[@Nacl-HCl]: https://github.com/Nacl-HCl
+[@ducnhan123-co]: https://github.com/ducnhan123-co
+[@Map130]: https://github.com/Map130
+[@thelastbackspace]: https://github.com/thelastbackspace
