@@ -1,0 +1,6 @@
+# Used only by the regression test in `src/testing/mod.rs` for
+# https://github.com/launchbadge/sqlx/issues/4372, which checks that
+# `#[sqlx::test]` applies `drivers.sqlite` config the same way
+# `sqlx::query!()` and `sqlx-cli` already do.
+[drivers.sqlite]
+unsafe-load-extensions = ["sqlx-issue-4372-regression-test-marker"]
