@@ -160,10 +160,13 @@ async fn migration_logging_without_transaction(
 #[cfg(feature = "any")]
 #[sqlx::test(migrations = false)]
 async fn migration_logging_any(pool: sqlx::Pool<Postgres>) -> anyhow::Result<()> {
-    use sqlx::{ConnectOptions, Connection};
+    use sqlx::Connection;
 
     sqlx::any::install_default_drivers();
-    let url = pool.connect_options().to_url_lossy();
+    // Preserve TLS paths and socket options rather than serializing native options.
+    let mut url = url::Url::parse(&dotenvy::var("DATABASE_URL")?)?;
+    url.query_pairs_mut()
+        .append_pair("dbname", pool.connect_options().get_database().unwrap());
     let mut conn = sqlx::AnyConnection::connect(url.as_str()).await?;
     let result = logging::migrations_are_logged(&mut conn, false).await;
     conn.close().await?;
