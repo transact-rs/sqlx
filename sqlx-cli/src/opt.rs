@@ -131,6 +131,9 @@ pub enum DatabaseCommand {
         /// PostgreSQL only: force drops the database.
         #[clap(long, short, default_value = "false")]
         force: bool,
+
+        #[clap(flatten)]
+        no_lock: NoLock,
     },
 
     /// Creates the database specified in your DATABASE_URL and runs any pending migrations.
@@ -143,6 +146,9 @@ pub enum DatabaseCommand {
 
         #[clap(flatten)]
         connect_opts: ConnectOpts,
+
+        #[clap(flatten)]
+        no_lock: NoLock,
     },
 }
 
@@ -244,6 +250,9 @@ pub enum MigrateCommand {
         /// pending migrations. If already at the target version, then no-op.
         #[clap(long)]
         target_version: Option<i64>,
+
+        #[clap(flatten)]
+        no_lock: NoLock,
     },
 
     /// Override migration state, potentially dangerous operations.
@@ -275,6 +284,9 @@ pub enum MigrateCommand {
         /// at the target version, then no-op.
         #[clap(long)]
         target_version: Option<i64>,
+
+        #[clap(flatten)]
+        no_lock: NoLock,
     },
 
     /// List all available migrations.
@@ -329,6 +341,9 @@ pub enum OverrideCommand {
         /// pending migrations. If already at the target version, then no-op.
         #[clap(long)]
         target_version: Option<i64>,
+
+        #[clap(flatten)]
+        no_lock: NoLock,
     },
 }
 
@@ -541,6 +556,23 @@ impl Not for IgnoreMissing {
 
     fn not(self) -> Self::Output {
         !self.ignore_missing
+    }
+}
+
+/// Argument for skipping the migration lock.
+#[derive(Args, Copy, Clone, Debug)]
+pub struct NoLock {
+    /// Do not acquire the database lock before migrating. Only use if your
+    /// database does not support advisory locks (e.g. CockroachDB).
+    #[clap(long)]
+    no_lock: bool,
+}
+
+impl Deref for NoLock {
+    type Target = bool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.no_lock
     }
 }
 

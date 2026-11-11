@@ -51,15 +51,17 @@ pub async fn reset(
     connect_opts: &ConnectOpts,
     confirm: bool,
     force: bool,
+    no_lock: bool,
 ) -> anyhow::Result<()> {
     drop(connect_opts, confirm, force).await?;
-    setup(config, migration_source, connect_opts).await
+    setup(config, migration_source, connect_opts, no_lock).await
 }
 
 pub async fn setup(
     config: &Config,
     migration_source: &MigrationSourceOpt,
     connect_opts: &ConnectOpts,
+    no_lock: bool,
 ) -> anyhow::Result<()> {
     create(connect_opts).await?;
     migrate::run(
@@ -70,6 +72,7 @@ pub async fn setup(
         false,
         None,
         false,
+        no_lock,
     )
     .await
 }
