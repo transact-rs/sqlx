@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         table_name: &'e str,
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
-        Box::pin(async move {
+        Box::pin(sqlx_core::logger::log_migration(migration, async move {
             // Use a single transaction for the actual migration script and the essential bookkeeping so we never
             // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
             // The `execution_time` however can only be measured for the whole transaction. This value _only_ exists for
@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             .await?;
 
             Ok(elapsed)
-        })
+        }))
     }
 
     fn revert<'e>(
@@ -267,7 +267,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         table_name: &'e str,
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
-        Box::pin(async move {
+        Box::pin(sqlx_core::logger::log_migration(migration, async move {
             // Use a single transaction for the actual migration script and the essential bookkeeping so we never
             // execute migrations twice. See https://github.com/launchbadge/sqlx/issues/1966.
             let mut tx = self.begin().await?;
@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             let elapsed = start.elapsed();
 
             Ok(elapsed)
-        })
+        }))
     }
 
     fn skip<'e>(
