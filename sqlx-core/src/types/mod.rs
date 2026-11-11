@@ -193,6 +193,24 @@ pub use bstr::{BStr, BString};
 /// enum Color { Red, Green, Blue }
 /// ```
 ///
+/// For enums using the variant names, one variant may be marked with `#[sqlx(other)]` to act
+/// as a catch-all when decoding. Any value that does not match another variant is captured in
+/// this variant instead of returning an error. When encoding, the captured string is written
+/// back verbatim, which the database may reject if it is not a valid value for the type.
+/// This is not supported for `#[repr(..)]` enums.
+///
+/// ```rust,ignore
+/// #[derive(sqlx::Type)]
+/// #[sqlx(type_name = "color", rename_all = "lowercase")]
+/// enum Color {
+///     Red,
+///     Green,
+///     Blue,
+///     #[sqlx(other)]
+///     Unknown(String),
+/// }
+/// ```
+///
 /// ### Records
 ///
 /// User-defined composite types are supported through deriving a `struct`.
