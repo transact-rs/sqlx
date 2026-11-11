@@ -141,3 +141,34 @@ async fn clean_up(conn: &mut PgConnection) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[path = "../migrate/logging.rs"]
+mod logging;
+
+#[sqlx::test(migrations = false)]
+async fn migration_logging(mut conn: PoolConnection<Postgres>) -> anyhow::Result<()> {
+    logging::migrations_are_logged(&mut *conn, false).await
+}
+
+#[sqlx::test(migrations = false)]
+async fn migration_logging_without_transaction(
+    mut conn: PoolConnection<Postgres>,
+) -> anyhow::Result<()> {
+    logging::migrations_are_logged(&mut *conn, true).await
+}
+
+#[cfg(feature = "any")]
+#[sqlx::test(migrations = false)]
+async fn migration_logging_any(pool: sqlx::Pool<Postgres>) -> anyhow::Result<()> {
+    use sqlx::Connection;
+
+    sqlx::any::install_default_drivers();
+    // Preserve TLS paths and socket options rather than serializing native options.
+    let mut url = url::Url::parse(&dotenvy::var("DATABASE_URL")?)?;
+    url.query_pairs_mut()
+        .append_pair("dbname", pool.connect_options().get_database().unwrap());
+    let mut conn = sqlx::AnyConnection::connect(url.as_str()).await?;
+    let result = logging::migrations_are_logged(&mut conn, false).await;
+    conn.close().await?;
+    result
+}

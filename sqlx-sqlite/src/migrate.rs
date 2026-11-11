@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         table_name: &'e str,
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
-        Box::pin(async move {
+        Box::pin(sqlx_core::logger::log_migration(migration, async move {
             let start = Instant::now();
 
             if migration.no_tx {
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             .await?;
 
             Ok(elapsed)
-        })
+        }))
     }
 
     fn revert<'e>(
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
         table_name: &'e str,
         migration: &'e Migration,
     ) -> BoxFuture<'e, Result<Duration, MigrateError>> {
-        Box::pin(async move {
+        Box::pin(sqlx_core::logger::log_migration(migration, async move {
             let start = Instant::now();
 
             if migration.no_tx {
@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
             let elapsed = start.elapsed();
 
             Ok(elapsed)
-        })
+        }))
     }
 
     fn skip<'e>(

@@ -42,6 +42,20 @@ For more details, run `sqlx <command> --help`.
 DATABASE_URL=postgres://postgres@localhost/my_database
 ```
 
+### Logging
+
+Both `sqlx` and `cargo sqlx` write logs to stderr. The default log level is `warn`;
+set `RUST_LOG` in the environment or `.env` file to change the filter. For example,
+to log each migration before it starts and after it completes:
+
+```bash
+RUST_LOG=sqlx::migrate=info sqlx migrate run
+```
+
+Migration events include the version, description, and direction (`up` or `down`).
+Successful completions also include the execution time, and failures are logged
+at `error`. Dry runs and skipped or already applied migrations do not emit execution events.
+
 ### Create/drop the database at `DATABASE_URL`
 
 ```bash
