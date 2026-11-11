@@ -121,3 +121,31 @@ async fn clean_up(conn: &mut MySqlConnection) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[path = "../migrate/logging.rs"]
+mod logging;
+
+#[sqlx::test(migrations = false)]
+async fn migration_logging(mut conn: PoolConnection<MySql>) -> anyhow::Result<()> {
+    logging::migrations_are_logged(&mut *conn, false).await
+}
+
+#[sqlx::test(migrations = false)]
+async fn migration_logging_without_transaction(
+    mut conn: PoolConnection<MySql>,
+) -> anyhow::Result<()> {
+    logging::migrations_are_logged(&mut *conn, true).await
+}
+
+#[cfg(feature = "any")]
+#[sqlx::test(migrations = false)]
+async fn migration_logging_any(pool: sqlx::Pool<MySql>) -> anyhow::Result<()> {
+    use sqlx::{ConnectOptions, Connection};
+
+    sqlx::any::install_default_drivers();
+    let url = pool.connect_options().to_url_lossy();
+    let mut conn = sqlx::AnyConnection::connect(url.as_str()).await?;
+    let result = logging::migrations_are_logged(&mut conn, false).await;
+    conn.close().await?;
+    result
+}
