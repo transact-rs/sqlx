@@ -84,6 +84,11 @@ impl<DB: Database> PoolInner<DB> {
         self.num_idle.load(Ordering::Acquire)
     }
 
+    pub(super) fn num_acquired(&self) -> u32 {
+        self.size()
+            .saturating_sub(u32::try_from(self.num_idle()).unwrap_or(u32::MAX))
+    }
+
     pub(super) fn is_closed(&self) -> bool {
         self.is_closed.load(Ordering::Acquire)
     }
