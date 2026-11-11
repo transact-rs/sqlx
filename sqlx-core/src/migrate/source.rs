@@ -216,6 +216,17 @@ pub fn resolve_blocking_with_config(
         // would be a breaking change.
         let file_name = file_name.to_string_lossy();
 
+        if [
+            MigrationType::Simple,
+            MigrationType::ReversibleUp,
+            MigrationType::ReversibleDown,
+        ]
+        .iter()
+        .any(|migration_type| file_name == migration_type.template_filename())
+        {
+            continue;
+        }
+
         let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
 
         if parts.len() != 2 || !parts[1].ends_with(".sql") {
@@ -367,6 +378,31 @@ fn resolve_can_opt_out_of_erroring_on_unparseable_sql_file() {
         assert_eq!(migrations.len(), 1);
         assert_eq!(migrations[0].0.version, 1);
     }
+}
+
+#[test]
+fn resolve_ignores_migration_templates() {
+    let dir = tempfile::tempdir().unwrap();
+
+    for migration_type in [
+        MigrationType::Simple,
+        MigrationType::ReversibleUp,
+        MigrationType::ReversibleDown,
+    ] {
+        fs::write(
+            dir.path().join(migration_type.template_filename()),
+            "-- Migration template",
+        )
+        .unwrap();
+    }
+
+    fs::write(dir.path().join("1_foo.sql"), "create table foo();").unwrap();
+
+    let migrations = resolve_blocking(dir.path()).unwrap();
+
+    assert_eq!(migrations.len(), 1);
+    assert_eq!(migrations[0].0.version, 1);
+    assert_eq!(migrations[0].0.description, "foo");
 }
 
 #[test]

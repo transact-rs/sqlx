@@ -106,11 +106,27 @@ fn create_file(
     path.push(migration_source);
     path.push(&file_name);
 
+    let template_path = Path::new(migration_source).join(migration_type.template_filename());
+    let contents = match fs::read(&template_path) {
+        Ok(contents) => Cow::Owned(contents),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Cow::Borrowed(migration_type.file_content().as_bytes())
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "Failed to read migration template {}",
+                    template_path.display()
+                )
+            });
+        }
+    };
+
     println!("Creating {}", style(path.display()).cyan());
 
     let mut file = File::create(&path).context("Failed to create migration file")?;
 
-    std::io::Write::write_all(&mut file, migration_type.file_content().as_bytes())?;
+    std::io::Write::write_all(&mut file, &contents)?;
 
     Ok(())
 }
