@@ -2338,3 +2338,46 @@ async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn it_reports_the_transaction_status_of_statements_run_as_queries() -> anyhow::Result<()> {
+    use sqlx::postgres::PgTransactionStatus;
+
+    let mut conn = new::<Postgres>().await?;
+    assert_eq!(conn.transaction_status().await?, PgTransactionStatus::Idle);
+
+    conn.execute("BEGIN").await?;
+    assert_eq!(
+        conn.transaction_status().await?,
+        PgTransactionStatus::Transaction
+    );
+    // SQLx did not begin this transaction, so it does not count it.
+    assert!(!conn.is_in_transaction());
+
+    // A query read only in part leaves its responses pending; they are read first.
+    let _: i32 = sqlx::query_scalar("select * from generate_series(1, 50)")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(
+        conn.transaction_status().await?,
+        PgTransactionStatus::Transaction
+    );
+
+    // A failed statement leaves the block failed until it ends.
+    assert!(conn.execute("select 1 / 0").await.is_err());
+    assert_eq!(conn.transaction_status().await?, PgTransactionStatus::Error);
+
+    conn.execute("ROLLBACK").await?;
+    assert_eq!(conn.transaction_status().await?, PgTransactionStatus::Idle);
+
+    // COMMIT AND CHAIN opens the next transaction at once.
+    conn.execute("BEGIN").await?;
+    conn.execute("COMMIT AND CHAIN").await?;
+    assert_eq!(
+        conn.transaction_status().await?,
+        PgTransactionStatus::Transaction
+    );
+    conn.execute("ROLLBACK").await?;
+
+    Ok(())
+}

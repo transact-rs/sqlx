@@ -57,6 +57,28 @@ impl MySqlConnection {
             .status_flags
             .intersects(Status::SERVER_STATUS_IN_TRANS)
     }
+
+    /// Whether the server reported an open transaction (`SERVER_STATUS_IN_TRANS`) in the
+    /// status of its last OK or EOF packet.
+    ///
+    /// Unlike [`Connection::is_in_transaction()`], which only counts the transactions begun
+    /// through SQLx, this reflects every statement the session ran: a `START TRANSACTION` or
+    /// `COMMIT` sent as a query, one run inside a stored procedure, or a rollback the server
+    /// made on its own (a deadlock).
+    ///
+    /// ERR packets carry no status, so after a statement fails the value may be stale until
+    /// the next response; [`Connection::ping()`] reads it again without running a statement.
+    pub fn server_in_transaction(&self) -> bool {
+        self.in_transaction()
+    }
+
+    /// Whether autocommit is on (`SERVER_STATUS_AUTOCOMMIT`), with the same source and caveats
+    /// as [`server_in_transaction()`][Self::server_in_transaction].
+    pub fn server_autocommit(&self) -> bool {
+        self.inner
+            .status_flags
+            .intersects(Status::SERVER_STATUS_AUTOCOMMIT)
+    }
 }
 
 impl Debug for MySqlConnection {
@@ -85,7 +107,8 @@ impl Connection for MySqlConnection {
     async fn ping(&mut self) -> Result<(), Error> {
         self.inner.stream.wait_until_ready().await?;
         self.inner.stream.send_packet(Ping).await?;
-        self.inner.stream.recv_ok().await?;
+        let ok = self.inner.stream.recv_ok().await?;
+        self.inner.status_flags = ok.status;
 
         Ok(())
     }

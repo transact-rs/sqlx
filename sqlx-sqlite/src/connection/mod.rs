@@ -376,6 +376,17 @@ impl LockedSqliteHandle<'_> {
         self.guard.handle.as_non_null_ptr()
     }
 
+    /// Whether the connection is in autocommit mode, that is, no transaction is open
+    /// ([`sqlite3_get_autocommit`](https://www.sqlite.org/c3ref/get_autocommit.html)).
+    ///
+    /// Unlike [`Connection::is_in_transaction()`], which only counts the transactions begun
+    /// through SQLx, this reflects every statement the connection ran: a `BEGIN` or `COMMIT`
+    /// sent as a query, or a rollback SQLite made on its own (`INSERT OR ROLLBACK`, an
+    /// interrupted write, a full disk).
+    pub fn is_autocommit(&mut self) -> bool {
+        !self.guard.handle.in_transaction()
+    }
+
     /// Apply a collation to the open database.
     ///
     /// See [`SqliteConnectOptions::collation()`] for details.
