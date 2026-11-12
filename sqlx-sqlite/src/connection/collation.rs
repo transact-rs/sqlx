@@ -45,9 +45,9 @@ impl Collation {
     }
 
     pub(crate) fn create(&self, handle: &mut ConnectionHandle) -> Result<(), Error> {
-        let raw_f = Arc::into_raw(Arc::clone(&self.collate));
         let c_name = CString::new(&*self.name)
             .map_err(|_| err_protocol!("invalid collation name: {:?}", self.name))?;
+        let raw_f = Arc::into_raw(Arc::clone(&self.collate));
         let flags = SQLITE_UTF8;
         let r = unsafe {
             sqlite3_create_collation_v2(
