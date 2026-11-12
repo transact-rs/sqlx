@@ -14,6 +14,8 @@ any = ["sqlx-core/any"]
 json = ["dep:serde", "dep:serde_json", "sqlx-core/json"]
 migrate = ["sqlx-core/migrate", "dep:crc"]
 offline = ["json", "sqlx-core/offline", "smallvec/serde"]
+_rt-tokio = ["sqlx-core/_rt-tokio", "dep:tokio"]
+_rt-async-io = ["sqlx-core/_rt-async-io", "dep:futures-io"]
 
 # Type Integration features
 bigdecimal = ["dep:bigdecimal", "dep:num-bigint", "sqlx-core/bigdecimal"]
@@ -74,6 +76,14 @@ serde_json = { version = "1.0.142", optional = true, features = ["raw_value"] }
 
 [dependencies.sqlx-core]
 workspace = true
+
+[dependencies.tokio]
+workspace = true
+optional = true
+
+[dependencies.futures-io]
+version = "0.3.32"
+optional = true
 
 [dev-dependencies.sqlx]
 # FIXME: https://github.com/rust-lang/cargo/issues/15622
