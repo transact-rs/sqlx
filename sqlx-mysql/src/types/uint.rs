@@ -25,6 +25,18 @@ fn uint_compatible(ty: &MySqlTypeInfo) -> bool {
             | ColumnType::Long
             | ColumnType::Int24
             | ColumnType::LongLong
+            | ColumnType::Bit
+    ) && ty.flags.contains(ColumnFlags::UNSIGNED)
+}
+
+fn uint_compatible_nonu8(ty: &MySqlTypeInfo) -> bool {
+    matches!(
+        ty.r#type,
+        ColumnType::Tiny
+            | ColumnType::Short
+            | ColumnType::Long
+            | ColumnType::Int24
+            | ColumnType::LongLong
             | ColumnType::Year
             | ColumnType::Bit
     ) && ty.flags.contains(ColumnFlags::UNSIGNED)
@@ -46,7 +58,7 @@ impl Type<MySql> for u16 {
     }
 
     fn compatible(ty: &MySqlTypeInfo) -> bool {
-        uint_compatible(ty)
+        uint_compatible_nonu8(ty)
     }
 }
 
@@ -56,7 +68,7 @@ impl Type<MySql> for u32 {
     }
 
     fn compatible(ty: &MySqlTypeInfo) -> bool {
-        uint_compatible(ty)
+        uint_compatible_nonu8(ty)
     }
 }
 
@@ -66,7 +78,7 @@ impl Type<MySql> for u64 {
     }
 
     fn compatible(ty: &MySqlTypeInfo) -> bool {
-        uint_compatible(ty)
+        uint_compatible_nonu8(ty)
     }
 }
 

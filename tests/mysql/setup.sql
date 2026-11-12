@@ -23,6 +23,11 @@ CREATE TABLE products (
     price NUMERIC CHECK (price > 0)
 );
 
+CREATE TABLE test_query_as_year_inference (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    birthyear YEAR NOT NULL
+);
+
 -- Create a user without a password to test passwordless auth.
 CREATE USER 'no_password'@'%';
 
