@@ -15,9 +15,22 @@ mod parse;
 mod pgpass;
 mod ssl_mode;
 
+/// Supplies an already authenticated transport for every new connection.
+///
+/// A connector owns transport authentication. SQLx does not perform its normal
+/// TCP/Unix connection or TLS negotiation when this hook is present, and never
+/// falls back to those transports on error. It must not return a plaintext
+/// transport when the application requires authenticated encryption.
+pub trait PgSocketConnector: fmt::Debug + Send + Sync + 'static {
+    fn connect(
+        &self,
+    ) -> futures_core::future::BoxFuture<'_, Result<Box<dyn crate::net::Socket>, crate::Error>>;
+}
+
 #[doc = include_str!("doc.md")]
 #[derive(Debug, Clone)]
 pub struct PgConnectOptions {
+    pub(crate) socket_connector: Option<Arc<dyn PgSocketConnector>>,
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) hostaddr: Option<IpAddr>,
@@ -83,6 +96,7 @@ impl PgConnectOptions {
         let database = var("PGDATABASE").ok();
 
         PgConnectOptions {
+            socket_connector: None,
             port,
             host,
             hostaddr: var("PGHOSTADDR")
@@ -123,6 +137,13 @@ impl PgConnectOptions {
             );
         }
 
+        self
+    }
+
+    /// Use an application-owned authenticated transport, including pool reconnects.
+    /// Standard host, port, socket, and TLS transport settings are bypassed.
+    pub fn socket_connector(mut self, connector: Arc<dyn PgSocketConnector>) -> Self {
+        self.socket_connector = Some(connector);
         self
     }
 
