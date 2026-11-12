@@ -46,6 +46,13 @@ impl MySqlTypeInfo {
     }
 
     #[doc(hidden)]
+    pub fn __is_enum(&self) -> bool {
+        // Columns carry flags like `NOT_NULL` or `NO_DEFAULT_VALUE` on top of `ENUM`,
+        // so this can't be an exact comparison with `__enum()`.
+        self.flags.contains(ColumnFlags::ENUM)
+    }
+
+    #[doc(hidden)]
     pub fn __type_feature_gate(&self) -> Option<&'static str> {
         match self.r#type {
             ColumnType::Date | ColumnType::Time | ColumnType::Timestamp | ColumnType::Datetime => {
