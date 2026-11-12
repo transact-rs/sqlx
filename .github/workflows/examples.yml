@@ -284,6 +284,13 @@ jobs:
           SQLX_OFFLINE: ${{ matrix.offline == 'offline' }}
         run: cargo run -p sqlx-example-postgres-multi-database
 
+      - name: Multi-Database (Test)
+        # `DATABASE_URL` is not set: `#[sqlx::test]` must use `ACCOUNTS_DATABASE_URL` from `sqlx.toml`.
+        env:
+          ACCOUNTS_DATABASE_URL: postgres://postgres:password@localhost:5432/multi-database-accounts
+          SQLX_OFFLINE: ${{ matrix.offline == 'offline' }}
+        run: cargo test -p sqlx-example-postgres-multi-database-accounts
+
       - name: Multi-Tenant (Setup)
         working-directory: examples/postgres/multi-tenant
         env:
