@@ -1,5 +1,5 @@
 use super::MySqlStream;
-use crate::connection::stream::Waiting;
+use crate::connection::stream::{PrepareProgress, Waiting};
 use crate::error::Error;
 use crate::executor::{Execute, Executor};
 use crate::ext::ustr::UStr;
@@ -32,6 +32,13 @@ impl MySqlConnection {
     ) -> Result<(u32, MySqlStatementMetadata), Error> {
         // https://dev.mysql.com/doc/internals/en/com-stmt-prepare.html
         // https://dev.mysql.com/doc/internals/en/com-stmt-prepare-response.html#packet-COM_STMT_PREPARE_OK
+
+        // Queued before the request, so the drain can finish and close a
+        // response a cancelled prepare left behind.
+        self.inner
+            .stream
+            .waiting
+            .push_back(Waiting::Prepare(PrepareProgress::Header));
 
         self.inner
             .stream
@@ -70,6 +77,10 @@ impl MySqlConnection {
             column_names: Arc::new(column_names),
         };
 
+        // Queued so the drain closes the statement if the caller is
+        // dropped before caching or closing it.
+        self.inner.stream.close_pending.push(id);
+
         Ok((id, metadata))
     }
 
@@ -85,11 +96,15 @@ impl MySqlConnection {
         let (id, metadata) = self.prepare_statement(sql).await?;
 
         // in case of the cache being full, close the least recently used statement
-        if let Some((id, _)) = self
+        let evicted = self
             .inner
             .cache_statement
-            .insert(sql, (id, metadata.clone()))
-        {
+            .insert(sql, (id, metadata.clone()));
+
+        // Cached, so no longer closed by the drain.
+        self.inner.stream.close_pending.pop();
+
+        if let Some((id, _)) = evicted {
             self.inner
                 .stream
                 .send_packet(StmtClose { statement: id })
@@ -110,7 +125,6 @@ impl MySqlConnection {
         let mut logger = QueryLogger::new(sql, self.inner.log_settings.clone());
 
         self.inner.stream.wait_until_ready().await?;
-        self.inner.stream.waiting.push_back(Waiting::Result);
 
         Ok(try_stream! {
         let sql = logger.sql().as_str();
@@ -136,6 +150,10 @@ impl MySqlConnection {
                         );
                     }
 
+                    // Queued only once the request is sent, so a cancelled
+                    // prepare or a failed parameter-count check leaves none.
+                    self.inner.stream.waiting.push_back(Waiting::Result);
+
                     // https://dev.mysql.com/doc/internals/en/com-stmt-execute.html
                     self.inner.stream
                         .send_packet(StatementExecute {
@@ -151,6 +169,7 @@ impl MySqlConnection {
                         .await?;
 
                     if arguments.types.len() != metadata.parameters {
+                        // Not cached and not closed here; the drain closes it.
                         return Err(
                             err_protocol!(
                                 "prepared statement expected {} parameters but {} parameters were provided",
@@ -160,6 +179,8 @@ impl MySqlConnection {
                         );
                     }
 
+                    self.inner.stream.waiting.push_back(Waiting::Result);
+
                     // https://dev.mysql.com/doc/internals/en/com-stmt-execute.html
                     self.inner.stream
                         .send_packet(StatementExecute {
@@ -168,11 +189,14 @@ impl MySqlConnection {
                         })
                         .await?;
 
+                    self.inner.stream.close_pending.pop();
                     self.inner.stream.send_packet(StmtClose { statement: id }).await?;
 
                     MySqlValueFormat::Binary
                 }
             } else {
+                self.inner.stream.waiting.push_back(Waiting::Result);
+
                 // https://dev.mysql.com/doc/internals/en/com-query.html
                 self.inner.stream.send_packet(Query(sql)).await?;
 
@@ -335,6 +359,7 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
             } else {
                 let (id, metadata) = self.prepare_statement(sql.as_str()).await?;
 
+                self.inner.stream.close_pending.pop();
                 self.inner
                     .stream
                     .send_packet(StmtClose { statement: id })
@@ -365,6 +390,7 @@ impl<'c> Executor<'c> for &'c mut MySqlConnection {
 
             let (id, metadata) = self.prepare_statement(sql.as_str()).await?;
 
+            self.inner.stream.close_pending.pop();
             self.inner
                 .stream
                 .send_packet(StmtClose { statement: id })
