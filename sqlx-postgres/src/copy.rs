@@ -12,7 +12,7 @@ use crate::ext::async_stream::TryAsyncStream;
 use crate::io::AsyncRead;
 use crate::message::{
     BackendMessageFormat, CommandComplete, CopyData, CopyDone, CopyFail, CopyInResponse,
-    CopyOutResponse, CopyResponseData, Query, ReadyForQuery,
+    CopyOutResponse, CopyResponseData, Query,
 };
 use crate::pool::{Pool, PoolConnection};
 use crate::Postgres;
@@ -148,12 +148,16 @@ pub struct PgCopyIn<C: DerefMut<Target = PgConnection>> {
 impl<C: DerefMut<Target = PgConnection>> PgCopyIn<C> {
     async fn begin(mut conn: C, statement: &str) -> Result<Self> {
         conn.wait_until_ready().await?;
-        conn.inner.stream.send(Query(statement)).await?;
+        conn.inner.stream.write_msg(Query(statement))?;
+        // Counted so a copy that is dropped or cancelled before its `ReadyForQuery` leaves the connection visibly busy, and `wait_until_ready` drains the reply instead of mistaking it for the answer to the next message. Before the flush: a cancelled flush leaves the `Query` buffered, to be sent later.
+        conn.inner.pending_ready_for_query_count += 1;
+        conn.inner.stream.flush().await?;
 
         let response = match conn.inner.stream.recv_expect::<CopyInResponse>().await {
             Ok(res) => res.0,
             Err(e) => {
-                conn.inner.stream.recv().await?;
+                // Drain whatever the statement still owes, up to its `ReadyForQuery`.
+                conn.wait_until_ready().await?;
                 return Err(e);
             }
         };
@@ -271,7 +275,7 @@ impl<C: DerefMut<Target = PgConnection>> PgCopyIn<C> {
                 match e.code() {
                     Some(Cow::Borrowed("57014")) => {
                         // postgres abort received error code
-                        conn.inner.stream.recv_expect::<ReadyForQuery>().await?;
+                        conn.recv_ready_for_query().await?;
                         Ok(())
                     }
                     _ => Err(Error::Database(e)),
@@ -294,12 +298,12 @@ impl<C: DerefMut<Target = PgConnection>> PgCopyIn<C> {
         let cc: CommandComplete = match conn.inner.stream.recv_expect().await {
             Ok(cc) => cc,
             Err(e) => {
-                conn.inner.stream.recv().await?;
+                conn.wait_until_ready().await?;
                 return Err(e);
             }
         };
 
-        conn.inner.stream.recv_expect::<ReadyForQuery>().await?;
+        conn.recv_ready_for_query().await?;
 
         Ok(cc.rows_affected())
     }
@@ -323,7 +327,12 @@ async fn pg_begin_copy_out<'c, C: DerefMut<Target = PgConnection> + Send + 'c>(
     statement: &str,
 ) -> Result<BoxStream<'c, Result<Bytes>>> {
     conn.wait_until_ready().await?;
-    conn.inner.stream.send(Query(statement)).await?;
+    conn.inner.stream.write_msg(Query(statement))?;
+    // Counted so a cancelled COPY's owed `ReadyForQuery` is drained by `wait_until_ready`
+    // instead of being mistaken for the reply to the connection's next message.
+    // Before the flush: a cancelled flush leaves the `Query` buffered, to be sent later.
+    conn.inner.pending_ready_for_query_count += 1;
+    conn.inner.stream.flush().await?;
 
     let _: CopyOutResponse = conn.inner.stream.recv_expect().await?;
 
@@ -331,7 +340,7 @@ async fn pg_begin_copy_out<'c, C: DerefMut<Target = PgConnection> + Send + 'c>(
         loop {
             match conn.inner.stream.recv().await {
                 Err(e) => {
-                    conn.inner.stream.recv_expect::<ReadyForQuery>().await?;
+                    conn.recv_ready_for_query().await?;
                     return Err(e);
                 },
                 Ok(msg) => match msg.format {
@@ -339,7 +348,7 @@ async fn pg_begin_copy_out<'c, C: DerefMut<Target = PgConnection> + Send + 'c>(
                     BackendMessageFormat::CopyDone => {
                         let _ = msg.decode::<CopyDone>()?;
                         conn.inner.stream.recv_expect::<CommandComplete>().await?;
-                        conn.inner.stream.recv_expect::<ReadyForQuery>().await?;
+                        conn.recv_ready_for_query().await?;
                         return Ok(())
                     },
                     _ => return Err(err_protocol!("unexpected message format during copy out: {:?}", msg.format))

@@ -82,6 +82,14 @@ pub trait AnyConnectionBackend: std::any::Any + Debug + Send + 'static {
     #[doc(hidden)]
     fn should_flush(&self) -> bool;
 
+    /// Forward to [`Connection::is_protocol_idle()`].
+    ///
+    /// [`Connection::is_protocol_idle()`]: method@crate::connection::Connection::is_protocol_idle
+    #[doc(hidden)]
+    fn is_protocol_idle(&self) -> bool {
+        false
+    }
+
     #[cfg(feature = "migrate")]
     fn as_migrate(&mut self) -> crate::Result<&mut (dyn crate::migrate::Migrate + Send + 'static)> {
         Err(crate::Error::Configuration(

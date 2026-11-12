@@ -71,6 +71,10 @@ impl AnyConnectionBackend for PgConnection {
         Connection::should_flush(self)
     }
 
+    fn is_protocol_idle(&self) -> bool {
+        Connection::is_protocol_idle(self)
+    }
+
     #[cfg(feature = "migrate")]
     fn as_migrate(
         &mut self,
