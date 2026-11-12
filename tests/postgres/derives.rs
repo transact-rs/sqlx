@@ -730,6 +730,132 @@ async fn test_flatten() -> anyhow::Result<()> {
 
 #[cfg(feature = "macros")]
 #[sqlx_macros::test]
+async fn test_flatten_nullable() -> anyhow::Result<()> {
+    #[derive(Debug, sqlx::FromRow)]
+    struct UserInfo {
+        name: String,
+        surname: String,
+        nickname: Option<String>,
+    }
+
+    #[derive(Debug, sqlx::FromRow)]
+    struct Account {
+        id: i32,
+        #[sqlx(flatten(nullable))]
+        info: Option<UserInfo>,
+    }
+
+    let mut conn = new::<Postgres>().await?;
+
+    let account: Account = sqlx::query_as(
+        r#"SELECT * FROM (VALUES (1, 'foo', 'bar', 'baz')) accounts("id", "name", "surname", "nickname")"#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    assert_eq!(1, account.id);
+    let info = account.info.expect("info should be present");
+    assert_eq!("foo", info.name);
+    assert_eq!("bar", info.surname);
+    assert_eq!(Some("baz"), info.nickname.as_deref());
+
+    // joined row absent: LEFT JOIN without a match yields NULL in every column
+    let account: Account = sqlx::query_as(
+        r#"
+        SELECT a."id", u."name", u."surname", u."nickname"
+        FROM (VALUES (2)) a("id")
+        LEFT JOIN (VALUES (1, 'foo', 'bar', 'baz')) u("id", "name", "surname", "nickname")
+            ON u."id" = a."id"
+        "#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    assert_eq!(2, account.id);
+    assert!(account.info.is_none());
+
+    let account: Account = sqlx::query_as(
+        r#"SELECT * FROM (VALUES (3, 'foo', 'bar', NULL::text)) accounts("id", "name", "surname", "nickname")"#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    assert_eq!(3, account.id);
+    let info = account.info.expect("info should be present");
+    assert_eq!("foo", info.name);
+    assert_eq!(None, info.nickname);
+
+    Ok(())
+}
+
+#[cfg(feature = "macros")]
+#[sqlx_macros::test]
+async fn test_flatten_nullable_try_from() -> anyhow::Result<()> {
+    #[derive(Debug, sqlx::FromRow)]
+    #[expect(dead_code, reason = "required by shape of test")]
+    struct UserInfo {
+        name: String,
+        surname: String,
+        nickname: Option<String>,
+    }
+    #[derive(Debug)]
+    struct UserInfoPresent;
+
+    impl TryFrom<UserInfo> for UserInfoPresent {
+        type Error = std::convert::Infallible;
+        fn try_from(_info: UserInfo) -> std::result::Result<Self, std::convert::Infallible> {
+            Ok(UserInfoPresent)
+        }
+    }
+
+    #[derive(Debug, sqlx::FromRow)]
+    struct Account {
+        id: i32,
+        #[sqlx(flatten(nullable))]
+        #[sqlx(try_from = "UserInfo")]
+        info: Option<UserInfoPresent>,
+    }
+
+    let mut conn = new::<Postgres>().await?;
+
+    let account: Account = sqlx::query_as(
+        r#"SELECT * FROM (VALUES (1, 'foo', 'bar', 'baz')) accounts("id", "name", "surname", "nickname")"#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    assert_eq!(1, account.id);
+    let _info = account.info.expect("info should be present");
+
+    // joined row absent: LEFT JOIN without a match yields NULL in every column
+    let account: Account = sqlx::query_as(
+        r#"
+        SELECT a."id", u."name", u."surname", u."nickname"
+        FROM (VALUES (2)) a("id")
+        LEFT JOIN (VALUES (1, 'foo', 'bar', 'baz')) u("id", "name", "surname", "nickname")
+            ON u."id" = a."id"
+        "#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    assert_eq!(2, account.id);
+    assert!(account.info.is_none());
+
+    let account: Account = sqlx::query_as(
+        r#"SELECT * FROM (VALUES (3, 'foo', 'bar', NULL::text)) accounts("id", "name", "surname", "nickname")"#,
+    )
+    .fetch_one(&mut conn)
+    .await?;
+
+    assert_eq!(3, account.id);
+    let _info = account.info.expect("info should be present");
+
+    Ok(())
+}
+
+#[cfg(feature = "macros")]
+#[sqlx_macros::test]
 async fn test_skip() -> anyhow::Result<()> {
     #[derive(Debug, Default, sqlx::FromRow)]
     struct AccountDefault {
