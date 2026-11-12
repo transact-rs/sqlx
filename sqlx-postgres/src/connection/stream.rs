@@ -42,21 +42,23 @@ pub struct PgStream {
 
 impl PgStream {
     pub(super) async fn connect(options: &PgConnectOptions) -> Result<Self, Error> {
-        let socket_result = match options.make_socket_path() {
-            Some(ref path) => net::connect_uds(path, MaybeUpgradeTls(options)).await?,
-            None => {
-                net::connect_tcp(
-                    options
-                        .hostaddr
-                        .map_or_else(|| SocketHost::Name(&options.host), SocketHost::Addr),
-                    options.port,
-                    MaybeUpgradeTls(options),
-                )
-                .await?
-            }
+        let socket = if let Some(connector) = &options.socket_connector {
+            connector.connect().await?
+        } else {
+            match options.make_socket_path() {
+                Some(ref path) => net::connect_uds(path, MaybeUpgradeTls(options)).await?,
+                None => {
+                    net::connect_tcp(
+                        options
+                            .hostaddr
+                            .map_or_else(|| SocketHost::Name(&options.host), SocketHost::Addr),
+                        options.port,
+                        MaybeUpgradeTls(options),
+                    )
+                    .await?
+                }
+            }?
         };
-
-        let socket = socket_result?;
 
         Ok(Self {
             inner: BufferedSocket::new(socket),
@@ -276,7 +278,53 @@ fn parse_server_version(s: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_server_version;
+    use std::io;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use super::{parse_server_version, PgStream};
+    use crate::error::Error;
+    use crate::net::Socket;
+    use crate::{PgConnectOptions, PgSocketConnector};
+
+    #[derive(Debug)]
+    struct FailingConnector {
+        calls: AtomicUsize,
+    }
+
+    impl PgSocketConnector for FailingConnector {
+        fn connect(&self) -> futures_core::future::BoxFuture<'_, Result<Box<dyn Socket>, Error>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Err(Error::Io(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "custom connector rejected peer",
+                )))
+            })
+        }
+    }
+
+    #[test]
+    fn test_socket_connector_is_retained_on_clone_and_does_not_fallback() {
+        let connector = Arc::new(FailingConnector {
+            calls: AtomicUsize::new(0),
+        });
+        let options = PgConnectOptions::new_without_pgpass()
+            .host("127.0.0.1")
+            .port(1)
+            .socket_connector(connector.clone())
+            .clone();
+
+        let err = futures_util::FutureExt::now_or_never(PgStream::connect(&options))
+            .expect("connector future resolves immediately")
+            .err()
+            .expect("connector error should fail PgStream::connect");
+        assert_eq!(connector.calls.load(Ordering::SeqCst), 1);
+        assert!(
+            err.to_string().contains("custom connector rejected peer"),
+            "unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn test_parse_server_version_num() {
