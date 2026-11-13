@@ -83,6 +83,7 @@ pub struct MySqlConnectOptions {
     pub(crate) timezone: Option<String>,
     pub(crate) set_names: bool,
     pub(crate) found_rows: bool,
+    pub(crate) deprecate_eof: bool,
 }
 
 impl Default for MySqlConnectOptions {
@@ -128,6 +129,7 @@ impl MySqlConnectOptions {
             timezone: Some(String::from("+00:00")),
             set_names: true,
             found_rows: true,
+            deprecate_eof: true,
         }
     }
 
@@ -464,6 +466,19 @@ impl MySqlConnectOptions {
     /// The default value is set to true.
     pub fn found_rows(mut self, flag_val: bool) -> Self {
         self.found_rows = flag_val;
+        self
+    }
+
+    /// Sets whether to request `CLIENT_DEPRECATE_EOF` when the server advertises it.
+    ///
+    /// When it is negotiated, the server ends result sets with an OK packet instead of
+    /// a legacy EOF packet. Some proxies and older servers advertise the capability but
+    /// still send legacy EOF packets, which fails every query with `OK_Packet too short`;
+    /// disable this to connect to them. Not requesting the capability is always valid.
+    ///
+    /// The default value is set to true.
+    pub fn deprecate_eof(mut self, flag_val: bool) -> Self {
+        self.deprecate_eof = flag_val;
         self
     }
 }
