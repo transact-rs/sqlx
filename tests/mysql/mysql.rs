@@ -66,6 +66,32 @@ async fn it_connects_without_password_after_auth_switch() -> anyhow::Result<()> 
 }
 
 #[sqlx_macros::test]
+async fn it_reads_result_sets_without_deprecate_eof() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let url = Url::parse(&env::var("DATABASE_URL").context("expected DATABASE_URL")?)
+        .context("error parsing DATABASE_URL")?;
+    let mut conn = MySqlConnectOptions::from_url(&url)?
+        .deprecate_eof(false)
+        .connect()
+        .await?;
+
+    let rows = sqlx::raw_sql("SELECT 1 AS a UNION ALL SELECT 2; SELECT 'x' AS b")
+        .fetch_all(&mut conn)
+        .await?;
+    assert_eq!(rows.len(), 3);
+
+    let value: i64 = sqlx::query_scalar("SELECT CAST(? AS SIGNED) + 1")
+        .bind(41_i64)
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(value, 42);
+
+    conn.close().await?;
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_maths() -> anyhow::Result<()> {
     let mut conn = new::<MySql>().await?;
 

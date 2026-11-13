@@ -80,6 +80,10 @@ impl MySqlConnectOptions {
                     options = options.timezone(Some(value.to_string()));
                 }
 
+                "deprecate-eof" | "deprecate_eof" => {
+                    options = options.deprecate_eof(value.parse().map_err(Error::config)?);
+                }
+
                 _ => {}
             }
         }
@@ -143,6 +147,10 @@ impl MySqlConnectOptions {
                 .append_pair("socket", &socket.to_string_lossy());
         }
 
+        if !self.deprecate_eof {
+            url.query_pairs_mut().append_pair("deprecate-eof", "false");
+        }
+
         url
     }
 }
@@ -196,4 +204,23 @@ fn it_parses_timezone() {
         .parse()
         .unwrap();
     assert_eq!(opts.timezone.as_deref(), Some("+08:00"));
+}
+
+#[test]
+fn it_parses_deprecate_eof() {
+    let opts: MySqlConnectOptions = "mysql://user:password@hostname/database".parse().unwrap();
+    assert!(opts.deprecate_eof);
+
+    let opts: MySqlConnectOptions = "mysql://user:password@hostname/database?deprecate-eof=false"
+        .parse()
+        .unwrap();
+    assert!(!opts.deprecate_eof);
+    assert!(!MySqlConnectOptions::parse_from_url(&opts.build_url())
+        .unwrap()
+        .deprecate_eof);
+
+    let opts: MySqlConnectOptions = "mysql://user:password@hostname/database?deprecate_eof=true"
+        .parse()
+        .unwrap();
+    assert!(opts.deprecate_eof);
 }

@@ -41,7 +41,6 @@ impl<S: Socket> MySqlStream<S> {
     pub(crate) fn with_socket(options: &MySqlConnectOptions, socket: S) -> Self {
         let mut capabilities = Capabilities::PROTOCOL_41
             | Capabilities::IGNORE_SPACE
-            | Capabilities::DEPRECATE_EOF
             | Capabilities::TRANSACTIONS
             | Capabilities::SECURE_CONNECTION
             | Capabilities::PLUGIN_AUTH_LENENC_DATA
@@ -57,6 +56,10 @@ impl<S: Socket> MySqlStream<S> {
 
         if options.found_rows {
             capabilities |= Capabilities::FOUND_ROWS;
+        }
+
+        if options.deprecate_eof {
+            capabilities |= Capabilities::DEPRECATE_EOF;
         }
 
         Self {
