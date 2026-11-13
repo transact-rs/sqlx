@@ -164,7 +164,7 @@ regexp = ["sqlx-sqlite?/regexp"]
 bstr = ["sqlx-core/bstr"]
 
 # authentication
-gssapi-auth-cross-krb5 = ["sqlx-postgres?/gssapi-auth-cross-krb5"]
+gssapi-auth-cross-krb5 = ["sqlx-postgres?/gssapi-auth-cross-krb5", "sqlx-core/_gssapi-auth-cross-krb5", "sqlx-macros?/_gssapi-auth-cross-krb5"]
 
 [workspace.dependencies]
 # Core Crates
