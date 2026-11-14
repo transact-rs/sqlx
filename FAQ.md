@@ -400,7 +400,7 @@ so the macros can just read those instead of talking to a database.
 
 See the following:
 
-* [the docs for `query!()`](https://docs.rs/sqlx/0.5.5/sqlx/macro.query.html#offline-mode-requires-the-offline-feature)
+* [the docs for `query!()`](https://docs.rs/sqlx/latest/sqlx/macro.query.html#offline-mode)
 * [the README for `sqlx-cli`](sqlx-cli/README.md#enable-building-in-offline-mode-with-query)
 
 To keep `.sqlx` up-to-date you need to run `cargo sqlx prepare` before every commit that
