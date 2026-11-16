@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::env::var;
 use std::fmt::{self, Display, Write};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -19,6 +20,7 @@ mod ssl_mode;
 pub struct PgConnectOptions {
     pub(crate) host: String,
     pub(crate) port: u16,
+    pub(crate) hostaddr: Option<IpAddr>,
     pub(crate) socket: Option<PathBuf>,
     pub(crate) username: String,
     pub(crate) password: Option<String>,
@@ -67,10 +69,7 @@ impl PgConnectOptions {
             .and_then(|v| v.parse().ok())
             .unwrap_or(5432);
 
-        let host = var("PGHOSTADDR")
-            .ok()
-            .or_else(|| var("PGHOST").ok())
-            .unwrap_or_else(|| default_host(port));
+        let host = var("PGHOST").ok().unwrap_or_else(|| default_host(port));
 
         let username = if let Ok(username) = var("PGUSER") {
             username
@@ -86,6 +85,9 @@ impl PgConnectOptions {
         PgConnectOptions {
             port,
             host,
+            hostaddr: var("PGHOSTADDR")
+                .ok()
+                .and_then(|hostaddr| hostaddr.parse().ok()),
             socket: None,
             username,
             password: var("PGPASSWORD").ok(),
@@ -158,6 +160,23 @@ impl PgConnectOptions {
     /// ```
     pub fn port(mut self, port: u16) -> Self {
         self.port = port;
+        self
+    }
+
+    /// Override hostname resolution with a preset IP address.
+    ///
+    /// [`Self::host()`] is still used for TLS server name identification (SNI) if
+    /// [`Self::ssl_mode()`] is [`PgSslMode::VerifyFull`].
+    ///
+    /// This avoids DNS lookup overhead if the server IP is already known,
+    /// allows connecting to a host through a proxy,
+    /// or allows using SNI when connecting to a host that is not listed in DNS.
+    ///
+    /// Defaults to `None`.
+    ///
+    /// Has no effect if [`Self::socket()`] is set.
+    pub fn hostaddr(mut self, hostaddr: impl Into<IpAddr>) -> Self {
+        self.hostaddr = Some(hostaddr.into());
         self
     }
 
@@ -475,7 +494,7 @@ impl PgConnectOptions {
 
     /// We try using a socket if hostname starts with `/` or if socket parameter
     /// is specified.
-    pub(crate) fn fetch_socket(&self) -> Option<String> {
+    pub(crate) fn make_socket_path(&self) -> Option<String> {
         match self.socket {
             Some(ref socket) => {
                 let full_path = format!("{}/.s.PGSQL.{}", socket.display(), self.port);

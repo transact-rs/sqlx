@@ -29,7 +29,7 @@ if a parameter is not passed in via URL, it is populated by reading
 | `password`         | `PGPASSWORD`         | Read from [`passfile`], if it exists.                       |
 | [`passfile`]       | `PGPASSFILE`         | `~/.pgpass` or `%APPDATA%\postgresql\pgpass.conf` (Windows) |
 | `host`             | `PGHOST`             | See [Note: Default Host](#note-default-host).               |
-| `hostaddr`         | `PGHOSTADDR`         | See [Note: Default Host](#note-default-host).               |
+| `hostaddr`         | `PGHOSTADDR`         | Unset.               |
 | `port`             | `PGPORT`             | `5432`                                                      |
 | `dbname`           | `PGDATABASE`         | Unset; defaults to the username server-side.                |
 | `sslmode`          | `PGSSLMODE`          | `prefer`. See [`PgSslMode`] for details.                    |
@@ -86,7 +86,8 @@ See `default_host()` in the same source file as this method for the current beha
 If `sslrootcert` is not set, the default root certificates used depends on Cargo features:
 
 * If `tls-native-tls` is enabled, the system root certificates are used.
-* If `tls-rustls-ring-native-roots` is enabled, the system root certificates are used.
+* If `tls-rustls-ring-native-roots` or `tls-rustls-aws-lc-rs-native-roots` is enabled,
+  the system root certificates are used.
 * Otherwise, TLS roots are populated using the [`webpki-roots`] crate.
 
 ## Environment Variables

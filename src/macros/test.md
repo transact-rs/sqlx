@@ -239,7 +239,7 @@ use serde_json::json;
 // #[sqlx::test(fixtures(path = "./fixtures", scripts("users", "posts")))]
 #[sqlx::test(fixtures("users", "posts"))]
 async fn test_create_comment(pool: PgPool) -> sqlx::Result<()> {
-    // See examples/postgres/social-axum-with-tests for a more in-depth example. 
+    // See examples/postgres/axum-social-with-tests for a more in-depth example. 
     let mut app = create_app(pool);     
     
     let comment = test_request(

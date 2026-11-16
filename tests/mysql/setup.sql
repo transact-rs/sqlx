@@ -30,3 +30,9 @@ CREATE USER 'no_password'@'%';
 -- Granting no privileges, or just `GRANT USAGE`, gives an "access denied" error.
 -- https://github.com/launchbadge/sqlx/issues/3484#issuecomment-2350901546
 GRANT SELECT ON sqlx.* TO 'no_password'@'%';
+
+-- Force a plugin switch on MySQL 8.0; MariaDB ignores the MySQL-only clause.
+CREATE USER 'no_password_native'@'%'
+    /*!50700 IDENTIFIED WITH mysql_native_password BY '' */;
+
+GRANT SELECT ON sqlx.* TO 'no_password_native'@'%';

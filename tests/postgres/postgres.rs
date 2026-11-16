@@ -1172,7 +1172,7 @@ async fn test_listener_try_recv_buffered() -> anyhow::Result<()> {
     assert!(listener.next_buffered().is_none());
 
     // Activate connection.
-    sqlx::query!("SELECT 1 AS one")
+    sqlx::query("SELECT 1 AS one")
         .fetch_all(&mut listener)
         .await?;
 
@@ -1189,6 +1189,27 @@ async fn test_listener_try_recv_buffered() -> anyhow::Result<()> {
 
     // Even if we wait.
     assert!(!try_recv(&mut listener).await?, "Notification received");
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn test_notification_on_non_listener_connection() -> anyhow::Result<()> {
+    // A connection that isn't a `PgListener` but is subscribed to a channel,
+    // as one can be when it runs `LISTEN` itself, or when a transaction-mode
+    // pooler hands it a server connection that another client subscribed.
+    let mut conn = new::<Postgres>().await?;
+    conn.execute("LISTEN test_channel3").await?;
+
+    // The server delivers the notification to the sending session too, just
+    // before `ReadyForQuery`. The query must still succeed.
+    let _: () = sqlx::query_scalar("select pg_notify('test_channel3', 'payload')")
+        .fetch_one(&mut conn)
+        .await?;
+
+    // And the connection must still be usable.
+    let value: i32 = sqlx::query_scalar("select 1").fetch_one(&mut conn).await?;
+    assert_eq!(value, 1);
 
     Ok(())
 }

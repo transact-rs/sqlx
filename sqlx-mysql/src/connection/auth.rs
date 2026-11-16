@@ -17,6 +17,12 @@ impl AuthPlugin {
         nonce: &Chain<Bytes, Bytes>,
     ) -> Result<Vec<u8>, Error> {
         match self {
+            // Empty passwords require an empty auth response, including after an auth switch.
+            AuthPlugin::CachingSha2Password | AuthPlugin::MySqlNativePassword
+                if password.is_empty() =>
+            {
+                Ok(Vec::new())
+            }
             // https://mariadb.com/kb/en/caching_sha2_password-authentication-plugin/
             AuthPlugin::CachingSha2Password => Ok(scramble_sha256(password, nonce).to_vec()),
 

@@ -119,3 +119,33 @@ async fn it_describes_composite() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Regression test for #4497: resolving one custom type could drop other
+// pending dependencies, leaving them unresolved on a cold type cache.
+#[sqlx_macros::test]
+async fn it_describes_nested_custom_types() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+    conn.execute(
+        r#"
+DROP TYPE IF EXISTS issue_4497_holder CASCADE;
+DROP TYPE IF EXISTS issue_4497_pair CASCADE;
+DROP TYPE IF EXISTS issue_4497_leaf_b CASCADE;
+DROP TYPE IF EXISTS issue_4497_leaf_a CASCADE;
+
+CREATE TYPE issue_4497_leaf_a AS (x int4);
+CREATE TYPE issue_4497_leaf_b AS (y int4);
+CREATE TYPE issue_4497_pair AS (a issue_4497_leaf_a, b issue_4497_leaf_b);
+CREATE TYPE issue_4497_holder AS (items issue_4497_leaf_a[]);
+"#,
+    )
+    .await?;
+
+    // A fresh connection so the type-OID cache is cold.
+    let mut conn = new::<Postgres>().await?;
+    conn.describe(
+        "SELECT NULL::issue_4497_pair[] AS pairs, NULL::issue_4497_holder AS holder".into_sql_str(),
+    )
+    .await?;
+
+    Ok(())
+}
