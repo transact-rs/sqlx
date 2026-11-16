@@ -45,12 +45,19 @@ impl<'r> Decode<'r, Postgres> for NaiveDate {
                 // DATE is encoded as the days since epoch
                 let days: i32 = Decode::<Postgres>::decode(value)?;
 
-                let days = TimeDelta::try_days(days.into())
+                let delta = TimeDelta::try_days(days.into())
                     .unwrap_or_else(|| {
                         unreachable!("BUG: days ({days}) as `i32` multiplied into seconds should not overflow `i64`")
                     });
 
-                postgres_epoch_date() + days
+                // `infinity`, `-infinity` and years beyond chrono's range don't fit in `NaiveDate`
+                postgres_epoch_date()
+                    .checked_add_signed(delta)
+                    .ok_or_else(|| {
+                        format!(
+                            "Postgres DATE out of range for NaiveDate: {days} days from 2000-01-01"
+                        )
+                    })?
             }
 
             PgValueFormat::Text => NaiveDate::parse_from_str(value.as_str()?, "%Y-%m-%d")?,

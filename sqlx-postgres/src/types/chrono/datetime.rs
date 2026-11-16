@@ -53,7 +53,13 @@ impl<'r> Decode<'r, Postgres> for NaiveDateTime {
             PgValueFormat::Binary => {
                 // TIMESTAMP is encoded as the microseconds since the epoch
                 let us = Decode::<Postgres>::decode(value)?;
-                postgres_epoch_datetime() + Duration::microseconds(us)
+
+                // `infinity`, `-infinity` and years beyond chrono's range don't fit in `NaiveDateTime`
+                postgres_epoch_datetime()
+                    .checked_add_signed(Duration::microseconds(us))
+                    .ok_or_else(|| {
+                        format!("Postgres TIMESTAMP out of range for NaiveDateTime: {us} microseconds from 2000-01-01")
+                    })?
             }
 
             PgValueFormat::Text => {

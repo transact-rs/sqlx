@@ -40,7 +40,13 @@ impl<'r> Decode<'r, Postgres> for Date {
             PgValueFormat::Binary => {
                 // DATE is encoded as the days since epoch
                 let days: i32 = Decode::<Postgres>::decode(value)?;
-                PG_EPOCH + Duration::days(days.into())
+
+                // `infinity`, `-infinity` and years beyond 9999 don't fit in `Date`
+                PG_EPOCH
+                    .checked_add(Duration::days(days.into()))
+                    .ok_or_else(|| {
+                        format!("Postgres DATE out of range for Date: {days} days from 2000-01-01")
+                    })?
             }
 
             PgValueFormat::Text => Date::parse(

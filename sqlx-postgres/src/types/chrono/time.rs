@@ -39,7 +39,19 @@ impl<'r> Decode<'r, Postgres> for NaiveTime {
             PgValueFormat::Binary => {
                 // TIME is encoded as the microseconds since midnight
                 let us: i64 = Decode::<Postgres>::decode(value)?;
-                NaiveTime::default() + Duration::microseconds(us)
+
+                // Postgres allows `24:00:00`, which would otherwise wrap around to midnight
+                let (time, overflow) =
+                    NaiveTime::default().overflowing_add_signed(Duration::microseconds(us));
+
+                if overflow != 0 {
+                    return Err(format!(
+                        "Postgres TIME out of range for NaiveTime: {us} microseconds from midnight"
+                    )
+                    .into());
+                }
+
+                time
             }
 
             PgValueFormat::Text => NaiveTime::parse_from_str(value.as_str()?, "%H:%M:%S%.f")?,
