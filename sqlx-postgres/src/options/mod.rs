@@ -117,7 +117,7 @@ impl PgConnectOptions {
     pub(crate) fn apply_pgpass(mut self) -> Self {
         if self.password.is_none() {
             self.password = pgpass::load_password(
-                &self.host.original(),
+                self.host.original(),
                 self.port,
                 &self.username,
                 self.database.as_deref(),
