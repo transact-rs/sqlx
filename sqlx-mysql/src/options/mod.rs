@@ -1,3 +1,4 @@
+use sqlx_core::net::UrlHost;
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, OnceLock},
@@ -65,13 +66,13 @@ pub use ssl_mode::MySqlSslMode;
 /// ```
 #[derive(Debug, Clone)]
 pub struct MySqlConnectOptions {
-    pub(crate) host: String,
+    pub(crate) host: UrlHost,
     pub(crate) port: u16,
     pub(crate) socket: Option<PathBuf>,
     pub(crate) username: String,
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
-    pub(crate) tls_server_name: Option<String>,
+    pub(crate) tls_sni_servername: Option<String>,
     pub(crate) ssl_options: SslOptions,
     pub(crate) statement_cache_capacity: usize,
     pub(crate) charset: String,
@@ -105,14 +106,14 @@ impl MySqlConnectOptions {
     pub fn new() -> Self {
         Self {
             port: 3306,
-            host: String::from("localhost"),
+            host: UrlHost::localhost(),
             socket: None,
             username: String::from("root"),
             password: None,
             database: None,
             charset: String::from("utf8mb4"),
             collation: None,
-            tls_server_name: None,
+            tls_sni_servername: None,
             ssl_options: SslOptions {
                 ssl_mode: MySqlSslMode::Preferred,
                 ssl_ca: None,
@@ -136,7 +137,7 @@ impl MySqlConnectOptions {
     /// The default behavior when the host is not specified,
     /// is to connect to localhost.
     pub fn host(mut self, host: &str) -> Self {
-        host.clone_into(&mut self.host);
+        self.host.set(host);
         self
     }
 
@@ -150,10 +151,10 @@ impl MySqlConnectOptions {
     /// # use sqlx_mysql::MySqlConnectOptions;
     /// let _options = MySqlConnectOptions::new()
     ///     .host("haproxy.example.com")
-    ///     .tls_server_name("mysql.example.com");
+    ///     .tls_sni_servername("mysql.example.com");
     /// ```
-    pub fn tls_server_name(mut self, server_name: &str) -> Self {
-        self.tls_server_name = Some(server_name.to_owned());
+    pub fn tls_sni_servername(mut self, server_name: &str) -> Self {
+        self.tls_sni_servername = Some(server_name.to_owned());
         self
     }
 
@@ -480,7 +481,7 @@ impl MySqlConnectOptions {
     /// assert_eq!(options.get_host(), "127.0.0.1");
     /// ```
     pub fn get_host(&self) -> &str {
-        &self.host
+        self.host.original()
     }
 
     /// Get the server's port.
@@ -586,7 +587,7 @@ mod tests {
 
     #[test]
     fn tls_server_name_is_stored() {
-        let opts = MySqlConnectOptions::new().tls_server_name("sni.example.com");
-        assert_eq!(opts.tls_server_name.as_deref(), Some("sni.example.com"));
+        let opts = MySqlConnectOptions::new().tls_sni_servername("sni.example.com");
+        assert_eq!(opts.tls_sni_servername.as_deref(), Some("sni.example.com"));
     }
 }

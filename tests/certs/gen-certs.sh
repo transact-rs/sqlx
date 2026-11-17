@@ -18,9 +18,13 @@ openssl x509 -req -CA ca.crt -CAkey keys/ca.key -in client.csr -out client.crt -
 
 # Generate server key + CSR
 # This adds a required x509 v3 extension:
-# * `subjectAltName=DNS:sqlx.test` supplies the Subject Alternative Name that RusTLS uses to verify the hostname.
+# * `subjectAltName` supplies the Subject Alternative Name that RusTLS uses to verify the hostname.
 #   * Only checked if using SSL mode `ssl_mode=verify_identity` (MySQL/MariaDB) or `sslmode=verify-full` (Postgres).
-openssl req -batch -newkey ed25519 -keyout keys/server.key -nodes -new -out server.csr -subj "/C=US/ST=CA/O=transact-rs/CN=sqlx.test" -addext subjectAltName=DNS:sqlx.test
+#   * `DNS:sqlx.test` allows testing with the `sqlx.test` hostname
+#   * `IP:::ffff:127.0.0.1` allows testing IPv6 with `127.0.0.1` mapped to it
+openssl req -batch -newkey ed25519 -keyout keys/server.key -nodes -new -out server.csr \
+	-subj "/C=US/ST=CA/O=transact-rs/CN=sqlx.test" \
+	-addext subjectAltName="DNS:sqlx.test, IP:::ffff:127.0.0.1"
 
 # Sign server CSR (note: `-copy_extensions copyall` is required for `subjectAltName` to be set)
 openssl x509 -req -CA ca.crt -CAkey keys/ca.key -in server.csr -out server.crt -days 7 -CAcreateserial -copy_extensions copyall

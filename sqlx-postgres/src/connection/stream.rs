@@ -14,7 +14,6 @@ use futures_channel::mpsc::UnboundedSender;
 use futures_util::SinkExt;
 use log::Level;
 use sqlx_core::bytes::Buf;
-use sqlx_core::net::SocketHost;
 
 // the stream is a separate type from the connection to uphold the invariant where an instantiated
 // [PgConnection] is a **valid** connection to postgres
@@ -48,7 +47,7 @@ impl PgStream {
                 net::connect_tcp(
                     options
                         .hostaddr
-                        .map_or_else(|| SocketHost::Name(&options.host), SocketHost::Addr),
+                        .map_or_else(|| (&options.host).into(), Into::into),
                     options.port,
                     MaybeUpgradeTls(options),
                 )

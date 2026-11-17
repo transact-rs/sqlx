@@ -86,7 +86,10 @@ pub(super) async fn maybe_upgrade<S: Socket>(
 
     tls::handshake(
         stream.socket.into_inner(),
-        options.tls_server_name.as_deref().unwrap_or(&options.host),
+        options
+            .tls_sni_servername
+            .as_deref()
+            .unwrap_or_else(|| options.host.stripped()),
         connector,
         MapStream {
             server_version: stream.server_version,

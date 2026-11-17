@@ -71,7 +71,7 @@ async fn maybe_upgrade<S: Socket>(
             .get_or_init(|| connector)
     };
 
-    tls::handshake(socket, &options.host, connector, SocketIntoBox).await
+    tls::handshake(socket, options.host.stripped(), connector, SocketIntoBox).await
 }
 
 async fn request_upgrade(
