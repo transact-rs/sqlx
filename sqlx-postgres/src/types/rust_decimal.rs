@@ -78,11 +78,14 @@ impl TryFrom<&'_ PgNumeric> for Decimal {
             PgNumericSign::Negative => value.set_sign_negative(true),
         }
 
-        // `rescale()` will raise the scale past `Decimal::MAX_SCALE` if the mantissa has room,
-        // which produces an invalid `Decimal` (e.g. serializing it with `serde` panics).
-        // Postgres can return a scale greater than 28 (e.g. the result of a division),
-        // so clamp it.
-        value.rescale(std::cmp::min(scale, Decimal::MAX_SCALE));
+        // `rescale()` will raise the scale past 28 (the maximum scale of `Decimal`) if the
+        // mantissa has room, which produces an invalid `Decimal` (e.g. serializing it with
+        // `serde` panics). Postgres can return a scale greater than 28 (e.g. the result of
+        // a division), so clamp it.
+        //
+        // `Decimal::MAX_SCALE` is not used as it is not available in the minimum supported
+        // version of `rust_decimal`.
+        value.rescale(std::cmp::min(scale, 28));
 
         Ok(value)
     }
@@ -524,7 +527,7 @@ mod tests {
     #[test]
     fn scale_greater_than_max_scale_smallest_digit() {
         // 0.000000000000000000000000015 with scale 41; the last digit group
-        // still within `Decimal::MAX_SCALE`
+        // still within the maximum scale of 28
         let numeric = PgNumeric::Number {
             sign: PgNumericSign::Positive,
             scale: 41,
