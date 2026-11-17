@@ -418,7 +418,7 @@ jobs:
           DATABASE_URL: postgres://postgres@localhost:5432/sqlx?sslmode=verify-ca&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
-      # Test with `hostaddr` and `verify-full`
+      # Test with `hostaddr` and `verify-full` (test connection only)
       - run: |
           SKIP_ARGS=()
           for test in $PG_ISOLATED_TESTS; do
@@ -427,10 +427,22 @@ jobs:
           cargo test \
             --no-default-features \
             --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
-            -- \
-            "${SKIP_ARGS[@]}"
+            --test postgres \
+            -- --exact it_connects
         env:
           DATABASE_URL: postgres://postgres@sqlx.test:5432/sqlx?hostaddr=127.0.0.1&sslmode=verify-full&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
+
+      # Test with IPv6 and `verify-full` (test connection only)
+      # The generated certificate includes a `subjectAltName` with an IPv6-mapped `127.0.0.1`
+      - run: |
+          cargo test \
+            --no-default-features \
+            --features any,postgres,macros,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --test postgres \
+            -- --exact it_connects
+        env:
+          DATABASE_URL: postgres://postgres@[::ffff:127.0.0.1]:5432/sqlx?sslmode=verify-full&sslrootcert=.%2Ftests%2Fcerts%2Fca.crt&sslkey=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&sslcert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
   postgres-isolated:
@@ -587,21 +599,41 @@ jobs:
           SQLX_OFFLINE_DIR: .sqlx
           RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
 
-      # client SSL authentication
+  # client SSL authentication
+  mysql-ssl-auth:
+    name: MySQL SSL Auth
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        mysql: [ 8 ]
+        runtime: [ async-global-executor, smol, tokio ]
+        tls: [ native-tls, rustls-aws-lc-rs, rustls-ring ]
+        include:
+          - { mysql: 8, runtime: tokio, tls: rustls-aws-lc-rs-native-roots }
+    needs: check
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
 
-      - if: ${{ matrix.tls != 'none' }}
-        run: |
-          docker stop mysql_${{ matrix.mysql }}
+      - name: Setup Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
+
+      - run: |
           docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_${{ matrix.mysql }}_client_ssl mysql_${{ matrix.mysql }}_client_ssl
           docker exec mysql_${{ matrix.mysql }}_client_ssl bash -c '
             until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot --silent) || \
-                  (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot --silent); do
+                (command -v mariadb-admin >/dev/null && mariadb-admin ping -uroot --silent); do
               sleep 2
-            done
+          done
           '
 
-      - if: ${{ matrix.tls != 'none' }}
-        run: |
+      - run: |
           SKIP_ARGS=()
           for test in $MYSQL_ISOLATED_TESTS; do
             SKIP_ARGS+=(--skip "$test")
@@ -613,6 +645,37 @@ jobs:
             "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+      # Test with `tls-sni-servername=sqlx.test` and `sslmode=verify_identity` (test connection only)
+      - run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --test mysql \
+            -- --exact it_connects
+        env:
+          DATABASE_URL: mysql://root@localhost:3306/sqlx?tls-sni-servername=sqlx.test&sslmode=verify_identity&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
+
+      # Test with IPv6 and `sslmode=verify_identity` (test connection only)
+      # The generated certificate includes a `subjectAltName` with an IPv6-mapped `127.0.0.1`
+      - run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --test mysql \
+            -- --exact it_connects
+        env:
+          DATABASE_URL: mysql://root@[::ffff:127.0.0.1]:3306/sqlx?sslmode=verify_identity&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: --cfg mysql_${{ matrix.mysql }}
 
   mysql-isolated:
@@ -748,9 +811,33 @@ jobs:
 
       # client SSL authentication
 
-      - if: ${{ matrix.tls != 'none' }}
-        run: |
-          docker stop mariadb_${{ matrix.mariadb }}
+  mariadb-ssl-auth:
+    name: MariaDB SSL Auth
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        mariadb: [ verylatest, 11_8, 11_4, 10_11, 10_6 ]
+        runtime: [ async-global-executor, smol, tokio ]
+        tls: [ native-tls, rustls-aws-lc-rs, rustls-ring ]
+        include:
+          - { mariadb: verylatest, runtime: tokio, tls: rustls-aws-lc-rs-native-roots }
+    needs: check
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Rust
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo build --features mysql,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+
+      # Generate TLS certificates
+      - run: ./gen-certs.sh
+        working-directory: tests/certs
+
+      - run: |
           docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mariadb_${{ matrix.mariadb }}_client_ssl mariadb_${{ matrix.mariadb }}_client_ssl
           docker exec mariadb_${{ matrix.mariadb }}_client_ssl bash -c '
             until (command -v mysqladmin >/dev/null && mysqladmin ping -uroot --silent) || \
@@ -759,8 +846,7 @@ jobs:
             done
           '
 
-      - if: ${{ matrix.tls != 'none' }}
-        run: |
+      - run: |
           SKIP_ARGS=()
           for test in $MYSQL_ISOLATED_TESTS; do
             SKIP_ARGS+=(--skip "$test")
@@ -772,4 +858,35 @@ jobs:
             "${SKIP_ARGS[@]}"
         env:
           DATABASE_URL: mysql://root@localhost:3306/sqlx?sslmode=verify_ca&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"
+
+      # Test with `tls-sni-servername=sqlx.test` and `sslmode=verify_identity` (test connection only)
+      - run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --test mysql \
+            -- --exact it_connects
+        env:
+          DATABASE_URL: mysql://root@localhost:3306/sqlx?tls-sni-servername=sqlx.test&sslmode=verify_identity&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
+          RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"
+
+      # Test with IPv6 and `sslmode=verify_identity` (test connection only)
+      # The generated certificate includes a `subjectAltName` with an IPv6-mapped `127.0.0.1`
+      - run: |
+          SKIP_ARGS=()
+          for test in $MYSQL_ISOLATED_TESTS; do
+            SKIP_ARGS+=(--skip "$test")
+          done
+          cargo test \
+            --no-default-features \
+            --features any,mysql,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --test mysql \
+            -- --exact it_connects
+        env:
+          DATABASE_URL: mysql://root@[::ffff:127.0.0.1]:3306/sqlx?sslmode=verify_identity&ssl-ca=.%2Ftests%2Fcerts%2Fca.crt&ssl-key=.%2Ftests%2Fcerts%2Fkeys%2Fclient.key&ssl-cert=.%2Ftests%2Fcerts%2Fclient.crt
           RUSTFLAGS: --cfg mariadb="${{ matrix.mariadb }}"

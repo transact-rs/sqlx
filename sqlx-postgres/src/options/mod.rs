@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use sqlx_core::net::tls::TlsConnector;
+use sqlx_core::net::UrlHost;
 pub use ssl_mode::PgSslMode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
@@ -18,7 +19,7 @@ mod ssl_mode;
 #[doc = include_str!("doc.md")]
 #[derive(Debug, Clone)]
 pub struct PgConnectOptions {
-    pub(crate) host: String,
+    pub(crate) host: UrlHost,
     pub(crate) port: u16,
     pub(crate) hostaddr: Option<IpAddr>,
     pub(crate) socket: Option<PathBuf>,
@@ -84,7 +85,7 @@ impl PgConnectOptions {
 
         PgConnectOptions {
             port,
-            host,
+            host: host.into(),
             hostaddr: var("PGHOSTADDR")
                 .ok()
                 .and_then(|hostaddr| hostaddr.parse().ok()),
@@ -116,7 +117,7 @@ impl PgConnectOptions {
     pub(crate) fn apply_pgpass(mut self) -> Self {
         if self.password.is_none() {
             self.password = pgpass::load_password(
-                &self.host,
+                &self.host.original(),
                 self.port,
                 &self.username,
                 self.database.as_deref(),
@@ -143,7 +144,7 @@ impl PgConnectOptions {
     ///     .host("localhost");
     /// ```
     pub fn host(mut self, host: &str) -> Self {
-        host.clone_into(&mut self.host);
+        self.host.set(host);
         self
     }
 
@@ -500,8 +501,8 @@ impl PgConnectOptions {
                 let full_path = format!("{}/.s.PGSQL.{}", socket.display(), self.port);
                 Some(full_path)
             }
-            None if self.host.starts_with('/') => {
-                let full_path = format!("{}/.s.PGSQL.{}", self.host, self.port);
+            None if self.host.original().starts_with('/') => {
+                let full_path = format!("{}/.s.PGSQL.{}", self.host.original(), self.port);
                 Some(full_path)
             }
             _ => None,
@@ -521,7 +522,7 @@ impl PgConnectOptions {
     /// assert_eq!(options.get_host(), "127.0.0.1");
     /// ```
     pub fn get_host(&self) -> &str {
-        &self.host
+        self.host.original()
     }
 
     /// Get the server's port.

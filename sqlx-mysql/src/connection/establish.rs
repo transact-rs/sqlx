@@ -9,7 +9,6 @@ use crate::protocol::Capabilities;
 use crate::{MySqlConnectOptions, MySqlConnection, MySqlSslMode};
 use bytes::buf::Buf;
 use bytes::Bytes;
-use sqlx_core::net::SocketHost;
 
 impl MySqlConnection {
     pub(crate) async fn establish(options: &MySqlConnectOptions) -> Result<Self, Error> {
@@ -18,8 +17,7 @@ impl MySqlConnection {
         let handshake = match &options.socket {
             Some(path) => crate::net::connect_uds(path, do_handshake).await?,
             None => {
-                crate::net::connect_tcp(SocketHost::Name(&options.host), options.port, do_handshake)
-                    .await?
+                crate::net::connect_tcp((&options.host).into(), options.port, do_handshake).await?
             }
         };
 

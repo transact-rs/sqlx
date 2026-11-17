@@ -1,16 +1,14 @@
-use std::fmt::Display;
 use std::future::Future;
 use std::io;
-use std::net::{AddrParseError, IpAddr};
 use std::path::Path;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
+use crate::io::ReadBuf;
+use crate::net::SocketHost;
 pub use buffered::{BufferedSocket, WriteBuffer};
 use bytes::BufMut;
 use cfg_if::cfg_if;
-
-use crate::io::ReadBuf;
 
 mod buffered;
 
@@ -183,33 +181,6 @@ impl<S: Socket + ?Sized> Socket for Box<S> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum SocketHost<'a> {
-    Name(&'a str),
-    Addr(IpAddr),
-}
-
-impl TryFrom<SocketHost<'_>> for IpAddr {
-    type Error = AddrParseError;
-
-    fn try_from(host: SocketHost<'_>) -> Result<Self, Self::Error> {
-        match host {
-            // IPv6 addresses in URLs will be wrapped in brackets and the `url` crate doesn't trim those.
-            SocketHost::Name(name) => name.trim_matches(&['[', ']'][..]).parse(),
-            SocketHost::Addr(addr) => Ok(addr),
-        }
-    }
-}
-
-impl Display for SocketHost<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SocketHost::Name(name) => name.fmt(f),
-            SocketHost::Addr(addr) => addr.fmt(f),
-        }
-    }
-}
-
 pub async fn connect_tcp<Ws: WithSocket>(
     host: SocketHost<'_>,
     port: u16,
@@ -217,9 +188,11 @@ pub async fn connect_tcp<Ws: WithSocket>(
 ) -> crate::Result<Ws::Output> {
     #[cfg(feature = "_rt-tokio")]
     if crate::rt::rt_tokio::available() {
-        let socket = match host {
-            SocketHost::Name(name) => tokio::net::TcpStream::connect((name, port)).await?,
-            SocketHost::Addr(addr) => tokio::net::TcpStream::connect((addr, port)).await?,
+        use tokio::net::TcpStream;
+
+        let socket = match host.try_as_ip() {
+            Ok(addr) => TcpStream::connect((addr, port)).await?,
+            Err(host) => TcpStream::connect((host, port)).await?,
         };
 
         socket.set_nodelay(true)?;
@@ -230,7 +203,7 @@ pub async fn connect_tcp<Ws: WithSocket>(
         if #[cfg(feature = "_rt-async-io")] {
             Ok(with_socket.with_socket(connect_tcp_async_io(host, port).await?).await)
         } else {
-            crate::rt::missing_rt((host, port, with_socket))
+            crate::rt::missing_rt((host.try_as_ip(), port, with_socket))
         }
     }
 }
@@ -243,21 +216,20 @@ pub async fn connect_tcp<Ws: WithSocket>(
 #[cfg(feature = "_rt-async-io")]
 async fn connect_tcp_async_io(host: SocketHost<'_>, port: u16) -> crate::Result<impl Socket> {
     use async_io::Async;
-    use std::net::{IpAddr, TcpStream, ToSocketAddrs};
+    use std::net::{TcpStream, ToSocketAddrs};
 
-    if let Ok(addr) = IpAddr::try_from(host) {
-        let socket = Async::<TcpStream>::connect((addr, port)).await?;
-        socket.get_ref().set_nodelay(true)?;
-        return Ok(socket);
-    }
+    let host: Box<str> = match host.try_as_ip() {
+        Ok(addr) => {
+            let socket = Async::<TcpStream>::connect((addr, port)).await?;
+            socket.get_ref().set_nodelay(true)?;
+            return Ok(socket);
+        }
+        Err(host) => host.into(),
+    };
 
-    let host = host.to_string();
-
-    let addresses = crate::rt::spawn_blocking(move || {
-        let addr = (host.as_str(), port);
-        ToSocketAddrs::to_socket_addrs(&addr)
-    })
-    .await?;
+    let addresses =
+        crate::rt::spawn_blocking(move || ToSocketAddrs::to_socket_addrs(&(&host[..], port)))
+            .await?;
 
     let mut last_err = None;
 
