@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## 0.9.1 - 2026-11-09
+## 0.9.1 - 2026-11-17
 
 ### AI Policy Announcement
 
@@ -78,8 +78,10 @@ See also [#4472] for motivation and discussion.
 * [[#4439]]: fix(macros-core): only track paths rustc can checksum [[@varunshahdev]]
 * [[#4441]]: fix(mysql): decode MySQL 9 VECTOR columns (type 0xf2) [[@anderson-andres-dev]]
 * [[#4442]]: fix(sqlite): await SQLCipher test connection cleanup before exit [[@shuvroroy]]
+* [[#4450]]: fix(tls): don't wait for incoming data in `RustlsSocket::poll_flush()` [[@Tango-Ninja]]
 * [[#4458]]: fix(mysql): harden protocol decoders against malformed packets from hostile servers [[@portlandhodl]]
 * [[#4463]]: fix(macros): only report Ambiguous{DateTime,Numeric}Type when preferred crate is Inferred [[@rscorer]]
+* [[#4473]]: fix(sqlite): synchronize transaction depth when SQLite auto-rolls back [[@webdevsamran]]
 * [[#4477]]: fix(postgres): Bind encodes result-format count from the wrong field [[@prostomarkeloff]]
 * [[#4485]]: fix(postgres): ignore notifications on connections that aren't listening.  fixes #4484. [[@luketpeterson]]
 * [[#4488]]: fix(postgres): preserve quoted "NULL" elements when decoding text arrays [[@MinJaeRun]]
@@ -88,13 +90,20 @@ See also [#4472] for motivation and discussion.
 * [[#4498]]: fix(postgres): keep draining resolved type dependencies in fill_cache [[@ducnhan123-co]]
 * [[#4503]]: fix(mysql): decode DECIMAL columns into integer types correctly [[@Map130]]
 * [[#4508]]: fix(macros): reject `#[repr(C)]` on enums in `derive(Type)` [[@thelastbackspace]]
+* [[#4525]]: sqlx-sqlite: bump the upper bound on libsqlite3-sys to allow 0.40.x [[@lthiery]]
+* [[#4526]]: docs(FAQ): Replace versioned docs.rs link with latest [[@TheJanzap]]
+* [[#4528]]: fix(postgres): don't panic decoding out-of-range dates and times [[@colinhacks]]
+* [[#4529]]: fix: handle IPv6 properly at all levels [[@abonander]]
+  * IPv6 addresses are now properly supported in URLs (e.g. `postgres://user:password@[::1]:5432/database`)
+    and passed to the TLS layer for IP-based Server Name Identification (SNI), if applicable.
+  * Note: renamed unreleased `MySqlConnectOptions::tls_servername()` to `tls_sni_servername` 
+    to match the option added to the MySQL C API. Also added `tls-sni-servername` as a URL parameter.  
 
 [#4016]: https://github.com/transact-rs/sqlx/pull/4016
 [#4080]: https://github.com/transact-rs/sqlx/pull/4080
 [#4130]: https://github.com/transact-rs/sqlx/pull/4130
 [#4205]: https://github.com/transact-rs/sqlx/pull/4205
 [#4242]: https://github.com/transact-rs/sqlx/pull/4242
-[#4256]: https://github.com/transact-rs/sqlx/pull/4256
 [#4263]: https://github.com/transact-rs/sqlx/pull/4263
 [#4264]: https://github.com/transact-rs/sqlx/pull/4264
 [#4278]: https://github.com/transact-rs/sqlx/pull/4278
@@ -131,6 +140,8 @@ See also [#4472] for motivation and discussion.
 [#4439]: https://github.com/transact-rs/sqlx/pull/4439
 [#4441]: https://github.com/transact-rs/sqlx/pull/4441
 [#4442]: https://github.com/transact-rs/sqlx/pull/4442
+[#4450]: https://github.com/transact-rs/sqlx/pull/4450
+[#4473]: https://github.com/transact-rs/sqlx/pull/4473
 [#4458]: https://github.com/transact-rs/sqlx/pull/4458
 [#4463]: https://github.com/transact-rs/sqlx/pull/4463
 [#4472]: https://github.com/transact-rs/sqlx/pull/4472
@@ -146,6 +157,10 @@ See also [#4472] for motivation and discussion.
 [#4503]: https://github.com/transact-rs/sqlx/pull/4503
 [#4508]: https://github.com/transact-rs/sqlx/pull/4508
 [#4514]: https://github.com/transact-rs/sqlx/pull/4514
+[#4525]: https://github.com/transact-rs/sqlx/pull/4525
+[#4526]: https://github.com/transact-rs/sqlx/pull/4526
+[#4528]: https://github.com/transact-rs/sqlx/pull/4528
+[#4529]: https://github.com/transact-rs/sqlx/pull/4529
 
 ## 0.9.0 - 2026-05-06
 
@@ -3517,3 +3532,8 @@ Fix docs.rs build by enabling a runtime feature in the docs.rs metadata in `Carg
 [@Map130]: https://github.com/Map130
 [@thelastbackspace]: https://github.com/thelastbackspace
 [@MinJaeRun]: https://github.com/MinJaeRun
+[@Tango-Ninja]: https://github.com/Tango-Ninja
+[@webdevsamran]: https://github.com/webdevsamran
+[@lthiery]: https://github.com/lthiery
+[@TheJanzap]: https://github.com/TheJanzap
+[@colinhacks]: https://github.com/colinhacks
