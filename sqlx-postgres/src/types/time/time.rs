@@ -40,7 +40,17 @@ impl<'r> Decode<'r, Postgres> for Time {
             PgValueFormat::Binary => {
                 // TIME is encoded as the microseconds since midnight
                 let us = Decode::<Postgres>::decode(value)?;
-                Time::MIDNIGHT + Duration::microseconds(us)
+                let duration = Duration::microseconds(us);
+
+                // Postgres allows `24:00:00`, which would otherwise wrap around to midnight
+                if !(Duration::ZERO..Duration::DAY).contains(&duration) {
+                    return Err(format!(
+                        "Postgres TIME out of range for Time: {us} microseconds from midnight"
+                    )
+                    .into());
+                }
+
+                Time::MIDNIGHT + duration
             }
 
             PgValueFormat::Text => Time::parse(

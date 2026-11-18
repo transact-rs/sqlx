@@ -57,7 +57,14 @@ impl<'r> Decode<'r, Postgres> for PrimitiveDateTime {
             PgValueFormat::Binary => {
                 // TIMESTAMP is encoded as the microseconds since the epoch
                 let us = Decode::<Postgres>::decode(value)?;
-                PG_EPOCH.midnight() + Duration::microseconds(us)
+
+                // `infinity`, `-infinity` and years beyond 9999 don't fit in `PrimitiveDateTime`
+                PG_EPOCH
+                    .midnight()
+                    .checked_add(Duration::microseconds(us))
+                    .ok_or_else(|| {
+                        format!("Postgres TIMESTAMP out of range for PrimitiveDateTime: {us} microseconds from 2000-01-01")
+                    })?
             }
 
             PgValueFormat::Text => {
