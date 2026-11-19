@@ -78,7 +78,14 @@ impl TryFrom<&'_ PgNumeric> for Decimal {
             PgNumericSign::Negative => value.set_sign_negative(true),
         }
 
-        value.rescale(scale);
+        // `rescale()` will raise the scale past 28 (the maximum scale of `Decimal`) if the
+        // mantissa has room, which produces an invalid `Decimal` (e.g. serializing it with
+        // `serde` panics). Postgres can return a scale greater than 28 (e.g. the result of
+        // a division), so clamp it.
+        //
+        // `Decimal::MAX_SCALE` is not used as it is not available in the minimum supported
+        // version of `rust_decimal`.
+        value.rescale(std::cmp::min(scale, 28));
 
         Ok(value)
     }
@@ -496,5 +503,40 @@ mod tests {
         assert_eq!(actual_decimal, one_hundred);
         assert_eq!(actual_decimal.mantissa(), 10000);
         assert_eq!(actual_decimal.scale(), 2);
+    }
+
+    #[test]
+    fn scale_greater_than_max_scale() {
+        // -0.03586404 with scale 41, as Postgres returns it from e.g. a product of divisions
+        let numeric = PgNumeric::Number {
+            sign: PgNumericSign::Negative,
+            scale: 41,
+            weight: -1,
+            digits: vec![358, 6404],
+        };
+
+        let actual_decimal = Decimal::try_from(numeric).unwrap();
+        assert_eq!(actual_decimal, "-0.03586404".parse::<Decimal>().unwrap());
+        assert_eq!(actual_decimal.scale(), 28);
+        assert_eq!(
+            actual_decimal.to_string(),
+            "-0.0358640400000000000000000000"
+        );
+    }
+
+    #[test]
+    fn scale_greater_than_max_scale_smallest_digit() {
+        // 0.000000000000000000000000015 with scale 41; the last digit group
+        // still within the maximum scale of 28
+        let numeric = PgNumeric::Number {
+            sign: PgNumericSign::Positive,
+            scale: 41,
+            weight: -7,
+            digits: vec![150],
+        };
+
+        let actual_decimal = Decimal::try_from(numeric).unwrap();
+        assert_eq!(actual_decimal.scale(), 28);
+        assert_eq!(actual_decimal.to_string(), "0.0000000000000000000000000150");
     }
 }
