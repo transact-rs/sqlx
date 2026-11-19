@@ -29,6 +29,13 @@ async fn it_connects() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_accepts_send_only_transaction_callbacks() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    sqlx_test::test_send_only_transaction_callbacks(&mut conn).await
+}
+
+#[sqlx_macros::test]
 async fn it_can_select_void() -> anyhow::Result<()> {
     let mut conn = new::<Postgres>().await?;
 
