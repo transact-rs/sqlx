@@ -1,5 +1,6 @@
 mod common;
 
+use assert_cmd::cargo_bin_cmd;
 use common::MigrateCommand;
 use common::TestDatabase;
 
@@ -256,4 +257,70 @@ async fn ignored_chars() {
     db.run_migration(MigrateCommand::Run, None, false)
         .success()
         .stdout("");
+}
+
+#[tokio::test]
+async fn no_lock_migrations() {
+    let all_migrations: Vec<i64> = vec![
+        20230101000000,
+        20230201000000,
+        20230301000000,
+        20230401000000,
+        20230501000000,
+    ];
+
+    // Run and revert with --no-lock, after a dry-run with --no-lock.
+    {
+        let db = TestDatabase::new("no_lock_run_revert", "migrations_reversible");
+
+        // dry run
+        cargo_bin_cmd!("sqlx")
+            .args(["migrate", "run", "--no-lock", "--dry-run"])
+            .args(["--database-url", &db.connection_string()])
+            .args(["--source", "tests/migrations_reversible"])
+            .assert()
+            .success();
+        assert!(db.applied_migrations().await.is_empty());
+
+        cargo_bin_cmd!("sqlx")
+            .args(["migrate", "run", "--no-lock"])
+            .args(["--database-url", &db.connection_string()])
+            .args(["--source", "tests/migrations_reversible"])
+            .assert()
+            .success();
+        assert_eq!(db.applied_migrations().await, all_migrations);
+
+        // Revert undoes the latest migration only.
+        cargo_bin_cmd!("sqlx")
+            .args(["migrate", "revert", "--no-lock"])
+            .args(["--database-url", &db.connection_string()])
+            .args(["--source", "tests/migrations_reversible"])
+            .assert()
+            .success();
+        assert_eq!(db.applied_migrations().await, all_migrations[..4]);
+    }
+    // Skip with --no-lock marks everything as applied.
+    {
+        let db = TestDatabase::new("no_lock_skip", "migrations_reversible");
+
+        cargo_bin_cmd!("sqlx")
+            .args(["migrate", "override", "skip", "--no-lock"])
+            .args(["--database-url", &db.connection_string()])
+            .args(["--source", "tests/migrations_reversible"])
+            .assert()
+            .success();
+        assert_eq!(db.applied_migrations().await, all_migrations);
+    }
+    // Database setup with --no-lock creates the database and applies everything.
+    {
+        let db = TestDatabase::new("no_lock_setup", "migrations_reversible");
+
+        cargo_bin_cmd!("sqlx")
+            .args(["database", "setup", "--no-lock"])
+            .args(["--database-url", &db.connection_string()])
+            .args(["--source", "tests/migrations_reversible"])
+            .assert()
+            .success();
+        assert_eq!(db.applied_migrations().await, all_migrations);
+    }
 }
