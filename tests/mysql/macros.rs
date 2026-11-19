@@ -586,3 +586,24 @@ async fn test_uuid_is_compatible_mariadb() -> anyhow::Result<()> {
 }
 
 // we don't emit bind parameter type-checks for MySQL so testing the overrides is redundant
+
+#[sqlx_macros::test]
+async fn test_query_as_year_inference() -> anyhow::Result<()> {
+    let mut conn = new::<MySql>().await?;
+
+    pub struct Users {
+        pub birthyear: u16,
+    }
+
+    sqlx::query!("INSERT INTO test_query_as_year_inference(birthyear) VALUES (1998)")
+        .execute(&mut conn)
+        .await?;
+
+    let record = sqlx::query_as!(Users, "select birthyear from test_query_as_year_inference")
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(record.birthyear, 1998);
+
+    Ok(())
+}
