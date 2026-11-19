@@ -8,6 +8,13 @@ use std::slice;
 /// A resolved set of migrations, ready to be run.
 ///
 /// Can be constructed statically using `migrate!()` or at runtime using [`Migrator::new()`].
+///
+/// The built-in database drivers emit `tracing` events with the `sqlx::migrate` target
+/// before executing each migration and after it completes. These include the version,
+/// description, and direction (`up` or `down`). Starts and successful completions are
+/// logged at `INFO`, with the execution time on completion; failures are logged at `ERROR`.
+/// Already applied migrations and migrations marked as applied with [`Migrator::skip()`]
+/// do not emit these events.
 #[derive(Debug)]
 // Forbids `migrate!()` from constructing this:
 // #[non_exhaustive]

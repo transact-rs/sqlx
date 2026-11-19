@@ -14,6 +14,7 @@ enum Cli {
 #[tokio::main]
 async fn main() {
     sqlx_cli::maybe_apply_dotenv();
+    sqlx_cli::init_logging();
 
     sqlx::any::install_default_drivers();
 

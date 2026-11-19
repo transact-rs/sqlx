@@ -20,6 +20,7 @@
 
 use std::future::Future;
 use std::io;
+use std::io::IsTerminal;
 use std::time::Duration;
 
 use futures_util::TryFutureExt;
@@ -54,6 +55,22 @@ pub fn maybe_apply_dotenv() {
             eprintln!("Warning: error loading `.env` file: {e:?}");
         }
     }
+}
+
+/// Initialize CLI logging after loading `.env`, so it can configure `RUST_LOG`.
+pub fn init_logging() {
+    use tracing_subscriber::filter::LevelFilter;
+    use tracing_subscriber::EnvFilter;
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::WARN.into())
+                .from_env_lossy(),
+        )
+        .with_writer(io::stderr)
+        .with_ansi(io::stderr().is_terminal())
+        .init();
 }
 
 pub async fn run(opt: Opt) -> anyhow::Result<()> {
