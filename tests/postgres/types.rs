@@ -632,6 +632,83 @@ test_type!(bigdecimal<sqlx::types::BigDecimal>(Postgres,
     "12345.6789::numeric" == "12345.6789".parse::<sqlx::types::BigDecimal>().unwrap(),
 ));
 
+// `BigDecimal` equality ignores the scale, so `test_type!` cannot see it; compare the strings.
+// https://github.com/launchbadge/sqlx/issues/468
+#[sqlx_macros::test]
+#[cfg(feature = "bigdecimal")]
+async fn test_bigdecimal_decode_keeps_scale() -> anyhow::Result<()> {
+    use sqlx::types::BigDecimal;
+    use sqlx_core::sql_str::AssertSqlSafe;
+
+    // `to_string()` never shows the scale of zero, so check the scale on its own as well.
+    fn assert_decimal_eq(value: &BigDecimal, expected: &str, scale: i64, context: &str) {
+        assert_eq!(value.to_string(), expected, "{context}");
+        assert_eq!(
+            value.as_bigint_and_exponent().1,
+            scale,
+            "scale of {context}"
+        );
+    }
+
+    let mut conn = new::<Postgres>().await?;
+
+    for (expr, expected, scale) in [
+        ("1.50::numeric(10, 2)", "1.50", 2),
+        ("4.00::numeric(10, 2)", "4.00", 2),
+        ("0.00::numeric(10, 2)", "0", 2),
+        ("-1.50::numeric(10, 2)", "-1.50", 2),
+        ("100.00::numeric(10, 2)", "100.00", 2),
+        ("12345.60::numeric(10, 2)", "12345.60", 2),
+        ("10000.00::numeric(10, 2)", "10000.00", 2),
+        ("0.0001::numeric(10, 6)", "0.000100", 6),
+        ("0::numeric", "0", 0),
+        ("10000::numeric", "10000", 0),
+        // the scale is the result scale chosen by Postgres, not a multiple of 4
+        ("2::numeric / 3", "0.66666666666666666667", 20),
+        // Postgres rounds to the declared scale before it sends the value
+        ("1.5678::numeric(10, 2)", "1.57", 2),
+    ] {
+        let sql = format!("SELECT {expr}");
+
+        // binary format
+        let value: BigDecimal = sqlx::query_scalar(AssertSqlSafe(sql.as_str()))
+            .fetch_one(&mut conn)
+            .await?;
+        assert_decimal_eq(&value, expected, scale, &format!("{expr} (binary)"));
+
+        // text format
+        let value: BigDecimal = sqlx::query_scalar(AssertSqlSafe(sql.as_str()))
+            .persistent(false)
+            .fetch_one(&mut conn)
+            .await?;
+        assert_decimal_eq(&value, expected, scale, &format!("{expr} (text)"));
+    }
+
+    // round trip through `Encode` and `Decode`
+    for (text, scale) in [
+        ("1.50", 2),
+        ("4.00", 2),
+        ("0.00", 2),
+        ("-1.50", 2),
+        ("10000.00", 2),
+        ("0.000100", 6),
+    ] {
+        let sent: BigDecimal = text.parse()?;
+        let value: BigDecimal = sqlx::query_scalar("SELECT $1::numeric")
+            .bind(&sent)
+            .fetch_one(&mut conn)
+            .await?;
+        assert_decimal_eq(
+            &value,
+            &sent.to_string(),
+            scale,
+            &format!("round trip of {text}"),
+        );
+    }
+
+    Ok(())
+}
+
 #[cfg(feature = "bigdecimal")]
 test_type!(numrange_bigdecimal<PgRange<sqlx::types::BigDecimal>>(Postgres,
     "'(1.3,2.4)'::numrange" == PgRange::from(

@@ -1,4 +1,4 @@
-use bigdecimal::BigDecimal;
+use bigdecimal::{BigDecimal, RoundingMode};
 use num_bigint::{BigInt, Sign};
 use std::cmp;
 
@@ -33,22 +33,28 @@ impl TryFrom<&'_ PgNumeric> for BigDecimal {
     type Error = BoxDynError;
 
     fn try_from(numeric: &'_ PgNumeric) -> Result<Self, Self::Error> {
-        let (digits, sign, weight) = match *numeric {
+        let (digits, sign, weight, scale) = match *numeric {
             PgNumeric::Number {
                 ref digits,
                 sign,
                 weight,
-                ..
-            } => (digits, sign, weight),
+                scale,
+            } => (digits, sign, weight, scale),
 
             PgNumeric::NotANumber => {
                 return Err("BigDecimal does not support NaN values".into());
             }
         };
 
+        if scale < 0 {
+            return Err(format!("invalid scale value for Pg NUMERIC: {scale}").into());
+        }
+
+        let display_scale = i64::from(scale);
+
         if digits.is_empty() {
             // Postgres returns an empty digit array for 0 but BigInt expects at least one zero
-            return Ok(0u64.into());
+            return Ok(BigDecimal::from(0u64).with_scale(display_scale));
         }
 
         let sign = match sign {
@@ -60,7 +66,7 @@ impl TryFrom<&'_ PgNumeric> for BigDecimal {
         //
         // `Vec` capacity cannot exceed `isize::MAX` bytes, so this cast can't wrap in practice.
         #[allow(clippy::cast_possible_wrap)]
-        let scale = (digits.len() as i64 - weight as i64 - 1) * 4;
+        let digits_scale = (digits.len() as i64 - weight as i64 - 1) * 4;
 
         // no optimized algorithm for base-10 so use base-100 for faster processing
         let mut cents = Vec::with_capacity(digits.len() * 2);
@@ -85,7 +91,13 @@ impl TryFrom<&'_ PgNumeric> for BigDecimal {
         let bigint = BigInt::from_radix_be(sign, &cents, 100)
             .ok_or("PgNumeric contained an out-of-range digit")?;
 
-        Ok(BigDecimal::new(bigint, scale))
+        // The base-10000 digits only give a scale that is a multiple of 4, so apply the `scale`
+        // Postgres sent, to keep trailing zeros (`1.50`) and the scale of a whole number (`4.00`).
+        //
+        // Postgres rounds to `scale` before it sends a value, so there are no nonzero digits past
+        // it. If a hand-built `PgNumeric` has some, round half away from zero like Postgres does.
+        Ok(BigDecimal::new(bigint, digits_scale)
+            .with_scale_round(display_scale, RoundingMode::HalfUp))
     }
 }
 
@@ -217,6 +229,107 @@ fn sign_to_pg(sign: Sign) -> PgNumericSign {
 mod tests {
     use super::{BigDecimal, PgNumeric, PgNumericSign};
     use std::convert::TryFrom;
+
+    /// Decode a hand-built `PgNumeric::Number` and check how the `BigDecimal` is rendered.
+    ///
+    /// `BigDecimal` equality ignores the scale, so compare the string, and check the scale itself
+    /// because `to_string()` never shows the scale of zero.
+    #[track_caller]
+    fn assert_decodes_to(
+        sign: PgNumericSign,
+        weight: i16,
+        scale: i16,
+        digits: Vec<i16>,
+        expected: &str,
+    ) {
+        let decoded = BigDecimal::try_from(PgNumeric::Number {
+            sign,
+            scale,
+            weight,
+            digits,
+        })
+        .unwrap();
+
+        assert_eq!(decoded.to_string(), expected);
+        assert_eq!(decoded.as_bigint_and_exponent().1, i64::from(scale));
+    }
+
+    #[test]
+    fn decode_keeps_trailing_zeros_of_fraction() {
+        // `1.50::numeric(10, 2)`
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![1, 5000], "1.50");
+    }
+
+    #[test]
+    fn decode_keeps_scale_of_integer_value() {
+        // `4.00::numeric(10, 2)`
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![4], "4.00");
+        // `100.00::numeric(10, 2)`
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![100], "100.00");
+    }
+
+    #[test]
+    fn decode_keeps_scale_of_zero() {
+        // Postgres sends no digits at all for `0.00::numeric(10, 2)`;
+        // `BigDecimal` displays zero as "0" whatever its scale, `assert_decodes_to` checks the scale.
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![], "0");
+        assert_decodes_to(PgNumericSign::Positive, 0, 0, vec![], "0");
+    }
+
+    #[test]
+    fn decode_keeps_scale_with_positive_weight() {
+        // `12345.60::numeric(10, 2)`
+        assert_decodes_to(
+            PgNumericSign::Positive,
+            1,
+            2,
+            vec![1, 2345, 6000],
+            "12345.60",
+        );
+        // `10000.00::numeric(10, 2)`: the digits end before the decimal point
+        assert_decodes_to(PgNumericSign::Positive, 1, 2, vec![1], "10000.00");
+        // `10000::numeric`
+        assert_decodes_to(PgNumericSign::Positive, 1, 0, vec![1], "10000");
+    }
+
+    #[test]
+    fn decode_keeps_scale_of_negative() {
+        // `-1.50::numeric(10, 2)`
+        assert_decodes_to(PgNumericSign::Negative, 0, 2, vec![1, 5000], "-1.50");
+    }
+
+    #[test]
+    fn decode_keeps_scale_of_small_fraction() {
+        // `0.0001::numeric(10, 6)`
+        assert_decodes_to(PgNumericSign::Positive, -1, 6, vec![1], "0.000100");
+        // `0.00001234::numeric`
+        assert_decodes_to(PgNumericSign::Positive, -2, 8, vec![1234], "0.00001234");
+    }
+
+    #[test]
+    fn decode_rounds_digits_beyond_scale_half_away_from_zero() {
+        // Postgres never sends nonzero digits past `scale` (it rounds to `scale` before it sends),
+        // but a hand-built value can have them. Round like Postgres and like the `Decimal` impl.
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![1, 5678], "1.57");
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![1, 5650], "1.57");
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![1, 5649], "1.56");
+        assert_decodes_to(PgNumericSign::Negative, 0, 2, vec![1, 5650], "-1.57");
+        assert_decodes_to(PgNumericSign::Positive, 0, 0, vec![1, 5000], "2");
+        assert_decodes_to(PgNumericSign::Positive, 0, 0, vec![1, 4999], "1");
+        // carries into the integer part
+        assert_decodes_to(PgNumericSign::Positive, 0, 2, vec![1, 9999], "2.00");
+    }
+
+    #[test]
+    fn decode_rejects_negative_scale() {
+        assert!(BigDecimal::try_from(PgNumeric::Number {
+            sign: PgNumericSign::Positive,
+            scale: -1,
+            weight: 0,
+            digits: vec![1],
+        })
+        .is_err());
+    }
 
     #[test]
     fn zero() {
