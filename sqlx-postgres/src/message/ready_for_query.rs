@@ -3,9 +3,13 @@ use sqlx_core::bytes::Bytes;
 use crate::error::Error;
 use crate::message::{BackendMessage, BackendMessageFormat};
 
-#[derive(Debug)]
+/// The transaction status of a session, as the server reports it in every
+/// `ReadyForQuery` message.
+///
+/// See [`PgConnection::transaction_status()`][crate::PgConnection::transaction_status].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
-pub enum TransactionStatus {
+pub enum PgTransactionStatus {
     /// Not in a transaction block.
     Idle = b'I',
 
@@ -18,7 +22,7 @@ pub enum TransactionStatus {
 
 #[derive(Debug)]
 pub struct ReadyForQuery {
-    pub transaction_status: TransactionStatus,
+    pub transaction_status: PgTransactionStatus,
 }
 
 impl BackendMessage for ReadyForQuery {
@@ -26,9 +30,9 @@ impl BackendMessage for ReadyForQuery {
 
     fn decode_body(buf: Bytes) -> Result<Self, Error> {
         let status = match buf[0] {
-            b'I' => TransactionStatus::Idle,
-            b'T' => TransactionStatus::Transaction,
-            b'E' => TransactionStatus::Error,
+            b'I' => PgTransactionStatus::Idle,
+            b'T' => PgTransactionStatus::Transaction,
+            b'E' => PgTransactionStatus::Error,
 
             status => {
                 return Err(err_protocol!(
@@ -50,7 +54,7 @@ fn test_decode_ready_for_query() -> Result<(), Error> {
 
     let m = ReadyForQuery::decode_body(Bytes::from_static(DATA))?;
 
-    assert!(matches!(m.transaction_status, TransactionStatus::Error));
+    assert!(matches!(m.transaction_status, PgTransactionStatus::Error));
 
     Ok(())
 }
