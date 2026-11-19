@@ -191,7 +191,7 @@ fn to_asciz(s: &str) -> Vec<u8> {
 
 #[cfg(feature = "rsa")]
 mod rsa_backend {
-    use rsa::{pkcs8::DecodePublicKey, Oaep, RsaPublicKey};
+    use rsa::{pkcs8::DecodePublicKey, Oaep, PublicKey};
 
     use super::Error;
 
@@ -203,14 +203,14 @@ mod rsa_backend {
     }
 
     // https://docs.rs/rsa/0.3.0/rsa/struct.RSAPublicKey.html?search=#example-1
-    fn parse_rsa_pub_key(key: &[u8]) -> Result<RsaPublicKey, Error> {
+    fn parse_rsa_pub_key(key: &[u8]) -> Result<PublicKey, Error> {
         let pem = std::str::from_utf8(key).map_err(Error::protocol)?;
 
         // This takes advantage of the knowledge that we know
         // we are receiving a PKCS#8 RSA Public Key at all
         // times from MySQL
 
-        RsaPublicKey::from_public_key_pem(pem).map_err(Error::protocol)
+        PublicKey::from_public_key_pem(pem).map_err(Error::protocol)
     }
 }
 
