@@ -26,6 +26,8 @@ _tls-rustls-aws-lc-rs-native-roots = ["sqlx-macros-core/_tls-rustls-aws-lc-rs-na
 _tls-rustls-ring-webpki = ["sqlx-macros-core/_tls-rustls-ring-webpki"]
 _tls-rustls-ring-native-roots = ["sqlx-macros-core/_tls-rustls-ring-native-roots"]
 
+_gssapi-auth-cross-krb5 = ["sqlx-macros-core/_gssapi-auth-cross-krb5"]
+
 # SQLx features
 derive = ["sqlx-macros-core/derive"]
 macros = ["sqlx-macros-core/macros"]
