@@ -107,7 +107,7 @@ impl PgConnection {
         Ok(())
     }
 
-    async fn recv_ready_for_query(&mut self) -> Result<(), Error> {
+    pub(crate) async fn recv_ready_for_query(&mut self) -> Result<(), Error> {
         let r: ReadyForQuery = self.inner.stream.recv_expect().await?;
 
         self.inner.pending_ready_for_query_count -= 1;
