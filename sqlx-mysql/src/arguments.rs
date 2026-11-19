@@ -35,6 +35,26 @@ impl MySqlArguments {
 
         Ok(())
     }
+
+    /// The type of each bound parameter, in bind order.
+    pub fn types(&self) -> &[MySqlTypeInfo] {
+        &self.types
+    }
+
+    /// The bound parameters, concatenated in bind order, in the binary protocol encoding of
+    /// `COM_STMT_EXECUTE`. A parameter that [`is_null`][Self::is_null] has no bytes here.
+    pub fn values(&self) -> &[u8] {
+        &self.values
+    }
+
+    /// Whether the parameter at `index` was bound as `NULL`.
+    ///
+    /// Returns `false` if `index` is out of bounds.
+    pub fn is_null(&self, index: usize) -> bool {
+        index < self.types.len()
+            && self.null_bitmap[index / (u8::BITS as usize)] & (1 << (index % (u8::BITS as usize)))
+                != 0
+    }
 }
 
 impl Arguments for MySqlArguments {
@@ -104,5 +124,28 @@ mod test {
         bit_map.push(IsNull::Yes);
 
         assert_eq!([0b01010101, 0b1].as_slice(), bit_map.deref());
+    }
+
+    #[test]
+    fn arguments_expose_types_values_and_nulls() {
+        use crate::type_info::TypeInfo;
+
+        let mut args = MySqlArguments::default();
+        args.add(7_u64).unwrap();
+        args.add(Option::<i32>::None).unwrap();
+        args.add("ab").unwrap();
+
+        let names: Vec<_> = args.types().iter().map(TypeInfo::name).collect();
+        assert_eq!(names, ["BIGINT UNSIGNED", "INT", "VARCHAR"]);
+        assert_eq!(args.values(), [7, 0, 0, 0, 0, 0, 0, 0, 2, b'a', b'b']);
+        assert_eq!(
+            [
+                args.is_null(0),
+                args.is_null(1),
+                args.is_null(2),
+                args.is_null(3)
+            ],
+            [false, true, false, false],
+        );
     }
 }
