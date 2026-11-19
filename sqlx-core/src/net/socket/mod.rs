@@ -10,6 +10,8 @@ pub use buffered::{BufferedSocket, WriteBuffer};
 use bytes::BufMut;
 use cfg_if::cfg_if;
 
+#[cfg(any(feature = "_rt-tokio", feature = "_rt-async-io"))]
+pub mod async_rw_adapter;
 mod buffered;
 
 pub trait Socket: Send + Sync + Unpin + 'static {
