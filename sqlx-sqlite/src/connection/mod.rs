@@ -36,6 +36,7 @@ pub(crate) mod establish;
 pub(crate) mod execute;
 mod executor;
 mod explain;
+pub(crate) mod function;
 mod handle;
 pub(crate) mod intmap;
 #[cfg(feature = "preupdate-hook")]

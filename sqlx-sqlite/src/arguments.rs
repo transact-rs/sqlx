@@ -126,6 +126,17 @@ impl SqliteArgumentsBuffer {
 }
 
 impl SqliteArgumentValue {
+    pub(crate) fn encode_one<'q>(value: impl Encode<'q, Sqlite>) -> Result<Self, BoxDynError> {
+        let mut args = SqliteArguments::default();
+        args.add(value)?;
+        let [value] = args
+            .values
+            .0
+            .try_into()
+            .map_err(|_| "a scalar function must return one SQLite value")?;
+        Ok(value)
+    }
+
     fn bind(&self, handle: &mut StatementHandle, i: usize) -> Result<(), Error> {
         use SqliteArgumentValue::*;
 

@@ -1,6 +1,6 @@
 use futures_util::TryStreamExt;
 use rand::{rngs::Xoshiro256PlusPlus, RngExt, SeedableRng};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteOperation, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteFunction, SqliteOperation, SqlitePoolOptions};
 use sqlx::SqlSafeStr;
 use sqlx::{
     query, sqlite::Sqlite, sqlite::SqliteRow, Column, ConnectOptions, Connection, Executor, Row,
@@ -444,6 +444,86 @@ CREATE TEMPORARY TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE
 
     assert_eq!(name, "b");
 
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_registers_scalar_functions_on_each_connection() -> anyhow::Result<()> {
+    let upper = SqliteFunction::new("unicode_upper", 1, |args| {
+        Ok(args.get::<Option<&str>>(0)?.map(str::to_uppercase))
+    })
+    .deterministic();
+    let dir = tempfile::tempdir()?;
+    let options = SqliteConnectOptions::new()
+        .filename(dir.path().join("names.db"))
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .function(upper);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await?;
+    let mut first = pool.acquire().await?;
+    first
+        .execute("CREATE TABLE names(name); CREATE INDEX by_name ON names(unicode_upper(name))")
+        .await?;
+    for mut conn in [first, pool.acquire().await?] {
+        let row = conn
+            .fetch_one(
+                "SELECT unicode_upper('Straße'), unicode_upper(NULL),
+                        unicode_upper(1.0), unicode_upper(x'C3A9')",
+            )
+            .await?;
+        assert_eq!(row.try_get::<&str, _>(0)?, "STRASSE");
+        assert_eq!(row.try_get::<Option<&str>, _>(1)?, None);
+        assert_eq!(row.try_get::<&str, _>(2)?, "1.0");
+        assert_eq!(row.try_get::<&str, _>(3)?, "É");
+    }
+    pool.close().await;
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn scalar_function_errors_leave_the_connection_usable() -> anyhow::Result<()> {
+    let checked = SqliteFunction::new("checked", -1, |args| match args.len() {
+        0 => Err("missing input".into()),
+        1 => args.get::<i64>(0),
+        _ => panic!("callback panic"),
+    });
+    let mut conn = SqliteConnectOptions::new()
+        .function(checked)
+        .connect()
+        .await?;
+    let err = conn.fetch_one("SELECT checked()").await.unwrap_err();
+    assert_eq!(err.as_database_error().unwrap().message(), "missing input");
+    let err = conn.fetch_one("SELECT checked(1, 2)").await.unwrap_err();
+    assert!(err.as_database_error().is_some());
+    assert_eq!(
+        conn.fetch_one("SELECT checked(2)")
+            .await?
+            .try_get::<i64, _>(0)?,
+        2
+    );
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn closing_a_connection_releases_its_scalar_functions() -> anyhow::Result<()> {
+    let bytes = Arc::new([0_u8, 255]);
+    let weak = Arc::downgrade(&bytes);
+    let function = SqliteFunction::new("bytes", 0, move |_| Ok(*bytes));
+    let mut conn = SqliteConnectOptions::new()
+        .function(function)
+        .connect()
+        .await?;
+    assert_eq!(
+        conn.fetch_one("SELECT bytes()")
+            .await?
+            .try_get::<&[u8], _>(0)?,
+        &[0, 255]
+    );
+    conn.close().await?;
+    assert!(weak.upgrade().is_none());
     Ok(())
 }
 

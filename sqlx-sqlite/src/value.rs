@@ -143,7 +143,6 @@ impl<'r> SqliteValueRef<'r> {
     /// The supplied sqlite3_value must not be null and SQLite must free it.
     /// It will not be freed on drop.
     /// The lifetime on this struct should tie it to whatever scope it's valid for before SQLite frees it.
-    #[allow(unused)]
     pub(crate) unsafe fn borrowed(value: *mut sqlite3_value) -> Self {
         debug_assert!(!value.is_null());
         let handle = ValueHandle::temporary(NonNull::new_unchecked(value));
