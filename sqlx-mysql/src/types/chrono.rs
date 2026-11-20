@@ -335,7 +335,7 @@ fn naive_dt_encoded_len(time: &NaiveDateTime) -> u8 {
         time.minute(),
         time.second(),
         #[allow(deprecated)]
-        time.timestamp_subsec_nanos(),
+        (time.timestamp_subsec_nanos() / 1000),
     ) {
         // if hour, minutes, seconds and micro_seconds are all 0,
         // length is 4 and no other field is sent
@@ -352,11 +352,77 @@ fn naive_dt_encoded_len(time: &NaiveDateTime) -> u8 {
 
 #[inline(always)]
 fn naive_time_encoded_len(time: &NaiveTime) -> u8 {
-    if time.nanosecond() == 0 {
+    if time.nanosecond() / 1000 == 0 {
         // if micro_seconds is 0, length is 8 and micro_seconds is not sent
         8
     } else {
         // otherwise length is 12
         12
     }
+}
+
+#[test]
+fn naive_time_zero_us_non_zero_ns() {
+    let time_ref = sqlx::types::chrono::NaiveTime::from_hms_nano_opt(14, 35, 25, 0).unwrap();
+    let time =
+        sqlx::types::chrono::NaiveTime::from_hms_nano_opt(14, 35, 25, 999 /* ns < 1 µs */).unwrap();
+
+    let hint = sqlx::Encode::<sqlx::MySql>::size_hint(&time);
+    assert_eq!(hint, 9);
+
+    let mut buf_ref = Vec::with_capacity(hint);
+    let mut buf = Vec::with_capacity(hint);
+
+    _ = sqlx::Encode::<sqlx::MySql>::encode_by_ref(&time_ref, &mut buf_ref);
+    _ = sqlx::Encode::<sqlx::MySql>::encode_by_ref(&time, &mut buf);
+
+    assert_eq!(buf_ref, buf);
+}
+
+#[test]
+fn naive_dt_zero_us_non_zero_ns() {
+    let datetime_ref = sqlx::types::chrono::NaiveDate::from_ymd_opt(2026, 11, 20)
+        .unwrap()
+        .and_hms_nano_opt(14, 35, 25, 0 /* ns */)
+        .unwrap();
+
+    let datetime = sqlx::types::chrono::NaiveDate::from_ymd_opt(2026, 11, 20)
+        .unwrap()
+        .and_hms_nano_opt(14, 35, 25, 999 /* ns < 1 µs*/)
+        .unwrap();
+
+    let hint = sqlx::Encode::<sqlx::MySql>::size_hint(&datetime);
+    assert_eq!(hint, 8);
+
+    let mut buf_ref = Vec::with_capacity(hint);
+    let mut buf = Vec::with_capacity(hint);
+
+    _ = sqlx::Encode::<sqlx::MySql>::encode_by_ref(&datetime_ref, &mut buf_ref);
+    _ = sqlx::Encode::<sqlx::MySql>::encode_by_ref(&datetime, &mut buf);
+
+    assert_eq!(buf_ref, buf);
+}
+
+#[test]
+fn naive_dt_zero_time_except_non_zero_ns() {
+    let datetime_ref = sqlx::types::chrono::NaiveDate::from_ymd_opt(2026, 11, 20)
+        .unwrap()
+        .and_hms_nano_opt(0, 0, 0, 0 /* ns */)
+        .unwrap();
+
+    let datetime = sqlx::types::chrono::NaiveDate::from_ymd_opt(2026, 11, 20)
+        .unwrap()
+        .and_hms_nano_opt(0, 0, 0, 999 /* ns < 1 µs */)
+        .unwrap();
+
+    let hint = sqlx::Encode::<sqlx::MySql>::size_hint(&datetime);
+    assert_eq!(hint, 5);
+
+    let mut buf_ref = Vec::with_capacity(hint);
+    let mut buf = Vec::with_capacity(hint);
+
+    _ = sqlx::Encode::<sqlx::MySql>::encode_by_ref(&datetime_ref, &mut buf_ref);
+    _ = sqlx::Encode::<sqlx::MySql>::encode_by_ref(&datetime, &mut buf);
+
+    assert_eq!(buf_ref, buf);
 }
