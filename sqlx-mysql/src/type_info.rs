@@ -18,6 +18,16 @@ pub struct MySqlTypeInfo {
 }
 
 impl MySqlTypeInfo {
+    /// Returns the declared number of bits in a `BIT(M)` column.
+    ///
+    /// Returns `None` for other types or when the width is unavailable.
+    pub fn bit_width(&self) -> Option<u32> {
+        match self.r#type {
+            ColumnType::Bit => self.max_size,
+            _ => None,
+        }
+    }
+
     pub(crate) const fn binary(ty: ColumnType) -> Self {
         Self {
             r#type: ty,
