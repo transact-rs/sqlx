@@ -148,4 +148,9 @@ impl Connection for AnyConnection {
     fn should_flush(&self) -> bool {
         self.backend.should_flush()
     }
+
+    #[doc(hidden)]
+    fn is_protocol_idle(&self) -> bool {
+        self.backend.is_protocol_idle()
+    }
 }

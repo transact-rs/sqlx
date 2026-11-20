@@ -165,6 +165,14 @@ pub trait Connection: Send {
     #[doc(hidden)]
     fn should_flush(&self) -> bool;
 
+    /// Returns `true` only if the driver can prove that no operation is in progress on this connection: nothing is buffered to send, the server owes no response, and no transaction is open.
+    ///
+    /// `Pool` tests a connection when it is returned, to flush protocol state left behind by a cancelled or failed operation. It skips that round trip when this returns `true`. A driver that cannot track every operation to completion, including cancelled ones, must return `false`, which is the default.
+    #[doc(hidden)]
+    fn is_protocol_idle(&self) -> bool {
+        false
+    }
+
     /// Establish a new database connection.
     ///
     /// A value of [`Options`][Self::Options] is parsed from the provided connection string. This parsing
