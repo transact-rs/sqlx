@@ -18,6 +18,7 @@ pub use synchronous::SqliteSynchronous;
 
 use crate::common::DebugFn;
 use crate::connection::collation::Collation;
+use crate::SqliteFunction;
 use sqlx_core::{config, IndexMap};
 
 /// Options and flags which can be used to configure a SQLite connection.
@@ -85,6 +86,7 @@ pub struct SqliteConnectOptions {
     pub(crate) row_channel_size: usize,
 
     pub(crate) collations: Vec<Collation>,
+    pub(crate) functions: Vec<SqliteFunction>,
 
     pub(crate) serialized: bool,
     pub(crate) thread_name: Arc<DebugFn<dyn Fn(u64) -> String + Send + Sync + 'static>>,
@@ -210,6 +212,7 @@ impl SqliteConnectOptions {
             #[cfg(feature = "load-extension")]
             extensions: Default::default(),
             collations: Default::default(),
+            functions: Vec::new(),
             serialized: false,
             thread_name: Arc::new(DebugFn(|id| format!("sqlx-sqlite-worker-{id}"))),
             command_channel_size: 50,
@@ -424,6 +427,24 @@ impl SqliteConnectOptions {
         F: Fn(&str, &str) -> Ordering + Send + Sync + 'static,
     {
         self.collations.push(Collation::new(name, collate));
+        self
+    }
+
+    /// Register a scalar function on each connection opened with these options.
+    /// A later registration with the same name and argument count replaces the earlier one.
+    ///
+    /// ```
+    /// use sqlx::sqlite::{SqliteConnectOptions, SqliteFunction};
+    ///
+    /// let options = SqliteConnectOptions::new().function(
+    ///     SqliteFunction::new("unicode_upper", 1, |args| {
+    ///         Ok(args.get::<Option<&str>>(0)?.map(str::to_uppercase))
+    ///     })
+    ///     .deterministic(),
+    /// );
+    /// ```
+    pub fn function(mut self, function: SqliteFunction) -> Self {
+        self.functions.push(function);
         self
     }
 
