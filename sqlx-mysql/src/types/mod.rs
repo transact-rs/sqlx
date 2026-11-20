@@ -23,6 +23,8 @@
 //! | [`MySqlTime`]                         | TIME (encode and decode full range)                  |
 //! | [`Duration`][std::time::Duration]     | TIME (for decoding positive values only)             |
 //!
+//! A `BIT(1)` column can also be decoded as `bool`. Use `u64` to read wider `BIT(M)` columns.
+//!
 //! ##### Note: `BOOLEAN`/`BOOL` Type
 //! MySQL and MariaDB treat `BOOLEAN` as an alias of the `TINYINT` type:
 //!
