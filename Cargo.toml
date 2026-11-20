@@ -123,7 +123,7 @@ any = ["sqlx-core/any", "sqlx-mysql?/any", "sqlx-postgres?/any", "sqlx-sqlite?/a
 postgres = ["sqlx-postgres", "sqlx-macros?/postgres"]
 mysql = ["sqlx-mysql", "sqlx-macros?/mysql"]
 mysql-rsa = ["mysql", "sqlx-mysql/rsa", "sqlx-macros?/mysql-rsa"]
-sqlite = ["sqlite-bundled", "sqlite-deserialize", "sqlite-load-extension", "sqlite-unlock-notify"]
+sqlite = ["sqlite-bundled", "sqlite-deserialize", "sqlite-error-offset", "sqlite-load-extension", "sqlite-unlock-notify"]
 
 # SQLite base features
 sqlite-bundled = ["_sqlite", "sqlx-sqlite/bundled", "sqlx-macros?/sqlite"]
@@ -135,6 +135,9 @@ sqlite-unbundled = ["_sqlite", "sqlx-sqlite/unbundled", "sqlx-macros?/sqlite-unb
 # Enable `SqliteConnection::deserialize()` and `::serialize()`
 # Cannot be used with `-DSQLITE_OMIT_DESERIALIZE`; requires `-DSQLITE_ENABLE_DESERIALIZE` on SQLite < 3.36.0
 sqlite-deserialize = ["sqlx-sqlite/deserialize"]
+
+# Capture the byte offset of SQL errors. Requires SQLite 3.38.0 or later.
+sqlite-error-offset = ["sqlx-sqlite/error-offset"]
 
 # Enable `SqliteConnectOptions::extension()` and `::extension_with_entrypoint()`.
 # Also required to use `drivers.sqlite.unsafe-load-extensions` from `sqlx.toml`.
