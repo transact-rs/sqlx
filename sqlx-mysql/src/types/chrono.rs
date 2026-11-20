@@ -335,7 +335,7 @@ fn naive_dt_encoded_len(time: &NaiveDateTime) -> u8 {
         time.minute(),
         time.second(),
         #[allow(deprecated)]
-        time.timestamp_subsec_nanos(),
+        (time.timestamp_subsec_nanos() / 1000),
     ) {
         // if hour, minutes, seconds and micro_seconds are all 0,
         // length is 4 and no other field is sent
@@ -352,7 +352,7 @@ fn naive_dt_encoded_len(time: &NaiveDateTime) -> u8 {
 
 #[inline(always)]
 fn naive_time_encoded_len(time: &NaiveTime) -> u8 {
-    if time.nanosecond() == 0 {
+    if time.nanosecond() / 1000 == 0 {
         // if micro_seconds is 0, length is 8 and micro_seconds is not sent
         8
     } else {
