@@ -24,6 +24,7 @@ regexp = ["dep:regex"]
 
 # Conditionally compiled SQLite features
 deserialize = []
+error-offset = []
 load-extension = []
 preupdate-hook = ["libsqlite3-sys/preupdate_hook"]
 unlock-notify = ["libsqlite3-sys/unlock_notify"]
@@ -43,6 +44,7 @@ _unstable-all-types = [
 
 _unstable-all-sqlite-features = [
     "deserialize",
+    "error-offset",
     "load-extension",
     "preupdate-hook",
     "unlock-notify",

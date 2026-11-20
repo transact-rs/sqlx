@@ -19,9 +19,18 @@ pub(crate) use sqlx_core::error::*;
 pub struct SqliteError {
     code: c_int,
     message: Cow<'static, str>,
+    byte_offset: Option<usize>,
 }
 
 impl SqliteError {
+    /// The zero-based UTF-8 byte offset in the submitted SQL where preparation failed.
+    ///
+    /// Returns `None` when SQLite does not identify a token or the `sqlite-error-offset`
+    /// feature of `sqlx` is disabled.
+    pub fn byte_offset(&self) -> Option<usize> {
+        self.byte_offset
+    }
+
     pub(crate) unsafe fn new(handle: *mut sqlite3) -> Self {
         Self::try_new(handle).expect("There should be an error")
     }
@@ -45,7 +54,23 @@ impl SqliteError {
         Some(Self {
             code,
             message: message.into(),
+            byte_offset: None,
         })
+    }
+
+    pub(crate) unsafe fn from_prepare(handle: *mut sqlite3, _statement_start: usize) -> Self {
+        #[cfg(feature = "error-offset")]
+        // SQLite reports an offset relative to the SQL passed to sqlite3_prepare_v3().
+        let byte_offset = usize::try_from(unsafe { libsqlite3_sys::sqlite3_error_offset(handle) })
+            .ok()
+            .map(|offset| _statement_start + offset);
+        #[cfg(not(feature = "error-offset"))]
+        let byte_offset = None;
+
+        Self {
+            byte_offset,
+            ..unsafe { Self::new(handle) }
+        }
     }
 
     /// For errors during extension load, the error message is supplied via a separate pointer
@@ -71,7 +96,11 @@ impl SqliteError {
             }
         };
 
-        SqliteError { code, message }
+        SqliteError {
+            code,
+            message,
+            byte_offset: None,
+        }
     }
 
     #[allow(dead_code)]
@@ -79,6 +108,7 @@ impl SqliteError {
         Self {
             code: SQLITE_ERROR,
             message: message.into(),
+            byte_offset: None,
         }
     }
 
