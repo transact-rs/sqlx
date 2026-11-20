@@ -238,6 +238,28 @@ impl Migrator {
             conn.lock().await?;
         }
 
+        let result = self.run_locked(target, conn, skip).await;
+
+        // unlock the migrator to allow other migrators to run,
+        // whether or not the migrations succeeded
+        if self.locking {
+            let unlocked = conn.unlock().await;
+            result?;
+            return unlocked;
+        }
+
+        result
+    }
+
+    async fn run_locked<C>(
+        &self,
+        target: Option<i64>,
+        conn: &mut C,
+        skip: bool,
+    ) -> Result<(), MigrateError>
+    where
+        C: Migrate,
+    {
         for schema_name in self.create_schemas.iter() {
             conn.create_schema_if_not_exists(schema_name).await?;
         }
@@ -285,12 +307,6 @@ impl Migrator {
             }
         }
 
-        // unlock the migrator to allow other migrators to run
-        // but do nothing as we already migrated
-        if self.locking {
-            conn.unlock().await?;
-        }
-
         Ok(())
     }
 
@@ -323,6 +339,23 @@ impl Migrator {
             conn.lock().await?;
         }
 
+        let result = self.undo_locked(&mut *conn, target).await;
+
+        // unlock the migrator to allow other migrators to run,
+        // whether or not the migrations succeeded
+        if self.locking {
+            let unlocked = conn.unlock().await;
+            result?;
+            return unlocked;
+        }
+
+        result
+    }
+
+    async fn undo_locked<C>(&self, conn: &mut C, target: i64) -> Result<(), MigrateError>
+    where
+        C: Migrate,
+    {
         // creates [_migrations] table only if needed
         // eventually this will likely migrate previous versions of the table
         conn.ensure_migrations_table(&self.table_name).await?;
@@ -348,12 +381,6 @@ impl Migrator {
             .filter(|m| m.version > target)
         {
             conn.revert(&self.table_name, migration).await?;
-        }
-
-        // unlock the migrator to allow other migrators to run
-        // but do nothing as we already migrated
-        if self.locking {
-            conn.unlock().await?;
         }
 
         Ok(())
