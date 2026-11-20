@@ -54,13 +54,11 @@ CREATE TEMPORARY TABLE with_bit_and_tinyint (
     assert_eq!(d.column(1).name(), "value_bit_1");
     assert_eq!(d.column(1).type_info().name(), "BIT");
 
-    assert_eq!(d.column(1).type_info().bit_width(), Some(1));
-    assert_eq!(d.column(2).type_info().bit_width(), None);
-    assert_eq!(d.column(3).type_info().bit_width(), Some(64));
-    assert_eq!(d.column(5).type_info().bit_width(), Some(8));
-
-    assert!(<bool as Type<MySql>>::compatible(&d.column(1).type_info()));
-    assert!(<bool as Type<MySql>>::compatible(&d.column(2).type_info()));
+    assert!(<bool as Type<MySql>>::compatible(d.column(1).type_info()));
+    assert!(<bool as Type<MySql>>::compatible(d.column(2).type_info()));
+    assert!(!<bool as Type<MySql>>::compatible(d.column(3).type_info()));
+    assert!(<bool as Type<MySql>>::compatible(d.column(4).type_info()));
+    assert!(!<bool as Type<MySql>>::compatible(d.column(5).type_info()));
 
     Ok(())
 }

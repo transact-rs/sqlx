@@ -378,29 +378,25 @@ CREATE TEMPORARY TABLE with_bits (
     )
     .await?;
 
-    sqlx::query("INSERT INTO with_bits (value_1, value_n) VALUES (?, ?)")
+    sqlx::query("INSERT INTO with_bits (value_1, value_n) VALUES (?, ?), (0, 1)")
         .bind(1_u8)
         .bind(510202_u32)
         .execute(&mut conn)
         .await?;
 
-    // BINARY
-    let (v1, vn): (u8, u64) = sqlx::query_as("SELECT value_1, value_n FROM with_bits")
-        .fetch_one(&mut conn)
-        .await?;
+    let sql = "SELECT value_1, value_n FROM with_bits ORDER BY id";
+    let binary = sqlx::query(sql).fetch_all(&mut conn).await?;
+    let text = conn.fetch_all(sql).await?;
 
-    assert_eq!(v1, 1);
-    assert_eq!(vn, 510202);
-
-    // TEXT
-    let row = conn
-        .fetch_one("SELECT value_1, value_n FROM with_bits")
-        .await?;
-    let v1: u8 = row.try_get(0)?;
-    let vn: u64 = row.try_get(1)?;
-
-    assert_eq!(v1, 1);
-    assert_eq!(vn, 510202);
+    for rows in [binary, text] {
+        assert_eq!(rows.len(), 2);
+        for (row, (flag, bits)) in rows.iter().zip([(true, 510202), (false, 1)]) {
+            assert_eq!(row.try_get::<bool, _>(0)?, flag);
+            assert_eq!(row.try_get::<u8, _>(0)?, u8::from(flag));
+            assert_eq!(row.try_get::<u64, _>(1)?, bits);
+            assert!(row.try_get::<bool, _>(1).is_err());
+        }
+    }
 
     Ok(())
 }

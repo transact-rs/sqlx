@@ -20,15 +20,15 @@ impl Type<MySql> for bool {
     }
 
     fn compatible(ty: &MySqlTypeInfo) -> bool {
-        matches!(
-            ty.r#type,
+        match ty.r#type {
+            ColumnType::Bit => ty.max_size == Some(1),
             ColumnType::Tiny
-                | ColumnType::Short
-                | ColumnType::Long
-                | ColumnType::Int24
-                | ColumnType::LongLong
-                | ColumnType::Bit
-        )
+            | ColumnType::Short
+            | ColumnType::Long
+            | ColumnType::Int24
+            | ColumnType::LongLong => true,
+            _ => false,
+        }
     }
 }
 
@@ -40,6 +40,10 @@ impl Encode<'_, MySql> for bool {
 
 impl Decode<'_, MySql> for bool {
     fn decode(value: MySqlValueRef<'_>) -> Result<Self, BoxDynError> {
-        Ok(<i8 as Decode<MySql>>::decode(value)? != 0)
+        match value.type_info.r#type {
+            // BIT values are binary even in text-protocol rows.
+            ColumnType::Bit => Ok(<u64 as Decode<MySql>>::decode(value)? != 0),
+            _ => Ok(<i8 as Decode<MySql>>::decode(value)? != 0),
+        }
     }
 }
