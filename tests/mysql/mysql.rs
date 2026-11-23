@@ -804,3 +804,37 @@ async fn test_client_found_rows() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// The client key is in a PKCS #11 token (SoftHSM in CI), reached through `ssl_client_config`.
+// The server asks for a client certificate but does not require one, so the token's signature
+// count shows that it was used. Skipped unless `SQLX_TEST_PKCS11_MODULE` is set.
+#[cfg(all(
+    any(
+        feature = "tls-rustls-ring-webpki",
+        feature = "tls-rustls-ring-native-roots",
+        feature = "tls-rustls-aws-lc-rs",
+        feature = "tls-rustls-aws-lc-rs-native-roots"
+    ),
+    not(feature = "tls-native-tls")
+))]
+#[sqlx_macros::test]
+async fn connect_with_a_client_key_in_a_pkcs11_token() -> anyhow::Result<()> {
+    setup_if_needed();
+    let Some((config, signatures)) = sqlx_test::pkcs11::client_config()? else {
+        return Ok(());
+    };
+
+    // The server certificate names `sqlx.test`, and the configuration verifies the name.
+    let options: MySqlConnectOptions = std::env::var("DATABASE_URL")?.parse()?;
+    let mut conn = options
+        .tls_sni_servername("sqlx.test")
+        .ssl_client_config(config)
+        .connect()
+        .await?;
+
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&mut conn).await?;
+    assert_eq!(one, 1);
+    assert!(signatures.load(std::sync::atomic::Ordering::SeqCst) > 0);
+
+    Ok(())
+}

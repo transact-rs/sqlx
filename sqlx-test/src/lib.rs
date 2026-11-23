@@ -1,3 +1,5 @@
+pub mod pkcs11;
+
 use sqlx::pool::PoolOptions;
 use sqlx::{Connection, Database, Error, Pool};
 use std::env;

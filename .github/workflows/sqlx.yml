@@ -398,6 +398,17 @@ jobs:
       - run: ./gen-certs.sh
         working-directory: tests/certs
 
+      # Put the client key in a SoftHSM token for `connect_with_a_client_key_in_a_pkcs11_token`
+      - run: |
+          sudo apt-get update && sudo apt-get install -y softhsm2
+          mkdir "$RUNNER_TEMP/softhsm"
+          echo "directories.tokendir = $RUNNER_TEMP/softhsm" > "$RUNNER_TEMP/softhsm2.conf"
+          export SOFTHSM2_CONF="$RUNNER_TEMP/softhsm2.conf"
+          softhsm2-util --init-token --free --label sqlx --so-pin 1234 --pin 1234
+          softhsm2-util --import tests/certs/keys/client.key --token sqlx --label client --id 01 --pin 1234
+          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
+          echo "SQLX_TEST_PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so" >> "$GITHUB_ENV"
+
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 5432:5432 --name postgres_${{ matrix.postgres }}_client_ssl postgres_${{ matrix.postgres }}_client_ssl
 
@@ -624,6 +635,17 @@ jobs:
       - run: ./gen-certs.sh
         working-directory: tests/certs
 
+      # Put the client key in a SoftHSM token for `connect_with_a_client_key_in_a_pkcs11_token`
+      - run: |
+          sudo apt-get update && sudo apt-get install -y softhsm2
+          mkdir "$RUNNER_TEMP/softhsm"
+          echo "directories.tokendir = $RUNNER_TEMP/softhsm" > "$RUNNER_TEMP/softhsm2.conf"
+          export SOFTHSM2_CONF="$RUNNER_TEMP/softhsm2.conf"
+          softhsm2-util --init-token --free --label sqlx --so-pin 1234 --pin 1234
+          softhsm2-util --import tests/certs/keys/client.key --token sqlx --label client --id 01 --pin 1234
+          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
+          echo "SQLX_TEST_PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so" >> "$GITHUB_ENV"
+
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mysql_${{ matrix.mysql }}_client_ssl mysql_${{ matrix.mysql }}_client_ssl
           docker exec mysql_${{ matrix.mysql }}_client_ssl bash -c '
@@ -835,6 +857,17 @@ jobs:
       # Generate TLS certificates
       - run: ./gen-certs.sh
         working-directory: tests/certs
+
+      # Put the client key in a SoftHSM token for `connect_with_a_client_key_in_a_pkcs11_token`
+      - run: |
+          sudo apt-get update && sudo apt-get install -y softhsm2
+          mkdir "$RUNNER_TEMP/softhsm"
+          echo "directories.tokendir = $RUNNER_TEMP/softhsm" > "$RUNNER_TEMP/softhsm2.conf"
+          export SOFTHSM2_CONF="$RUNNER_TEMP/softhsm2.conf"
+          softhsm2-util --init-token --free --label sqlx --so-pin 1234 --pin 1234
+          softhsm2-util --import tests/certs/keys/client.key --token sqlx --label client --id 01 --pin 1234
+          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
+          echo "SQLX_TEST_PKCS11_MODULE=/usr/lib/softhsm/libsofthsm2.so" >> "$GITHUB_ENV"
 
       - run: |
           docker compose -f tests/docker-compose.yml run -d -p 3306:3306 --name mariadb_${{ matrix.mariadb }}_client_ssl mariadb_${{ matrix.mariadb }}_client_ssl

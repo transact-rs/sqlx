@@ -2382,3 +2382,42 @@ async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<
 
     Ok(())
 }
+
+// The client key is in a PKCS #11 token (SoftHSM in CI), reached through `ssl_client_config`.
+// `pg_hba.conf` requires a client certificate on `hostssl`, so logging in at all proves it was used.
+// Skipped unless `SQLX_TEST_PKCS11_MODULE` is set.
+#[cfg(all(
+    any(
+        feature = "tls-rustls-ring-webpki",
+        feature = "tls-rustls-ring-native-roots",
+        feature = "tls-rustls-aws-lc-rs",
+        feature = "tls-rustls-aws-lc-rs-native-roots"
+    ),
+    not(feature = "tls-native-tls")
+))]
+#[sqlx_macros::test]
+async fn connect_with_a_client_key_in_a_pkcs11_token() -> anyhow::Result<()> {
+    use sqlx::ConnectOptions;
+
+    setup_if_needed();
+    let Some((config, signatures)) = sqlx_test::pkcs11::client_config()? else {
+        return Ok(());
+    };
+
+    // The server certificate names `sqlx.test`, and the configuration verifies the name.
+    let options: PgConnectOptions = env::var("DATABASE_URL")?.parse()?;
+    let mut conn = options
+        .host("sqlx.test")
+        .hostaddr([127, 0, 0, 1])
+        .ssl_client_config(config)
+        .connect()
+        .await?;
+
+    let user: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(user, "postgres");
+    assert!(signatures.load(std::sync::atomic::Ordering::SeqCst) > 0);
+
+    Ok(())
+}
