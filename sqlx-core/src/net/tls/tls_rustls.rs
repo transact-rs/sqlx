@@ -103,7 +103,7 @@ impl<S: Socket> Socket for RustlsSocket<S> {
 
 #[derive(Debug, Clone)]
 pub struct RustlsConnector {
-    config: Arc<ClientConfig>,
+    pub(super) config: Arc<ClientConfig>,
 }
 
 pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {
@@ -514,5 +514,79 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
         server.reader().read_to_end(&mut received).unwrap();
         assert_eq!(received, b"ping");
         assert!(server.process_new_packets().unwrap().peer_has_closed());
+    }
+
+    // A prebuilt configuration is used. Its client certificate resolver answers a server that
+    // requires client authentication, with no key handed to SQLx. Modeled on the
+    // `flush_and_shutdown_do_not_wait_for_a_silent_peer` test.
+    #[cfg(not(feature = "_tls-native-tls"))]
+    #[test]
+    fn a_prebuilt_config_authenticates_through_its_resolver() {
+        let mut cx = Context::from_waker(Waker::noop());
+
+        // The client's config as `sslmode=require` builds it; loading no files, it's ready at once.
+        // Only its crypto provider is used, so the test runs with whichever one SQLx was built with.
+        let tls_config = TlsConfig {
+            accept_invalid_certs: true,
+            accept_invalid_hostnames: true,
+            root_cert_path: None,
+            client_cert_path: None,
+            client_key_path: None,
+        };
+        let Poll::Ready(Ok(RustlsConnector { config })) = pin!(connector(tls_config)).poll(&mut cx)
+        else {
+            panic!("`connector()` should be ready at once");
+        };
+        let provider = config.crypto_provider().clone();
+
+        let cert = CertificateDer::from_pem_slice(CERT.as_bytes()).unwrap();
+        let mut roots = RootCertStore::empty();
+        roots.add(cert.clone()).unwrap();
+
+        let signing_key = provider
+            .key_provider
+            .load_private_key(PrivateKeyDer::from_pem_slice(KEY.as_bytes()).unwrap())
+            .unwrap();
+        // Stands in for a resolver whose signing key lives in a token or HSM.
+        let resolver = rustls::sign::SingleCertAndKey::from(rustls::sign::CertifiedKey::new(
+            vec![cert.clone()],
+            signing_key,
+        ));
+
+        let client_config = ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots.clone())
+            .with_client_cert_resolver(Arc::new(resolver));
+
+        let RustlsConnector { config } = crate::net::tls::connector_from_prebuilt(
+            &crate::net::tls::IntoPrebuiltTlsConfig::into_prebuilt_tls_config(client_config),
+        );
+
+        let client_verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+            Arc::new(roots),
+            provider.clone(),
+        )
+        .build()
+        .unwrap();
+        let server_config = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_client_cert_verifier(client_verifier)
+            .with_single_cert(
+                vec![cert.clone()],
+                PrivateKeyDer::from_pem_slice(KEY.as_bytes()).unwrap(),
+            )
+            .unwrap();
+        let mut server = ServerConnection::new(Arc::new(server_config)).unwrap();
+        let mut client =
+            ClientConnection::new(config, ServerName::try_from("localhost").unwrap()).unwrap();
+
+        while client.is_handshaking() || server.is_handshaking() {
+            transfer(&mut client, &mut server);
+            transfer(&mut server, &mut client);
+        }
+
+        assert_eq!(server.peer_certificates(), Some(&[cert][..]));
     }
 }

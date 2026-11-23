@@ -9,7 +9,7 @@ mod parse;
 mod ssl_mode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
-use sqlx_core::net::tls::TlsConnector;
+use sqlx_core::net::tls::{IntoPrebuiltTlsConfig, PrebuiltTlsConfig, TlsConnector};
 pub use ssl_mode::MySqlSslMode;
 
 /// Options and flags which can be used to configure a MySQL connection.
@@ -98,6 +98,7 @@ pub(crate) struct SslOptions {
     pub(crate) ssl_ca: Option<CertificateInput>,
     pub(crate) ssl_client_cert: Option<CertificateInput>,
     pub(crate) ssl_client_key: Option<CertificateInput>,
+    pub(crate) ssl_client_config: Option<PrebuiltTlsConfig>,
     pub(crate) cached_connector: Arc<OnceLock<TlsConnector>>,
 }
 
@@ -119,6 +120,7 @@ impl MySqlConnectOptions {
                 ssl_ca: None,
                 ssl_client_cert: None,
                 ssl_client_key: None,
+                ssl_client_config: None,
                 cached_connector: Arc::new(OnceLock::new()),
             },
             statement_cache_capacity: 100,
@@ -327,6 +329,48 @@ impl MySqlConnectOptions {
     pub fn ssl_client_key_from_pem(mut self, key: impl AsRef<[u8]>) -> Self {
         self.ssl_options_mut().ssl_client_key =
             Some(CertificateInput::Inline(key.as_ref().to_vec()));
+        self
+    }
+
+    /// Sets a TLS client configuration built by the application.
+    ///
+    /// With Rustls, pass a `rustls::ClientConfig` (or an `Arc` of one). The configuration
+    /// decides everything about the TLS session: the crypto provider, the trust anchors, how the
+    /// server certificate is verified, and how the client authenticates. A client certificate
+    /// resolver (`rustls::client::ResolvesClientCert`) lets the private key stay in a hardware
+    /// token or HSM, which [`ssl_client_key`](Self::ssl_client_key) cannot do.
+    ///
+    /// When it is set, [`ssl_ca`](Self::ssl_ca), [`ssl_client_cert`](Self::ssl_client_cert) and
+    /// [`ssl_client_key`](Self::ssl_client_key) (and their `_from_pem` forms) are not used. The
+    /// SSL mode applies as usual to whether TLS is used; certificate and hostname verification are
+    /// whatever the configuration does.
+    ///
+    /// The server name sent and verified is the host, or
+    /// [`tls_sni_servername`](Self::tls_sni_servername) if set.
+    ///
+    /// This setting cannot be expressed in a connection URL and is left out of
+    /// [`ConnectOptions::to_url_lossy`](sqlx_core::connection::ConnectOptions::to_url_lossy).
+    ///
+    /// It requires a Rustls backend. If SQLx is also built with `tls-native-tls`, native-tls is
+    /// the backend and passing a Rustls configuration does not compile.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use std::sync::Arc;
+    /// use sqlx_mysql::MySqlConnectOptions;
+    ///
+    /// // `resolver` implements `rustls::client::ResolvesClientCert`, e.g. backed by PKCS #11.
+    /// let client_config = rustls::ClientConfig::builder()
+    ///     .with_root_certificates(roots)
+    ///     .with_client_cert_resolver(resolver);
+    ///
+    /// let options = MySqlConnectOptions::new()
+    ///     .host("db.example.com")
+    ///     .ssl_client_config(Arc::new(client_config));
+    /// ```
+    pub fn ssl_client_config(mut self, config: impl IntoPrebuiltTlsConfig) -> Self {
+        self.ssl_options_mut().ssl_client_config = Some(config.into_prebuilt_tls_config());
         self
     }
 

@@ -55,6 +55,12 @@ pub(super) async fn maybe_upgrade<S: Socket>(
 
     let connector = if let Some(c) = options.ssl_options.cached_connector.get() {
         c
+    } else if let Some(prebuilt) = &options.ssl_options.ssl_client_config {
+        let connector = tls::connector_from_prebuilt(prebuilt);
+        options
+            .ssl_options
+            .cached_connector
+            .get_or_init(|| connector)
     } else {
         let tls_config = TlsConfig {
             accept_invalid_certs: !matches!(

@@ -57,6 +57,55 @@ impl std::fmt::Display for CertificateInput {
     }
 }
 
+/// A TLS client configuration built by the application.
+///
+/// With the Rustls backend this wraps a [`rustls::ClientConfig`], so the application controls
+/// the crypto provider, the trust anchors, server certificate verification, and client
+/// authentication, including a client certificate resolver whose key never leaves a hardware
+/// token or HSM (`rustls::client::ResolvesClientCert`).
+///
+/// SQLx builds no part of the configuration: the SSL mode, root certificate, and client
+/// certificate and key options do not apply to it. It is made from a `rustls::ClientConfig` or an
+/// `Arc` of one through [`IntoPrebuiltTlsConfig`].
+///
+/// It can only be constructed when SQLx is built with one of the `tls-rustls*` features and
+/// without `tls-native-tls`. With both, native-tls is the backend, [`IntoPrebuiltTlsConfig`] has
+/// no implementations, and code that passes a Rustls configuration does not compile.
+#[derive(Clone, Debug)]
+pub struct PrebuiltTlsConfig(PrebuiltTlsConfigInner);
+
+#[derive(Clone, Debug)]
+enum PrebuiltTlsConfigInner {
+    #[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
+    Rustls(std::sync::Arc<rustls::ClientConfig>),
+}
+
+/// Converts a Rustls client configuration into a [`PrebuiltTlsConfig`].
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be used as a prebuilt TLS configuration in this build of SQLx",
+    label = "requires the Rustls TLS backend",
+    note = "a prebuilt `rustls::ClientConfig` requires a `tls-rustls*` feature without \
+            `tls-native-tls`; when both are enabled, native-tls is the TLS backend"
+)]
+pub trait IntoPrebuiltTlsConfig {
+    /// Wraps `self` for use.
+    fn into_prebuilt_tls_config(self) -> PrebuiltTlsConfig;
+}
+
+#[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
+impl IntoPrebuiltTlsConfig for std::sync::Arc<rustls::ClientConfig> {
+    fn into_prebuilt_tls_config(self) -> PrebuiltTlsConfig {
+        PrebuiltTlsConfig(PrebuiltTlsConfigInner::Rustls(self))
+    }
+}
+
+#[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
+impl IntoPrebuiltTlsConfig for rustls::ClientConfig {
+    fn into_prebuilt_tls_config(self) -> PrebuiltTlsConfig {
+        PrebuiltTlsConfig(PrebuiltTlsConfigInner::Rustls(std::sync::Arc::new(self)))
+    }
+}
+
 pub struct TlsConfig<'a> {
     pub accept_invalid_certs: bool,
     pub accept_invalid_hostnames: bool,
@@ -84,6 +133,20 @@ pub async fn connector(config: TlsConfig<'_>) -> crate::Result<TlsConnector> {
     {
         _ = config;
         panic!("one of the `runtime-*-native-tls` or `runtime-*-rustls` features must be enabled")
+    }
+}
+
+/// Returns a connector that uses a configuration prepared by the application.
+pub fn connector_from_prebuilt(config: &PrebuiltTlsConfig) -> TlsConnector {
+    // This function never fails at runtime. Without the `Rustls` variant, this match has no arms
+    // and cannot be reached. With the `IntoPrebuiltTlsConfig` impls compiled out too, no
+    // `PrebuiltTlsConfig` can be constructed and a caller passing a Rustls configuration gets
+    // the trait's `on_unimplemented` compile error at its own call site instead.
+    match config.0 {
+        #[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
+        PrebuiltTlsConfigInner::Rustls(ref config) => tls_rustls::RustlsConnector {
+            config: std::sync::Arc::clone(config),
+        },
     }
 }
 
