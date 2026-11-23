@@ -215,6 +215,10 @@ run the migrations once into a template database and create each test database f
 with `CREATE DATABASE ... TEMPLATE`. The template is named after a fingerprint of the migrations,
 so it is rebuilt automatically when they change. Tests that do not use migrations are unaffected.
 
+This is most useful when running the migrations takes a noticeable part of each test's runtime,
+e.g. dozens of migrations or ones that load data. The migrator still runs against each test database
+to validate it, but finds every migration already applied and does no further work.
+
 This is opt-in because of the following caveats:
 
 * Templates persist on the server across test runs, and are registered in `_sqlx_test.templates`.

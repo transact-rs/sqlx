@@ -205,7 +205,7 @@ macro_using_test!("tests/postgres/migrations");
 // Without it, this passes trivially: there is nothing template-specific to check.
 #[sqlx::test(migrations = "tests/postgres/migrations")]
 async fn it_clones_a_migrated_template(pool: PgPool) -> sqlx::Result<()> {
-    let enabled = std::env::var("SQLX_TEST_TEMPLATES")
+    let enabled = dotenvy::var("SQLX_TEST_TEMPLATES")
         .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
 
     if !enabled {
@@ -219,7 +219,7 @@ async fn it_clones_a_migrated_template(pool: PgPool) -> sqlx::Result<()> {
 
     assert!(post_table_exists);
 
-    let mut master = sqlx::PgConnection::connect(&std::env::var("DATABASE_URL").unwrap()).await?;
+    let mut master = sqlx::PgConnection::connect(&dotenvy::var("DATABASE_URL").unwrap()).await?;
 
     let templates: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_test.templates")
         .fetch_one(&mut master)

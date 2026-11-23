@@ -21,14 +21,16 @@ use crate::{PgConnectOptions, PgConnection, Postgres};
 
 pub(crate) use sqlx_core::testing::*;
 
-// Using a blocking `OnceLock` here because the critical sections are short.
-static MASTER_POOL: OnceLock<Pool<Postgres>> = OnceLock::new();
-// Automatically delete any databases created before the start of the test binary.
-
 // Templates not used for this long are dropped when a new one is built.
 const TEMPLATE_MAX_AGE_DAYS: i32 = 7;
 // How long to wait for the migrating connection to disappear from `pg_stat_activity`.
 const TEMPLATE_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+// magic constant 8319684163996232044 is just 8 ascii bytes 'sqlxtmpl'.
+const TEMPLATE_LOCK_ID: i64 = 8319684163996232044;
+
+// Using a blocking `OnceLock` here because the critical sections are short.
+static MASTER_POOL: OnceLock<Pool<Postgres>> = OnceLock::new();
+// Automatically delete any databases created before the start of the test binary.
 
 impl TestSupport for Postgres {
     fn test_context(
@@ -262,8 +264,8 @@ async fn ensure_template(
 ) -> Result<String, Error> {
     let template = template_name(migrator);
 
-    // magic constant 8319684163996232044 is just 8 ascii bytes 'sqlxtmpl'.
-    query("select pg_advisory_lock(8319684163996232044)")
+    query("select pg_advisory_lock($1)")
+        .bind(TEMPLATE_LOCK_ID)
         .execute(&mut *conn)
         .await?;
 
@@ -271,7 +273,8 @@ async fn ensure_template(
 
     // Always release the lock. If the connection is broken the lock goes away with the session
     // anyway, so only surface the unlock error if the build itself succeeded.
-    let unlock = query("select pg_advisory_unlock(8319684163996232044)")
+    let unlock = query("select pg_advisory_unlock($1)")
+        .bind(TEMPLATE_LOCK_ID)
         .execute(&mut *conn)
         .await;
 
