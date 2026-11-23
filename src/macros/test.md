@@ -205,6 +205,35 @@ async fn basic_test(pool: PgPool) -> sqlx::Result<()> {
 # }
 ```
 
+### Template Databases for Faster Migrations (Postgres only)
+
+By default, every `#[sqlx::test]` creates an empty database and runs all migrations in it,
+which can take a long time when there are many migrations.
+
+Set the environment variable `SQLX_TEST_TEMPLATES` to `1` or `true` (it may also be set in `.env`) to
+run the migrations once into a template database and create each test database from it
+with `CREATE DATABASE ... TEMPLATE`. The template is named after a fingerprint of the migrations,
+so it is rebuilt automatically when they change. Tests that do not use migrations are unaffected.
+
+This is opt-in because of the following caveats:
+
+* Templates persist on the server across test runs, and are registered in `_sqlx_test.templates`.
+  Whenever a new template is built, templates unused for more than 7 days are dropped.
+* Database-level settings (`ALTER DATABASE ... SET ...`) are not copied from a template.
+* Migrations run once, in the template database, so anything in them that depends on
+  `current_database()` sees the template's name, not the test database's.
+* As with normal use, the user in `DATABASE_URL` needs the `CREATEDB` privilege.
+
+To remove templates manually, drop each database listed in `_sqlx_test.templates`
+and delete its row; the next test run rebuilds what it needs:
+
+```sql
+SELECT template_name FROM _sqlx_test.templates;
+-- the template databases are not connectable, so run this from a different database:
+DROP DATABASE "<template_name>";
+DELETE FROM _sqlx_test.templates WHERE template_name = '<template_name>';
+```
+
 ### Automatic Fixture Application (requires `migrate` feature)
 
 Since tests are isolated from each other but may require data to already exist in the database to keep from growing

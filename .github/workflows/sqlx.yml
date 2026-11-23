@@ -332,6 +332,18 @@ jobs:
           SQLX_OFFLINE_DIR: .sqlx
           RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
 
+      # Run the `test-attr` test again with opt-in template databases.
+      - run: >
+          cargo test
+          --test postgres-test-attr
+          --no-default-features
+          --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }}
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/sqlx
+          SQLX_OFFLINE_DIR: .sqlx
+          SQLX_TEST_TEMPLATES: true
+          RUSTFLAGS: -D warnings --cfg postgres="${{ matrix.postgres }}"
+
       - if: matrix.tls != 'none'
         run: |
           SKIP_ARGS=()

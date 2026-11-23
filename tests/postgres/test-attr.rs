@@ -1,6 +1,6 @@
 // The no-arg variant is covered by other tests already.
 
-use sqlx::PgPool;
+use sqlx::{Connection, PgPool};
 
 const MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("tests/postgres/migrations");
 
@@ -199,3 +199,33 @@ macro_rules! macro_using_test {
     };
 }
 macro_using_test!("tests/postgres/migrations");
+
+// With `SQLX_TEST_TEMPLATES` set, the test database is cloned from a registered template
+// that already contains the migrated schema.
+// Without it, this passes trivially: there is nothing template-specific to check.
+#[sqlx::test(migrations = "tests/postgres/migrations")]
+async fn it_clones_a_migrated_template(pool: PgPool) -> sqlx::Result<()> {
+    let enabled = std::env::var("SQLX_TEST_TEMPLATES")
+        .is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+
+    if !enabled {
+        return Ok(());
+    }
+
+    let post_table_exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('public.post') IS NOT NULL")
+            .fetch_one(&pool)
+            .await?;
+
+    assert!(post_table_exists);
+
+    let mut master = sqlx::PgConnection::connect(&std::env::var("DATABASE_URL").unwrap()).await?;
+
+    let templates: i64 = sqlx::query_scalar("SELECT count(*) FROM _sqlx_test.templates")
+        .fetch_one(&mut master)
+        .await?;
+
+    assert!(templates >= 1);
+
+    Ok(())
+}
