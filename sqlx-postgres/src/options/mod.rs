@@ -402,8 +402,9 @@ impl PgConnectOptions {
     ///
     /// The server name sent and verified is the host.
     ///
-    /// This setting cannot be expressed in a connection URL and is left out of
-    /// [`ConnectOptions::to_url_lossy`](sqlx_core::connection::ConnectOptions::to_url_lossy).
+    /// The configuration cannot be expressed in a connection URL, so
+    /// [`ConnectOptions::to_url_lossy`](sqlx_core::connection::ConnectOptions::to_url_lossy) does
+    /// not include it.
     ///
     /// It requires a Rustls backend. If SQLx is also built with `tls-native-tls`, native-tls is
     /// the backend and passing a Rustls configuration does not compile.
