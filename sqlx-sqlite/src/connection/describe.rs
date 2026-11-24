@@ -7,7 +7,6 @@ use crate::type_info::DataType;
 use crate::{Sqlite, SqliteColumn};
 use sqlx_core::sql_str::SqlStr;
 use sqlx_core::Either;
-use std::convert::identity;
 
 pub(crate) fn describe(
     conn: &mut ConnectionState,
@@ -78,9 +77,8 @@ pub(crate) fn describe(
                 ty
             };
 
-            // check explain
             let col_nullable = stmt.handle.column_nullable(col)?;
-            let exp_nullable = fallback_nullable.get(col).copied().and_then(identity);
+            let exp_nullable = fallback_nullable.get(col).copied().flatten();
 
             nullable.push(exp_nullable.or(col_nullable));
 
