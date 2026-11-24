@@ -155,7 +155,10 @@ sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-aws-lc-r
 
 ### Cargo Feature Flags
 
-#### Runtimes
+Click each header to expand the section:
+
+<details>
+    <summary><h4>Runtimes</h4></summary>
 
 SQLx supports multiple async runtimes, which to our knowledge it is the only SQL client to do so.
 
@@ -189,7 +192,11 @@ for a new runtime.
 [Axum]: https://docs.rs/axum
 [Hyper]: https://docs.rs/hyper
 
-#### TLS Backends
+</details>
+
+<details>
+<summary><h4>TLS Backends</h4></summary>
+
 
 SQLx supports TLS through platform APIs with [`native-tls`] or through [`rustls`].
 
@@ -267,8 +274,10 @@ for maximum flexibility.
 [`rustls-native-certs`]: https://docs.rs/rustls-native-certs
 
 [`CryptoProvider::install_default()`]: https://docs.rs/rustls/latest/rustls/crypto/struct.CryptoProvider.html#method.install_default
+</details>
 
-#### Databases
+<details>
+<summary><h4>Databases</h4></summary>
 
 -   `postgres`: Add support for the Postgres database server.
 
@@ -289,8 +298,10 @@ for maximum flexibility.
     * Exposed as a separate feature because it's generally not enabled by default.
     * Using this feature with `sqlite-unbundled` may cause linker failures if the system SQLite version does not support it.
 
+</details>
 
-#### Optional APIs
+<details>
+<summary><h4>Optional APIs</h4></summary>
 
 -   `any`: Add support for the `Any` database driver, which can proxy to a database driver at runtime.
 
@@ -304,7 +315,10 @@ for maximum flexibility.
 
 [readme-offline]: sqlx-cli/README.md#enable-building-in-offline-mode-with-query
 
-#### Third-Party Integrations
+</details>
+
+<details>
+<summary><h4>External Crate Integrations</h4></summary>
 
 -   `uuid`: Add support for UUID.
 
@@ -323,6 +337,7 @@ for maximum flexibility.
 -   `ipnetwork`: Add support for `INET` and `CIDR` (in postgres) using the `ipnetwork` crate.
 
 -   `json`: Add support for `JSON` and `JSONB` (in postgres) using the `serde_json` crate.
+</details>
 
 ## SQLx is not an ORM!
 
