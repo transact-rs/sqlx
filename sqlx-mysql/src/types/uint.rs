@@ -1,3 +1,4 @@
+use super::int::integral_decimal_str;
 use crate::collation::Collation;
 use crate::decode::Decode;
 use crate::encode::{Encode, IsNull};
@@ -113,6 +114,17 @@ fn uint_decode(value: MySqlValueRef<'_>) -> Result<u64, BoxDynError> {
         }
 
         return Ok(value);
+    }
+
+    // DECIMAL is ASCII text even over the binary protocol (e.g. `SUM()` over
+    // integers yields one); parse the digits rather than the raw bytes.
+    if matches!(
+        value.type_info.r#type,
+        ColumnType::Decimal | ColumnType::NewDecimal
+    ) {
+        return integral_decimal_str(value.as_str()?)?
+            .parse()
+            .map_err(Into::into);
     }
 
     Ok(match value.format() {

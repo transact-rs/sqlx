@@ -846,6 +846,32 @@ async fn it_closes_statements_when_not_persistent_issue_3850() -> anyhow::Result
 }
 
 #[sqlx_macros::test]
+async fn it_closes_statements_when_caching_is_disabled_issue_4328() -> anyhow::Result<()> {
+    sqlx_test::setup_if_needed();
+
+    let mut options: PgConnectOptions = env::var("DATABASE_URL")?.parse().unwrap();
+
+    options = options.statement_cache_capacity(0);
+
+    let mut conn = PgConnection::connect_with(&options).await?;
+
+    let _row = sqlx::query("SELECT $1 AS val")
+        .bind(Oid(1))
+        .fetch_one(&mut conn)
+        .await?;
+
+    let row = sqlx::query("SELECT count(*) AS num_prepared_statements FROM pg_prepared_statements")
+        .persistent(false)
+        .fetch_one(&mut conn)
+        .await?;
+
+    let n: i64 = row.get("num_prepared_statements");
+    assert_eq!(0, n, "no prepared statements should be open");
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_sets_application_name() -> anyhow::Result<()> {
     sqlx_test::setup_if_needed();
 
@@ -1146,7 +1172,7 @@ async fn test_listener_try_recv_buffered() -> anyhow::Result<()> {
     assert!(listener.next_buffered().is_none());
 
     // Activate connection.
-    sqlx::query!("SELECT 1 AS one")
+    sqlx::query("SELECT 1 AS one")
         .fetch_all(&mut listener)
         .await?;
 
@@ -1163,6 +1189,27 @@ async fn test_listener_try_recv_buffered() -> anyhow::Result<()> {
 
     // Even if we wait.
     assert!(!try_recv(&mut listener).await?, "Notification received");
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn test_notification_on_non_listener_connection() -> anyhow::Result<()> {
+    // A connection that isn't a `PgListener` but is subscribed to a channel,
+    // as one can be when it runs `LISTEN` itself, or when a transaction-mode
+    // pooler hands it a server connection that another client subscribed.
+    let mut conn = new::<Postgres>().await?;
+    conn.execute("LISTEN test_channel3").await?;
+
+    // The server delivers the notification to the sending session too, just
+    // before `ReadyForQuery`. The query must still succeed.
+    let _: () = sqlx::query_scalar("select pg_notify('test_channel3', 'payload')")
+        .fetch_one(&mut conn)
+        .await?;
+
+    // And the connection must still be usable.
+    let value: i32 = sqlx::query_scalar("select 1").fetch_one(&mut conn).await?;
+    assert_eq!(value, 1);
 
     Ok(())
 }
@@ -1762,6 +1809,50 @@ async fn it_can_copy_out() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_can_reuse_connection_after_cancelled_copy_out() -> anyhow::Result<()> {
+    use sqlx::postgres::PgPoolCopyExt;
+    use sqlx_core::rt::timeout;
+
+    let mut setup = new::<Postgres>().await?;
+    setup
+        .execute("CREATE TABLE IF NOT EXISTS _sqlx_copy_out_cancel (id INT)")
+        .await?;
+
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    let mut lock = setup.begin().await?;
+    lock.execute("LOCK TABLE _sqlx_copy_out_cancel IN ACCESS EXCLUSIVE MODE")
+        .await?;
+
+    let copy = async {
+        let mut stream = pool
+            .copy_out_raw("COPY (SELECT id FROM _sqlx_copy_out_cancel) TO STDOUT")
+            .await?;
+        while stream.try_next().await?.is_some() {}
+        Ok::<_, sqlx::Error>(())
+    };
+    assert!(
+        timeout(Duration::from_millis(200), copy).await.is_err(),
+        "COPY should time out while the table is locked"
+    );
+
+    lock.commit().await?;
+
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
+    assert_eq!(one, 1);
+
+    let mut stream = pool
+        .copy_out_raw("COPY (SELECT id FROM _sqlx_copy_out_cancel) TO STDOUT")
+        .await?;
+    while stream.try_next().await?.is_some() {}
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_encodes_custom_array_issue_1504() -> anyhow::Result<()> {
     use sqlx::encode::IsNull;
     use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo};
@@ -1915,6 +2006,28 @@ CREATE TABLE issue_1254 (id INT4 PRIMARY KEY, pairs PAIR[]);
         .execute(&mut conn)
         .await?;
     assert_eq!(result.rows_affected(), 1);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn test_issue_4305() -> anyhow::Result<()> {
+    let mut setup = new::<Postgres>().await?;
+    setup
+        .execute(
+            "DROP TYPE IF EXISTS issue_4305 CASCADE; CREATE TYPE issue_4305 AS ENUM ('a', 'b');",
+        )
+        .await?;
+
+    // A fresh connection so the type-OID cache is cold. A non-persistent query
+    // returning a custom type used to fail with "unnamed prepared statement does
+    // not exist" (SQLSTATE 26000): resolving the type's OID runs a simple query
+    // that destroyed the just-parsed unnamed statement.
+    let mut conn = new::<Postgres>().await?;
+    sqlx::query("SELECT 'a'::issue_4305")
+        .persistent(false)
+        .fetch_one(&mut conn)
+        .await?;
 
     Ok(())
 }
@@ -2217,4 +2330,55 @@ async fn it_can_recover_from_copy_in_invalid_params() -> anyhow::Result<()> {
         "invalid_param",
     )
     .await
+}
+
+// Regression: a future cancelled while `BEGIN`'s round trip is in flight used to leave the
+// session inside a transaction. `start_rollback` is a no-op while `transaction_depth` is
+// zero, and the depth was raised only after the await, so neither drop guard queued a
+// `ROLLBACK` -- and `return_to_pool` validates with a bare `wait_until_ready` that never
+// looks at the `ReadyForQuery` transaction-status byte, so the connection was handed to the
+// next borrower with the transaction still open.
+#[sqlx_macros::test]
+async fn it_rolls_back_a_transaction_cancelled_during_begin() -> anyhow::Result<()> {
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .min_connections(0)
+        .connect(&dotenvy::var("DATABASE_URL")?)
+        .await?;
+
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&pool)
+        .await?;
+
+    // A plain `BEGIN` answers too quickly to cancel reliably; the sleep widens the same
+    // round trip so the cancellation lands inside it.
+    let cancelled = sqlx_core::rt::timeout(
+        Duration::from_millis(300),
+        pool.begin_with(AssertSqlSafe("BEGIN; SELECT pg_sleep(2);".to_string())),
+    )
+    .await;
+    assert!(cancelled.is_err(), "the begin should not have completed");
+
+    // Outlast the sleep: the queued `ROLLBACK` is only flushed once the abandoned statement
+    // has answered and the connection is on its way back to the pool.
+    sqlx_core::rt::sleep(Duration::from_millis(3500)).await;
+
+    let mut conn = new::<Postgres>().await?;
+    let state: Option<String> =
+        sqlx::query_scalar("SELECT state FROM pg_stat_activity WHERE pid = $1")
+            .bind(pid)
+            .fetch_optional(&mut conn)
+            .await?;
+
+    assert_eq!(
+        state.as_deref(),
+        Some("idle"),
+        "connection was returned to the pool still inside a transaction"
+    );
+
+    // and the pooled connection is still usable
+    let one: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
+    assert_eq!(one, 1);
+
+    Ok(())
 }

@@ -1,6 +1,3 @@
-use bytes::buf::Buf;
-use bytes::Bytes;
-
 use crate::common::StatementCache;
 use crate::connection::{tls, MySqlConnectionInner, MySqlStream, MAX_PACKET_SIZE};
 use crate::error::Error;
@@ -10,6 +7,8 @@ use crate::protocol::connect::{
 };
 use crate::protocol::Capabilities;
 use crate::{MySqlConnectOptions, MySqlConnection, MySqlSslMode};
+use bytes::buf::Buf;
+use bytes::Bytes;
 
 impl MySqlConnection {
     pub(crate) async fn establish(options: &MySqlConnectOptions) -> Result<Self, Error> {
@@ -17,7 +16,9 @@ impl MySqlConnection {
 
         let handshake = match &options.socket {
             Some(path) => crate::net::connect_uds(path, do_handshake).await?,
-            None => crate::net::connect_tcp(&options.host, options.port, do_handshake).await?,
+            None => {
+                crate::net::connect_tcp((&options.host).into(), options.port, do_handshake).await?
+            }
         };
 
         let stream = handshake?;
@@ -42,7 +43,7 @@ impl<'a> DoHandshake<'a> {
     fn new(options: &'a MySqlConnectOptions) -> Result<Self, Error> {
         if options.enable_cleartext_plugin
             && matches!(
-                options.ssl_mode,
+                options.ssl_options.ssl_mode,
                 MySqlSslMode::Disabled | MySqlSslMode::Preferred
             )
         {
@@ -63,7 +64,9 @@ impl<'a> DoHandshake<'a> {
         let handshake: Handshake = stream.recv_packet().await?.decode()?;
 
         let mut plugin = handshake.auth_plugin;
-        let nonce = handshake.auth_plugin_data;
+        // `mut`: an AuthSwitchRequest carries a fresh nonce, and the plugin's follow-up
+        // exchange (e.g. caching_sha2_password full authentication) must use it.
+        let mut nonce = handshake.auth_plugin_data;
 
         // FIXME: server version parse is a bit ugly
         // expecting MAJOR.MINOR.PATCH
@@ -130,7 +133,7 @@ impl<'a> DoHandshake<'a> {
                         packet.decode_with(self.options.enable_cleartext_plugin)?;
 
                     plugin = Some(switch.plugin);
-                    let nonce = switch.data.chain(Bytes::new());
+                    nonce = switch.data.chain(Bytes::new());
 
                     let response = switch
                         .plugin

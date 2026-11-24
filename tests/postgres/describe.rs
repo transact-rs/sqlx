@@ -42,6 +42,28 @@ async fn it_describes_expression() -> anyhow::Result<()> {
     Ok(())
 }
 
+// Regression test for launchbadge/sqlx#3541 and #4274: the query macros force a
+// generic query plan on their describe connection so that nullability inference via
+// `EXPLAIN` isn't skewed by the `NULL` placeholder arguments bound during `describe`.
+// This checks the mechanism still applies on PostgreSQL.
+//
+// The complementary half of #4274 -- skipping this on databases without `EXPLAIN`
+// support (CockroachDB, Materialize, QuestDB), where the previous `DO` block failed
+// to even parse -- cannot be exercised here, as CI runs no such database.
+#[sqlx_macros::test]
+async fn it_forces_generic_plan_for_describe() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+
+    conn.force_generic_plan_for_describe().await?;
+
+    let mode: String = sqlx::query_scalar("SHOW plan_cache_mode")
+        .fetch_one(&mut conn)
+        .await?;
+    assert_eq!(mode, "force_generic_plan");
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn it_describes_enum() -> anyhow::Result<()> {
     let mut conn = new::<Postgres>().await?;
@@ -94,6 +116,36 @@ async fn it_describes_composite() -> anyhow::Result<()> {
         format!("{:?}", ty.kind()),
         r#"Composite([("name", PgTypeInfo(Text)), ("supplier_id", PgTypeInfo(Int4)), ("price", PgTypeInfo(Int8))])"#
     );
+
+    Ok(())
+}
+
+// Regression test for #4497: resolving one custom type could drop other
+// pending dependencies, leaving them unresolved on a cold type cache.
+#[sqlx_macros::test]
+async fn it_describes_nested_custom_types() -> anyhow::Result<()> {
+    let mut conn = new::<Postgres>().await?;
+    conn.execute(
+        r#"
+DROP TYPE IF EXISTS issue_4497_holder CASCADE;
+DROP TYPE IF EXISTS issue_4497_pair CASCADE;
+DROP TYPE IF EXISTS issue_4497_leaf_b CASCADE;
+DROP TYPE IF EXISTS issue_4497_leaf_a CASCADE;
+
+CREATE TYPE issue_4497_leaf_a AS (x int4);
+CREATE TYPE issue_4497_leaf_b AS (y int4);
+CREATE TYPE issue_4497_pair AS (a issue_4497_leaf_a, b issue_4497_leaf_b);
+CREATE TYPE issue_4497_holder AS (items issue_4497_leaf_a[]);
+"#,
+    )
+    .await?;
+
+    // A fresh connection so the type-OID cache is cold.
+    let mut conn = new::<Postgres>().await?;
+    conn.describe(
+        "SELECT NULL::issue_4497_pair[] AS pairs, NULL::issue_4497_holder AS holder".into_sql_str(),
+    )
+    .await?;
 
     Ok(())
 }

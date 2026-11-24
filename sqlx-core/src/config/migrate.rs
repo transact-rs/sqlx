@@ -114,8 +114,45 @@ pub struct Config {
     // Likely lower overhead for small sets than `HashSet`.
     pub ignored_chars: BTreeSet<char>,
 
+    /// Specify what to do with a `.sql` file in the migrations directory whose name does not
+    /// parse as `<VERSION>_<DESCRIPTION>.sql`.
+    ///
+    /// Defaults to `error`, since such a file is usually a migration that was named incorrectly
+    /// and would otherwise be skipped without any indication that it did not run.
+    ///
+    /// Set this to `warn` or `ignore` if you deliberately keep other SQL scripts alongside your
+    /// migrations. Files that don't end in `.sql` are always ignored regardless of this setting.
+    ///
+    /// ### Example
+    /// `sqlx.toml`:
+    /// ```toml
+    /// [migrate]
+    /// unrecognized-sql-files = "warn"
+    /// ```
+    pub unrecognized_sql_files: UnrecognizedSqlFiles,
+
     /// Specify default options for new migrations created with `sqlx migrate add`.
     pub defaults: MigrationDefaults,
+}
+
+/// What to do with a `.sql` file in the migrations directory that doesn't parse as
+/// `<VERSION>_<DESCRIPTION>.sql`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "sqlx-toml",
+    derive(serde::Deserialize),
+    serde(rename_all = "snake_case")
+)]
+pub enum UnrecognizedSqlFiles {
+    /// Return an error naming the file. The default.
+    #[default]
+    Error,
+
+    /// Log a warning naming the file and skip it.
+    Warn,
+
+    /// Skip the file without any output.
+    Ignore,
 }
 
 #[derive(Debug, Default)]
@@ -207,6 +244,7 @@ impl Config {
     pub fn to_resolve_config(&self) -> crate::migrate::ResolveConfig {
         let mut config = crate::migrate::ResolveConfig::new();
         config.ignore_chars(self.ignored_chars.iter().copied());
+        config.unrecognized_sql_files(self.unrecognized_sql_files);
         config
     }
 }

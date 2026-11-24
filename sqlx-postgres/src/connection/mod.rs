@@ -107,7 +107,7 @@ impl PgConnection {
         Ok(())
     }
 
-    async fn recv_ready_for_query(&mut self) -> Result<(), Error> {
+    pub(crate) async fn recv_ready_for_query(&mut self) -> Result<(), Error> {
         let r: ReadyForQuery = self.inner.stream.recv_expect().await?;
 
         self.inner.pending_ready_for_query_count -= 1;
@@ -145,6 +145,31 @@ impl PgConnection {
             TransactionStatus::Transaction => true,
             TransactionStatus::Error | TransactionStatus::Idle => false,
         }
+    }
+
+    pub(crate) async fn invalidate_cached_statement(
+        &mut self,
+        sql: &str,
+        backend: bool,
+    ) -> Result<(), Error> {
+        self.wait_until_ready().await?;
+
+        let Some((statement_id, _)) = self.inner.cache_statement.remove(sql) else {
+            return Ok(());
+        };
+
+        if backend {
+            self.inner
+                .stream
+                .write_msg(Close::Statement(statement_id))?;
+            self.write_sync();
+            self.inner.stream.flush().await?;
+
+            self.wait_for_close_complete(1).await?;
+            self.recv_ready_for_query().await?;
+        }
+
+        Ok(())
     }
 }
 

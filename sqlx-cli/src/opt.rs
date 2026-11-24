@@ -16,7 +16,6 @@ use std::path::PathBuf;
 const HELP_STYLES: Styles = Styles::styled()
     .header(AnsiColor::Blue.on_default().bold())
     .usage(AnsiColor::Blue.on_default().bold())
-    .literal(AnsiColor::White.on_default())
     .placeholder(AnsiColor::Green.on_default());
 
 #[derive(Parser, Debug)]

@@ -2,11 +2,6 @@ use std::collections::BTreeMap;
 use std::ops::{ControlFlow, Deref, DerefMut};
 use std::str::FromStr;
 
-use futures_channel::mpsc::UnboundedSender;
-use futures_util::SinkExt;
-use log::Level;
-use sqlx_core::bytes::Buf;
-
 use crate::connection::tls::MaybeUpgradeTls;
 use crate::error::Error;
 use crate::message::{
@@ -15,6 +10,10 @@ use crate::message::{
 };
 use crate::net::{self, BufferedSocket, Socket};
 use crate::{PgConnectOptions, PgDatabaseError, PgSeverity};
+use futures_channel::mpsc::UnboundedSender;
+use futures_util::SinkExt;
+use log::Level;
+use sqlx_core::bytes::Buf;
 
 // the stream is a separate type from the connection to uphold the invariant where an instantiated
 // [PgConnection] is a **valid** connection to postgres
@@ -42,9 +41,18 @@ pub struct PgStream {
 
 impl PgStream {
     pub(super) async fn connect(options: &PgConnectOptions) -> Result<Self, Error> {
-        let socket_result = match options.fetch_socket() {
+        let socket_result = match options.make_socket_path() {
             Some(ref path) => net::connect_uds(path, MaybeUpgradeTls(options)).await?,
-            None => net::connect_tcp(&options.host, options.port, MaybeUpgradeTls(options)).await?,
+            None => {
+                net::connect_tcp(
+                    options
+                        .hostaddr
+                        .map_or_else(|| (&options.host).into(), Into::into),
+                    options.port,
+                    MaybeUpgradeTls(options),
+                )
+                .await?
+            }
         };
 
         let socket = socket_result?;
@@ -134,9 +142,13 @@ impl PgStream {
                     if let Some(buffer) = &mut self.notifications {
                         let notification: Notification = message.decode()?;
                         let _ = buffer.send(notification).await;
-
-                        continue;
                     }
+
+                    // The server may send a notification at any time, e.g. to
+                    // a connection that ran `LISTEN` itself, or behind a
+                    // transaction-mode pooler that shares one that did.
+                    // A connection that isn't a `PgListener` drops it.
+                    continue;
                 }
 
                 BackendMessageFormat::ParameterStatus => {

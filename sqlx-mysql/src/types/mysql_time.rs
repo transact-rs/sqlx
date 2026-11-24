@@ -213,7 +213,7 @@ impl MySqlTime {
 
     /// Returns `true` if `self` is negative, `false` if positive or zero.
     pub fn is_negative(&self) -> bool {
-        self.sign.is_positive()
+        self.sign.is_negative()
     }
 
     /// Returns `true` if this interval is a valid time-of-day.
@@ -689,6 +689,13 @@ mod tests {
         assert_eq!(format!("{negative:.3}"), "-123:45:56.890");
         assert_eq!(format!("{negative:.6}"), "-123:45:56.890011");
         assert_eq!(format!("{negative:.9}"), "-123:45:56.890011000");
+    }
+
+    #[test]
+    fn test_is_negative() {
+        assert!(!MySqlTime::ZERO.is_negative());
+        assert!(!MySqlTime::MAX.is_negative());
+        assert!(MySqlTime::MIN.is_negative());
     }
 
     #[test]

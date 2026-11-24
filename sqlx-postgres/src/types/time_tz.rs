@@ -74,7 +74,16 @@ mod chrono {
                     let us = buf.read_i64::<BigEndian>()?;
                     // default is midnight, there is a canary test for this
                     // in `sqlx-postgres/src/types/chrono/time.rs`
-                    let time = NaiveTime::default() + Duration::microseconds(us);
+                    let (time, overflow) =
+                        NaiveTime::default().overflowing_add_signed(Duration::microseconds(us));
+
+                    // Postgres allows `24:00:00`, which would otherwise wrap around to midnight
+                    if overflow != 0 {
+                        return Err(format!(
+                            "Postgres TIMETZ out of range for NaiveTime: {us} microseconds from midnight"
+                        )
+                        .into());
+                    }
 
                     // OFFSET is encoded as seconds from UTC
                     let offset_seconds = buf.read_i32::<BigEndian>()?;
@@ -154,7 +163,17 @@ mod time {
 
                     // TIME is encoded as the microseconds since midnight
                     let us = buf.read_i64::<BigEndian>()?;
-                    let time = Time::MIDNIGHT + Duration::microseconds(us);
+                    let duration = Duration::microseconds(us);
+
+                    // Postgres allows `24:00:00`, which would otherwise wrap around to midnight
+                    if !(Duration::ZERO..Duration::DAY).contains(&duration) {
+                        return Err(format!(
+                            "Postgres TIMETZ out of range for Time: {us} microseconds from midnight"
+                        )
+                        .into());
+                    }
+
+                    let time = Time::MIDNIGHT + duration;
 
                     // OFFSET is encoded as seconds from UTC
                     let seconds = buf.read_i32::<BigEndian>()?;

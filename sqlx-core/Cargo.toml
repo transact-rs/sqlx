@@ -29,6 +29,7 @@ _rt-tokio = ["tokio", "tokio-stream"]
 
 _tls-native-tls = ["native-tls"]
 _tls-rustls-aws-lc-rs = ["_tls-rustls", "rustls/aws-lc-rs", "webpki-roots"]
+_tls-rustls-aws-lc-rs-native-roots = ["_tls-rustls", "rustls/aws-lc-rs", "rustls-native-certs"]
 _tls-rustls-ring-webpki = ["_tls-rustls", "rustls/ring", "webpki-roots"]
 _tls-rustls-ring-native-roots = ["_tls-rustls", "rustls/ring", "rustls-native-certs"]
 _tls-rustls = ["rustls"]
@@ -98,14 +99,15 @@ tracing = { version = "0.1.37", features = ["log"] }
 smallvec = "1.13.1"
 url = { version = "2.2.2" }
 bstr = { version = "1.0.1", default-features = false, features = ["std"], optional = true }
-hashlink = "0.11.0"
+hashlink = "0.12.0"
 indexmap = "2.0"
 event-listener = "5.2.0"
-hashbrown = "0.16.0"
+hashbrown = "0.17.0"
 
 thiserror.workspace = true
 
 [dev-dependencies]
+tempfile = "3.10.1"
 tokio = { version = "1.25.0", features = ["rt"] }
 
 [dev-dependencies.sqlx]

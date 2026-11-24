@@ -62,6 +62,13 @@ impl MySqlBufExt for Bytes {
         let size = usize::try_from(size)
             .map_err(|_| err_protocol!("string length overflows usize: {size}"))?;
 
+        if size > self.remaining() {
+            return Err(err_protocol!(
+                "length-encoded string declares {size} bytes but only {} bytes remain",
+                self.remaining()
+            ));
+        }
+
         self.get_str(size)
     }
 
@@ -70,6 +77,54 @@ impl MySqlBufExt for Bytes {
         let size = usize::try_from(size)
             .map_err(|_| err_protocol!("string length overflows usize: {size}"))?;
 
+        if size > self.remaining() {
+            return Err(err_protocol!(
+                "length-encoded byte string declares {size} bytes but only {} bytes remain",
+                self.remaining()
+            ));
+        }
+
         Ok(self.split_to(size))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_str_lenenc_reads_within_bounds() {
+        let mut buf = Bytes::from_static(&[3, b'a', b'b', b'c']);
+
+        assert_eq!(buf.get_str_lenenc().unwrap(), "abc");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn get_str_lenenc_rejects_oversized_length() {
+        // 0xfc prefixed length of 0x0100 (256) but only 3 bytes of data
+        let mut buf = Bytes::from_static(&[0xfc, 0x00, 0x01, b'a', b'b', b'c']);
+
+        let err = buf.get_str_lenenc().unwrap_err();
+
+        assert!(err.to_string().contains("256 bytes"), "{err}");
+    }
+
+    #[test]
+    fn get_bytes_lenenc_reads_within_bounds() {
+        let mut buf = Bytes::from_static(&[3, b'a', b'b', b'c']);
+
+        assert_eq!(&*buf.get_bytes_lenenc().unwrap(), b"abc");
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn get_bytes_lenenc_rejects_oversized_length() {
+        // 0xfc prefixed length of 0xffff (65535) but only 1 byte of data
+        let mut buf = Bytes::from_static(&[0xfc, 0xff, 0xff, b'a']);
+
+        let err = buf.get_bytes_lenenc().unwrap_err();
+
+        assert!(err.to_string().contains("65535 bytes"), "{err}");
     }
 }

@@ -90,7 +90,29 @@ impl Encode<'_, MySql> for i64 {
     }
 }
 
+/// Integer part of a textual `DECIMAL`, erroring if it has a nonzero fraction.
+pub(super) fn integral_decimal_str(s: &str) -> Result<&str, BoxDynError> {
+    let (int_part, frac_part) = s.split_once('.').unwrap_or((s, ""));
+
+    if frac_part.bytes().any(|b| b != b'0') {
+        return Err(format!("DECIMAL value `{s}` has a fractional part").into());
+    }
+
+    Ok(int_part)
+}
+
 fn int_decode(value: MySqlValueRef<'_>) -> Result<i64, BoxDynError> {
+    // DECIMAL is ASCII text even over the binary protocol, so parse the digits
+    // instead of reading the bytes as a little-endian integer.
+    if matches!(
+        value.type_info.r#type,
+        ColumnType::Decimal | ColumnType::NewDecimal
+    ) {
+        return integral_decimal_str(value.as_str()?)?
+            .parse()
+            .map_err(Into::into);
+    }
+
     Ok(match value.format() {
         MySqlValueFormat::Text => value.as_str()?.parse()?,
         MySqlValueFormat::Binary => {

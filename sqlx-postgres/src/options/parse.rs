@@ -75,8 +75,7 @@ impl PgConnectOptions {
                 }
 
                 "hostaddr" => {
-                    value.parse::<IpAddr>().map_err(Error::config)?;
-                    options = options.host(&value)
+                    options = options.hostaddr(value.parse::<IpAddr>().map_err(Error::config)?);
                 }
 
                 "port" => options = options.port(value.parse().map_err(Error::config)?),
@@ -114,18 +113,20 @@ impl PgConnectOptions {
     }
 
     pub(crate) fn build_url(&self) -> Url {
-        let host = match &self.socket {
+        let url_raw = match &self.socket {
             Some(socket) => {
-                utf8_percent_encode(&socket.to_string_lossy(), NON_ALPHANUMERIC).to_string()
+                format!(
+                    "postgres://{}@{}:{}",
+                    self.username,
+                    utf8_percent_encode(&socket.to_string_lossy(), NON_ALPHANUMERIC),
+                    self.port
+                )
             }
-            None => self.host.to_owned(),
+            None => format!("postgres://{}@{}:{}", self.username, self.host, self.port),
         };
 
-        let mut url = Url::parse(&format!(
-            "postgres://{}@{}:{}",
-            self.username, host, self.port
-        ))
-        .expect("BUG: generated un-parseable URL");
+        let mut url = Url::parse(&url_raw)
+            .unwrap_or_else(|e| panic!("BUG: generated un-parseable URL {url_raw:?}; error: {e}"));
 
         if let Some(password) = &self.password {
             let password = utf8_percent_encode(password, NON_ALPHANUMERIC).to_string();
@@ -136,7 +137,13 @@ impl PgConnectOptions {
             url.set_path(database);
         }
 
-        let ssl_mode = match self.ssl_mode {
+        let mut url_query = url.query_pairs_mut();
+
+        if let Some(hostaddr) = self.hostaddr {
+            url_query.append_pair("hostaddr", &hostaddr.to_string());
+        }
+
+        let ssl_mode = match self.ssl_options.ssl_mode {
             PgSslMode::Allow => "allow",
             PgSslMode::Disable => "disable",
             PgSslMode::Prefer => "prefer",
@@ -144,27 +151,29 @@ impl PgConnectOptions {
             PgSslMode::VerifyCa => "verify-ca",
             PgSslMode::VerifyFull => "verify-full",
         };
-        url.query_pairs_mut().append_pair("sslmode", ssl_mode);
 
-        if let Some(ssl_root_cert) = &self.ssl_root_cert {
-            url.query_pairs_mut()
-                .append_pair("sslrootcert", &ssl_root_cert.to_string());
+        url_query.append_pair("sslmode", ssl_mode);
+
+        if let Some(ssl_root_cert) = &self.ssl_options.ssl_root_cert {
+            url_query.append_pair("sslrootcert", &ssl_root_cert.to_string());
         }
 
-        if let Some(ssl_client_cert) = &self.ssl_client_cert {
-            url.query_pairs_mut()
-                .append_pair("sslcert", &ssl_client_cert.to_string());
+        if let Some(ssl_client_cert) = &self.ssl_options.ssl_client_cert {
+            url_query.append_pair("sslcert", &ssl_client_cert.to_string());
         }
 
-        if let Some(ssl_client_key) = &self.ssl_client_key {
-            url.query_pairs_mut()
-                .append_pair("sslkey", &ssl_client_key.to_string());
+        if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
+            url_query.append_pair("sslkey", &ssl_client_key.to_string());
         }
 
-        url.query_pairs_mut().append_pair(
+        url_query.append_pair(
             "statement-cache-capacity",
             &self.statement_cache_capacity.to_string(),
         );
+
+        url_query.finish();
+
+        drop(url_query);
 
         url
     }
@@ -194,7 +203,7 @@ fn it_parses_host_correctly_from_parameter() {
     let opts = PgConnectOptions::from_str(url).unwrap();
 
     assert_eq!(None, opts.socket);
-    assert_eq!("google.database.com", &opts.host);
+    assert_eq!("google.database.com", opts.host.original());
 }
 
 #[test]
@@ -203,7 +212,8 @@ fn it_parses_hostaddr_correctly_from_parameter() {
     let opts = PgConnectOptions::from_str(url).unwrap();
 
     assert_eq!(None, opts.socket);
-    assert_eq!("8.8.8.8", &opts.host);
+    assert_eq!("localhost", opts.host.original());
+    assert_eq!(Some("8.8.8.8".parse().unwrap()), opts.hostaddr);
 }
 
 #[test]
@@ -339,4 +349,21 @@ fn built_url_can_be_parsed() {
     let parsed = PgConnectOptions::from_str(opts.build_url().as_ref());
 
     assert!(parsed.is_ok());
+}
+
+#[test]
+fn ipv6_url_round_trips() {
+    let url = "postgres://username:p%40ssw0rd@[2001:db8::1]:5432/database";
+
+    let opts = PgConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(opts.host.original(), "[2001:db8::1]");
+    assert_eq!(opts.host.stripped(), "2001:db8::1");
+
+    assert_eq!(
+        opts.build_url().as_str(),
+        // `build_url()` adds some parameters that weren't in the URL originally,
+        // but this should not be harmful
+        "postgres://username:p%40ssw0rd@[2001:db8::1]:5432/database?sslmode=prefer&statement-cache-capacity=100"
+    );
 }

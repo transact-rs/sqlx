@@ -2,7 +2,7 @@ use sqlx::error::DatabaseError;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteError};
 use sqlx::TypeInfo;
 use sqlx::{sqlite::Sqlite, Column, Executor};
-use sqlx::{ConnectOptions, SqlSafeStr};
+use sqlx::{ConnectOptions, Connection, SqlSafeStr, SqliteConnection};
 use sqlx_test::new;
 use std::env;
 
@@ -1092,6 +1092,39 @@ async fn it_describes_analytical_function() -> anyhow::Result<()> {
         .await?;
     assert_eq!(d.column(0).type_info().name(), "TEXT");
     assert_eq!(d.nullable(0), Some(true));
+
+    Ok(())
+}
+
+// A column declared with no type at all, e.g. `CREATE TABLE foo (bar PRIMARY KEY)`, is
+// legal SQLite. `sqlite3_table_column_metadata()` reports a NULL declared type for such a
+// column, which `column_nullable()` used to dereference unconditionally, segfaulting the
+// process, and thus rustc itself when the `query!()` macros describe a live database.
+#[sqlx_macros::test]
+async fn it_describes_columns_with_no_declared_type() -> anyhow::Result<()> {
+    let mut conn = SqliteConnection::connect(":memory:").await?;
+
+    conn.execute(
+        r#"
+        CREATE TABLE untyped (
+            id PRIMARY KEY,
+            typeless,
+            typed TEXT NOT NULL
+        );
+        "#
+        .into_sql_str(),
+    )
+    .await?;
+
+    let d = conn
+        .describe("SELECT id, typeless, typed FROM untyped".into_sql_str())
+        .await?;
+
+    // A `PRIMARY KEY` with no declared type is not an `INTEGER PRIMARY KEY`, so it is not a
+    // rowid alias and SQLite does permit NULLs in it.
+    assert_eq!(d.nullable(0), Some(true));
+    assert_eq!(d.nullable(1), Some(true));
+    assert_eq!(d.nullable(2), Some(false));
 
     Ok(())
 }

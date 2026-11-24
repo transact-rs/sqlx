@@ -83,6 +83,7 @@ pub enum ColumnType {
     Year = 0x0d,
     VarChar = 0x0f,
     Bit = 0x10,
+    Vector = 0xf2,
     Json = 0xf5,
     NewDecimal = 0xf6,
     Enum = 0xf7,
@@ -202,6 +203,7 @@ impl ColumnType {
             ColumnType::Decimal | ColumnType::NewDecimal => "DECIMAL",
             ColumnType::Geometry => "GEOMETRY",
             ColumnType::Json => "JSON",
+            ColumnType::Vector => "VECTOR",
 
             ColumnType::String if is_binary => "BINARY",
             ColumnType::String if is_enum => "ENUM",
@@ -246,6 +248,7 @@ impl ColumnType {
             // [internal] 0x11 => ColumnType::Timestamp2,
             // [internal] 0x12 => ColumnType::Datetime2,
             // [internal] 0x13 => ColumnType::Time2,
+            0xf2 => ColumnType::Vector,
             0xf5 => ColumnType::Json,
             0xf6 => ColumnType::NewDecimal,
             0xf7 => ColumnType::Enum,
@@ -262,5 +265,32 @@ impl ColumnType {
                 return Err(err_protocol!("unknown column type 0x{:02x}", id));
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_a_mysql_9_vector_column() {
+        // catalog "def", empty schema/table, alias and name "v", then the
+        // fixed-length fields: collation 63 (binary), max size 12, type 0xf2
+        // (VECTOR), flags BINARY, 0 decimals and two filler bytes.
+        let mut packet = vec![3, b'd', b'e', b'f', 0, 0, 0, 1, b'v', 1, b'v', 0x0c];
+        packet.extend_from_slice(&63u16.to_le_bytes());
+        packet.extend_from_slice(&12u32.to_le_bytes());
+        packet.push(0xf2);
+        packet.extend_from_slice(&ColumnFlags::BINARY.bits().to_le_bytes());
+        packet.extend_from_slice(&[0, 0, 0]);
+
+        let column =
+            ColumnDefinition::decode_with(Bytes::from(packet), Capabilities::empty()).unwrap();
+
+        assert_eq!(column.r#type, ColumnType::Vector);
+        assert_eq!(
+            column.r#type.name(column.flags, Some(column.max_size)),
+            "VECTOR"
+        );
     }
 }

@@ -435,6 +435,15 @@ async fn recv_result_metadata(
     // the result-set metadata is primarily a listing of each output
     // column in the result-set
 
+    // MySQL (and MariaDB) enforce a hard limit of 4096 columns per result set;
+    // reject larger claimed counts before they are used to size allocations,
+    // as a hostile server could otherwise force an arbitrarily large allocation
+    if num_columns > 4096 {
+        return Err(err_protocol!(
+            "result-set metadata claims {num_columns} columns but the maximum supported is 4096"
+        ));
+    }
+
     let mut column_names = HashMap::with_capacity(num_columns);
 
     columns.clear();

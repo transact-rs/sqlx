@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::executor::Executor;
 use crate::io::StatementId;
 use crate::query_as::query_as;
 use crate::statement::PgStatementMetadata;
@@ -16,6 +17,29 @@ impl PgConnection {
         let is_materialize = parameter_statuses.contains_key("mz_version");
         let is_questdb = parameter_statuses.contains_key("questdb_version");
         !is_cockroachdb && !is_materialize && !is_questdb
+    }
+
+    /// Prepare a freshly-opened connection that the query macros use for `describe`.
+    ///
+    /// Forces a generic query plan so that nullability inference via `EXPLAIN` reflects
+    /// the real query shape, rather than a plan specialized for the `NULL` placeholder
+    /// arguments bound while describing a statement.
+    /// See <https://github.com/launchbadge/sqlx/pull/3541>.
+    ///
+    /// Gated on `is_explain_available()`: the setting only matters for the `EXPLAIN`-based
+    /// inference, which is skipped on databases that don't support it -- CockroachDB,
+    /// Materialize and QuestDB -- and on the server version, as `plan_cache_mode` was only
+    /// introduced in PostgreSQL 12. Issuing it unconditionally previously broke the macros
+    /// against CockroachDB, which rejects `SET` inside the `DO` block this used to run
+    /// (`SQLSTATE 0A000`). See <https://github.com/launchbadge/sqlx/issues/4274>.
+    #[doc(hidden)]
+    pub async fn force_generic_plan_for_describe(&mut self) -> Result<(), Error> {
+        if self.is_explain_available() && self.server_version_num().is_some_and(|v| v >= 120_000) {
+            self.execute("SET plan_cache_mode = 'force_generic_plan'")
+                .await?;
+        }
+
+        Ok(())
     }
 
     pub(crate) async fn get_nullable_for_columns(

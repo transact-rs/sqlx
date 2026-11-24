@@ -133,26 +133,30 @@ SQLx is compatible with the [`async-std`], [`tokio`], and [`actix`] runtimes; an
 # PICK ONE OF THE FOLLOWING:
 
 # tokio (no TLS)
-sqlx = { version = "0.8", features = [ "runtime-tokio" ] }
+sqlx = { version = "0.9", features = [ "runtime-tokio" ] }
 # tokio + native-tls
-sqlx = { version = "0.8", features = [ "runtime-tokio", "tls-native-tls" ] }
+sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-native-tls" ] }
 # tokio + rustls with ring and WebPKI CA certificates
-sqlx = { version = "0.8", features = [ "runtime-tokio", "tls-rustls-ring-webpki" ] }
+sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-ring-webpki" ] }
 # tokio + rustls with ring and platform's native CA certificates
-sqlx = { version = "0.8", features = [ "runtime-tokio", "tls-rustls-ring-native-roots" ] }
-# tokio + rustls with aws-lc-rs
-sqlx = { version = "0.8", features = [ "runtime-tokio", "tls-rustls-aws-lc-rs" ] }
+sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-ring-native-roots" ] }
+# tokio + rustls with aws-lc-rs and WebPKI CA certificates
+sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-aws-lc-rs" ] }
+# tokio + rustls with aws-lc-rs and platform's native CA certificates
+sqlx = { version = "0.9", features = [ "runtime-tokio", "tls-rustls-aws-lc-rs-native-roots" ] }
 
 # async-std (no TLS)
-sqlx = { version = "0.8", features = [ "runtime-async-std" ] }
+sqlx = { version = "0.9", features = [ "runtime-async-std" ] }
 # async-std + native-tls
-sqlx = { version = "0.8", features = [ "runtime-async-std", "tls-native-tls" ] }
+sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-native-tls" ] }
 # async-std + rustls with ring and WebPKI CA certificates
-sqlx = { version = "0.8", features = [ "runtime-async-std", "tls-rustls-ring-webpki" ] }
+sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-ring-webpki" ] }
 # async-std + rustls with ring and platform's native CA certificates
-sqlx = { version = "0.8", features = [ "runtime-async-std", "tls-rustls-ring-native-roots" ] }
-# async-std + rustls with aws-lc-rs
-sqlx = { version = "0.8", features = [ "runtime-async-std", "tls-rustls-aws-lc-rs" ] }
+sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-ring-native-roots" ] }
+# async-std + rustls with aws-lc-rs and WebPKI CA certificates
+sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-aws-lc-rs" ] }
+# async-std + rustls with aws-lc-rs and platform's native CA certificates
+sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-aws-lc-rs-native-roots" ] }
 ```
 
 #### Cargo Feature Flags
@@ -172,7 +176,8 @@ be removed in the future.
 -   `tls-native-tls`: Use the `native-tls` TLS backend (OpenSSL on *nix, SChannel on Windows, Secure Transport on macOS).
 
 -   `tls-rustls`: Use the `rustls` TLS backend (cross-platform backend, only supports TLS 1.2 and 1.3).
--   `tls-rustls-aws-lc-rs`: Use the `rustls` TLS backend with `aws-lc-rs`.
+-   `tls-rustls-aws-lc-rs`: Use the `rustls` TLS backend with `aws-lc-rs` and bundled WebPKI CA certificates.
+-   `tls-rustls-aws-lc-rs-native-roots`: Use the `rustls` TLS backend with `aws-lc-rs` and the platform's native CA certificates.
 
 -   `postgres`: Add support for the Postgres database server.
 

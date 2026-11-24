@@ -1,6 +1,11 @@
 #![cfg(sqlite_test_sqlcipher)]
 
+// Explicitly close every connection before opening the next one or returning from a test.
+// Dropping a connection only signals its worker to stop; its cleanup can otherwise race
+// SQLCipher's process-exit cleanup and cause a segfault.
+
 use std::str::FromStr;
+use std::sync::Arc;
 
 use sqlx::sqlite::SqliteQueryResult;
 use sqlx::{query, Connection, SqliteConnection};
@@ -56,16 +61,19 @@ async fn it_encrypts() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     // Create another connection without key, query should fail
     let mut conn = SqliteConnectOptions::from_str(&url)?.connect().await?;
 
-    assert!(conn
+    let result = conn
         .transaction(|tx| {
             Box::pin(async move { query("SELECT * FROM Company;").fetch_all(&mut **tx).await })
         })
-        .await
-        .is_err());
+        .await;
+    conn.close().await?;
+
+    assert!(result.is_err());
 
     Ok(())
 }
@@ -81,6 +89,7 @@ async fn it_can_store_and_read_encrypted_data() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     // Create another connection with valid key
     let mut conn = SqliteConnectOptions::from_str(&url)?
@@ -93,6 +102,7 @@ async fn it_can_store_and_read_encrypted_data() -> anyhow::Result<()> {
             Box::pin(async move { query("SELECT * FROM Company;").fetch_all(&mut **tx).await })
         })
         .await?;
+    conn.close().await?;
 
     assert!(result.len() > 0);
 
@@ -110,6 +120,7 @@ async fn it_fails_if_password_is_incorrect() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     // Connection with invalid key should not allow to execute queries
     let mut conn = SqliteConnectOptions::from_str(&url)?
@@ -117,12 +128,14 @@ async fn it_fails_if_password_is_incorrect() -> anyhow::Result<()> {
         .connect()
         .await?;
 
-    assert!(conn
+    let result = conn
         .transaction(|tx| {
             Box::pin(async move { query("SELECT * FROM Company;").fetch_all(&mut **tx).await })
         })
-        .await
-        .is_err());
+        .await;
+    conn.close().await?;
+
+    assert!(result.is_err());
 
     Ok(())
 }
@@ -148,6 +161,7 @@ async fn it_honors_order_of_encryption_pragmas() -> anyhow::Result<()> {
         .await?;
 
     fill_db(&mut conn).await?;
+    conn.close().await?;
 
     let mut conn = SqliteConnectOptions::from_str(&url)?
         .pragma("dummy", "pragma")
@@ -164,6 +178,7 @@ async fn it_honors_order_of_encryption_pragmas() -> anyhow::Result<()> {
             Box::pin(async move { query("SELECT * FROM COMPANY;").fetch_all(&mut **tx).await })
         })
         .await?;
+    conn.close().await?;
 
     assert!(result.len() > 0);
 
@@ -186,6 +201,7 @@ async fn it_allows_to_rekey_the_db() -> anyhow::Result<()> {
     query("PRAGMA rekey = new_password;")
         .execute(&mut conn)
         .await?;
+    conn.close().await?;
 
     let mut conn = SqliteConnectOptions::from_str(&url)?
         .pragma("dummy", "pragma")
@@ -198,8 +214,35 @@ async fn it_allows_to_rekey_the_db() -> anyhow::Result<()> {
             Box::pin(async move { query("SELECT * FROM COMPANY;").fetch_all(&mut **tx).await })
         })
         .await?;
+    conn.close().await?;
 
     assert!(result.len() > 0);
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_closes_the_encrypted_database() -> anyhow::Result<()> {
+    let (url, _dir) = new_db_url().await?;
+    let mut conn = SqliteConnectOptions::from_str(&url)?
+        .pragma("key", "the_password")
+        .create_if_missing(true)
+        .connect()
+        .await?;
+
+    // SQLite destroys collations during sqlite3_close(), so this detects whether
+    // close().await has actually released the database handle.
+    let drop_check = Arc::new(std::cmp::Ordering::Equal);
+    let weak = Arc::downgrade(&drop_check);
+    conn.lock_handle()
+        .await?
+        .create_collation("close_check", move |_, _| *drop_check)?;
+
+    fill_db(&mut conn).await?;
+    assert!(weak.upgrade().is_some());
+
+    conn.close().await?;
+    assert!(weak.upgrade().is_none());
 
     Ok(())
 }

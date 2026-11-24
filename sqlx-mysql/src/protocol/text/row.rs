@@ -17,6 +17,13 @@ impl<'de> ProtocolDecode<'de, &'de [MySqlColumn]> for TextRow {
         let mut values = Vec::with_capacity(columns.len());
 
         for c in columns {
+            if buf.is_empty() {
+                return Err(err_protocol!(
+                    "buffer exhausted when reading data for column {:?}; expected a length-encoded value or NULL marker, but no bytes remain in buffer. Malformed packet or protocol error?",
+                    c
+                ));
+            }
+
             if buf[0] == 0xfb {
                 // NULL is sent as 0xfb
                 values.push(None);
@@ -42,5 +49,55 @@ impl<'de> ProtocolDecode<'de, &'de [MySqlColumn]> for TextRow {
         }
 
         Ok(TextRow(Row { values, storage }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ext::ustr::UStr;
+    use crate::protocol::text::ColumnType;
+    use crate::MySqlTypeInfo;
+    use sqlx_core::column::ColumnOrigin;
+
+    fn test_column(name: &str, ty: ColumnType) -> MySqlColumn {
+        MySqlColumn {
+            ordinal: 0,
+            name: UStr::new(name),
+            type_info: MySqlTypeInfo::binary(ty),
+            origin: ColumnOrigin::Expression,
+            flags: None,
+        }
+    }
+
+    #[test]
+    fn decodes_null_and_value() {
+        let columns = [
+            test_column("a", ColumnType::Long),
+            test_column("b", ColumnType::VarString),
+        ];
+
+        let row = TextRow::decode_with(Bytes::from_static(&[0xfb, 2, b'h', b'i']), &columns)
+            .unwrap()
+            .0;
+
+        assert_eq!(row.get(0), None);
+        assert_eq!(row.get(1), Some(&b"hi"[..]));
+    }
+
+    #[test]
+    fn rejects_exhausted_buffer_mid_row() {
+        // two columns are declared but the buffer only holds the value for the first
+        let columns = [
+            test_column("a", ColumnType::Long),
+            test_column("b", ColumnType::Long),
+        ];
+
+        let err = TextRow::decode_with(Bytes::from_static(&[1, b'x']), &columns).unwrap_err();
+
+        assert!(
+            err.to_string().contains("no bytes remain in buffer"),
+            "{err}"
+        );
     }
 }

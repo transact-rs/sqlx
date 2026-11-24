@@ -21,7 +21,7 @@ time = "0.3.48"
 uuid = { version = "1.12.1", features = ["serde"] }
 validator = { version = "0.20.0", features = ["derive"] }
 
-# Auxilliary crates
+# Auxiliary crates
 anyhow = "1.0.58"
 dotenvy = "0.15.7"
 thiserror = "2.0.18"

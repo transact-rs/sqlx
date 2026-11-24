@@ -215,7 +215,7 @@ macro_rules! impl_type_checking {
                 if matches!(preferred_crates.date_time, DateTimeCrate::Time | DateTimeCrate::Inferred) {
                     $(
                         if <$time_ty as sqlx_core::types::Type<$database>>::type_info() == *info {
-                            if cfg!(feature = "chrono") {
+                            if preferred_crates.date_time == DateTimeCrate::Inferred && cfg!(feature = "chrono") {
                                 return Err($crate::type_checking::Error::AmbiguousDateTimeType {
                                     fallback: $crate::select_input_type!($time_ty $(, $time_input)?),
                                 });
@@ -227,7 +227,7 @@ macro_rules! impl_type_checking {
 
                     $(
                         if <$time_ty as sqlx_core::types::Type<$database>>::compatible(info) {
-                            if cfg!(feature = "chrono") {
+                            if preferred_crates.date_time == DateTimeCrate::Inferred && cfg!(feature = "chrono") {
                                 return Err($crate::type_checking::Error::AmbiguousDateTimeType {
                                     fallback: $crate::select_input_type!($time_ty $(, $time_input)?),
                                 });
@@ -272,7 +272,7 @@ macro_rules! impl_type_checking {
                 if matches!(preferred_crates.numeric, NumericCrate::BigDecimal | NumericCrate::Inferred) {
                     $(
                         if <$bigdecimal_ty as sqlx_core::types::Type<$database>>::type_info() == *info {
-                            if cfg!(feature = "rust_decimal") {
+                            if preferred_crates.numeric == NumericCrate::Inferred && cfg!(feature = "rust_decimal") {
                                 return Err($crate::type_checking::Error::AmbiguousNumericType {
                                     fallback: $crate::select_input_type!($bigdecimal_ty $(, $bigdecimal_input)?),
                                 });
@@ -284,7 +284,7 @@ macro_rules! impl_type_checking {
 
                     $(
                         if <$bigdecimal_ty as sqlx_core::types::Type<$database>>::compatible(info) {
-                            if cfg!(feature = "rust_decimal") {
+                            if preferred_crates.numeric == NumericCrate::Inferred && cfg!(feature = "rust_decimal") {
                                 return Err($crate::type_checking::Error::AmbiguousNumericType {
                                     fallback: $crate::select_input_type!($bigdecimal_ty $(, $bigdecimal_input)?),
                                 });
@@ -355,7 +355,7 @@ macro_rules! impl_type_checking {
                 if matches!(preferred_crates.date_time, DateTimeCrate::Time | DateTimeCrate::Inferred) {
                     $(
                         if <$time_ty as sqlx_core::types::Type<$database>>::type_info() == *info {
-                            if cfg!(feature = "chrono") {
+                            if preferred_crates.date_time == DateTimeCrate::Inferred && cfg!(feature = "chrono") {
                                 return Err($crate::type_checking::Error::AmbiguousDateTimeType {
                                     fallback: stringify!($time_ty),
                                 });
@@ -367,7 +367,7 @@ macro_rules! impl_type_checking {
 
                     $(
                         if <$time_ty as sqlx_core::types::Type<$database>>::compatible(info) {
-                            if cfg!(feature = "chrono") {
+                            if preferred_crates.date_time == DateTimeCrate::Inferred && cfg!(feature = "chrono") {
                                 return Err($crate::type_checking::Error::AmbiguousDateTimeType {
                                     fallback: stringify!($time_ty),
                                 });
@@ -412,7 +412,7 @@ macro_rules! impl_type_checking {
                 if matches!(preferred_crates.numeric, NumericCrate::BigDecimal | NumericCrate::Inferred) {
                     $(
                         if <$bigdecimal_ty as sqlx_core::types::Type<$database>>::type_info() == *info {
-                            if cfg!(feature = "rust_decimal") {
+                            if preferred_crates.numeric == NumericCrate::Inferred && cfg!(feature = "rust_decimal") {
                                 return Err($crate::type_checking::Error::AmbiguousNumericType {
                                     fallback: stringify!($bigdecimal_ty),
                                 });
@@ -424,7 +424,7 @@ macro_rules! impl_type_checking {
 
                     $(
                         if <$bigdecimal_ty as sqlx_core::types::Type<$database>>::compatible(info) {
-                            if cfg!(feature = "rust_decimal") {
+                            if preferred_crates.numeric == NumericCrate::Inferred && cfg!(feature = "rust_decimal") {
                                 return Err($crate::type_checking::Error::AmbiguousNumericType {
                                     fallback: stringify!($bigdecimal_ty),
                                 });

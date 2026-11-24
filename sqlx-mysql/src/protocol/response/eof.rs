@@ -28,9 +28,36 @@ impl ProtocolDecode<'_, Capabilities> for EofPacket {
             ));
         }
 
+        if buf.remaining() < 4 {
+            return Err(err_protocol!(
+                "expected warnings (2 bytes) and status flags (2 bytes) in EOF_Packet but got {} bytes",
+                buf.remaining()
+            ));
+        }
+
         let warnings = buf.get_u16_le();
         let status = Status::from_bits_truncate(buf.get_u16_le());
 
         Ok(Self { status, warnings })
     }
+}
+
+#[test]
+fn test_decode_eof_packet() {
+    let p = EofPacket::decode_with(
+        b"\xfe\x00\x00\x02\x00".as_ref().into(),
+        Capabilities::empty(),
+    )
+    .unwrap();
+
+    assert_eq!(p.warnings, 0);
+    assert!(p.status.contains(Status::SERVER_STATUS_AUTOCOMMIT));
+}
+
+#[test]
+fn test_decode_eof_packet_truncated() {
+    // only 2 bytes after the 0xfe header, need 4
+    let p = EofPacket::decode_with(b"\xfe\x00\x00".as_ref().into(), Capabilities::empty());
+
+    assert!(p.is_err());
 }

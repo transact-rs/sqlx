@@ -111,6 +111,8 @@ fn assert_migrate_config(config: &config::migrate::Config) {
 
     assert_eq!(config.ignored_chars, ignored_chars);
 
+    assert_eq!(config.unrecognized_sql_files, UnrecognizedSqlFiles::Warn);
+
     assert_eq!(
         config.defaults.migration_type,
         DefaultMigrationType::Reversible

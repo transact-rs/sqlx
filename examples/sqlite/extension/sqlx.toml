@@ -6,7 +6,7 @@
 #
 # When the extension file is installed in a non-standard location, as
 # in this example, there are two options:
-# * Provide the full path the the extension, as seen below.
+# * Provide the full path to the extension, as seen below.
 # * Add the non-standard location to the library search path, which on
 #   Linux means adding it to the LD_LIBRARY_PATH environment variable.
 unsafe-load-extensions = [

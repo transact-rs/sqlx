@@ -56,6 +56,10 @@ mod worker;
 ///
 /// You can explicitly call [`.close()`][Self::close] to ensure the database is closed successfully
 /// or get an error otherwise.
+///
+/// When using SQLCipher, call [`.close()`][Self::close] and await it before exiting the process.
+/// Otherwise, the worker thread may still be closing the database when SQLCipher frees its global
+/// resources during process exit, which can cause a segmentation fault.
 pub struct SqliteConnection {
     optimize_on_close: OptimizeOnClose,
     pub(crate) worker: ConnectionWorker,

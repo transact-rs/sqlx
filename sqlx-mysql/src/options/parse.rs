@@ -67,6 +67,8 @@ impl MySqlConnectOptions {
 
                 "sslkey" | "ssl-key" => options = options.ssl_client_key(&*value),
 
+                "tls-sni-servername" => options = options.tls_sni_servername(&value),
+
                 "statement-cache-capacity" => {
                     options =
                         options.statement_cache_capacity(value.parse().map_err(Error::config)?);
@@ -103,7 +105,7 @@ impl MySqlConnectOptions {
             url.set_path(database);
         }
 
-        let ssl_mode = match self.ssl_mode {
+        let ssl_mode = match self.ssl_options.ssl_mode {
             MySqlSslMode::Disabled => "DISABLED",
             MySqlSslMode::Preferred => "PREFERRED",
             MySqlSslMode::Required => "REQUIRED",
@@ -112,7 +114,7 @@ impl MySqlConnectOptions {
         };
         url.query_pairs_mut().append_pair("ssl-mode", ssl_mode);
 
-        if let Some(ssl_ca) = &self.ssl_ca {
+        if let Some(ssl_ca) = &self.ssl_options.ssl_ca {
             url.query_pairs_mut()
                 .append_pair("ssl-ca", &ssl_ca.to_string());
         }
@@ -123,12 +125,12 @@ impl MySqlConnectOptions {
             url.query_pairs_mut().append_pair("charset", collation);
         }
 
-        if let Some(ssl_client_cert) = &self.ssl_client_cert {
+        if let Some(ssl_client_cert) = &self.ssl_options.ssl_client_cert {
             url.query_pairs_mut()
                 .append_pair("ssl-cert", &ssl_client_cert.to_string());
         }
 
-        if let Some(ssl_client_key) = &self.ssl_client_key {
+        if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
             url.query_pairs_mut()
                 .append_pair("ssl-key", &ssl_client_key.to_string());
         }
@@ -196,4 +198,21 @@ fn it_parses_timezone() {
         .parse()
         .unwrap();
     assert_eq!(opts.timezone.as_deref(), Some("+08:00"));
+}
+
+#[test]
+fn ipv6_url_round_trips() {
+    let url = "mysql://username:p%40ssw0rd@[2001:db8::1]:3306/database";
+
+    let opts = MySqlConnectOptions::from_str(url).unwrap();
+
+    assert_eq!(opts.host.original(), "[2001:db8::1]");
+    assert_eq!(opts.host.stripped(), "2001:db8::1");
+
+    assert_eq!(
+        opts.build_url().as_str(),
+        // `build_url()` adds some parameters that weren't in the URL originally,
+        // but this should not be harmful
+        "mysql://username:p%40ssw0rd@[2001:db8::1]:3306/database?ssl-mode=PREFERRED&charset=utf8mb4&statement-cache-capacity=100"
+    )
 }

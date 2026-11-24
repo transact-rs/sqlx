@@ -30,6 +30,18 @@ pub trait DatabaseExt: Database + TypeChecking {
         database_url: &str,
         driver_config: &config::drivers::Config,
     ) -> sqlx_core::Result<Describe<Self>>;
+
+    /// Prepare a freshly-opened connection used by the query macros for `describe`.
+    ///
+    /// Defaults to a no-op. Postgres overrides this to force a generic query plan,
+    /// which gives more accurate nullability inference for parameterized queries
+    /// (see launchbadge/sqlx#3541). The override is gated so it is skipped where it
+    /// doesn't apply -- e.g. CockroachDB, which rejected the previous implementation
+    /// (see launchbadge/sqlx#4274).
+    #[allow(async_fn_in_trait)]
+    async fn prepare_describe_connection(_conn: &mut Self::Connection) -> sqlx_core::Result<()> {
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -65,25 +77,7 @@ impl<DB: DatabaseExt> CachingDescribeBlocking<DB> {
                 hash_map::Entry::Occupied(hit) => hit.into_mut(),
                 hash_map::Entry::Vacant(miss) => {
                     let conn = miss.insert(DB::Connection::connect(database_url).await?);
-
-                    #[cfg(feature = "postgres")]
-                    if DB::NAME == sqlx_postgres::Postgres::NAME {
-                        conn.execute(
-                            "
-                            DO $$
-                            BEGIN
-                                IF EXISTS (
-                                    SELECT 1
-                                    FROM pg_settings
-                                    WHERE name = 'plan_cache_mode'
-                                ) THEN
-                                    SET SESSION plan_cache_mode = 'force_generic_plan';
-                                END IF;
-                            END $$;
-                        ",
-                        )
-                        .await?;
-                    }
+                    DB::prepare_describe_connection(conn).await?;
                     conn
                 }
             };

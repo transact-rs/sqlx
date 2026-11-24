@@ -41,6 +41,31 @@ async fn it_connects_without_password() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_connects_without_password_after_auth_switch() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let mut url = Url::parse(&env::var("DATABASE_URL").context("expected DATABASE_URL")?)
+        .context("error parsing DATABASE_URL")?;
+
+    url.set_username("no_password_native").unwrap();
+    url.set_password(None).unwrap();
+
+    let options = MySqlConnectOptions::from_url(&url)?;
+
+    for options in [options.clone(), options.password("")] {
+        let mut conn = options.connect().await?;
+
+        let vars = sqlx::raw_sql("SHOW VARIABLES").fetch_all(&mut conn).await?;
+
+        assert!(!vars.is_empty());
+
+        conn.close().await?;
+    }
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn it_maths() -> anyhow::Result<()> {
     let mut conn = new::<MySql>().await?;
 
@@ -724,6 +749,58 @@ async fn any_blob_conversions() -> anyhow::Result<()> {
         <&[u8] as Decode<Any>>::decode(binary_blob).unwrap(),
         [0x01, 0x02, 0x03, 0x04, 0xDE, 0xAD, 0xBE, 0xEF],
     );
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn test_client_found_rows() -> anyhow::Result<()> {
+    setup_if_needed();
+
+    let url = url::Url::parse(&env::var("DATABASE_URL")?)?;
+
+    // CLIENT_AFFECTED_ROWS unspecified = true by default.
+    let mut conn = MySqlConnectOptions::from_url(&url)?.connect().await?;
+    let mut tx = conn.begin().await?;
+
+    tx.execute(sqlx::query(
+        "CREATE TEMPORARY TABLE found_rows_testing (id INT PRIMARY KEY, field INT NOT NULL)",
+    ))
+    .await?;
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 20) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 2);
+
+    tx.rollback().await?;
+
+    // Explicitly unset CLIENT_AFFECTED_ROWS.
+    let mut conn = MySqlConnectOptions::from_url(&url)?
+        .found_rows(false)
+        .connect()
+        .await?;
+    let mut tx = conn.begin().await?;
+
+    tx.execute(sqlx::query(
+        "CREATE TEMPORARY TABLE found_rows_testing (id INT PRIMARY KEY, field INT NOT NULL)",
+    ))
+    .await?;
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 1);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 10) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 0);
+
+    let result = tx.execute(sqlx::query("INSERT INTO found_rows_testing VALUES (0, 20) ON DUPLICATE KEY UPDATE field = VALUES(field)")).await?;
+    assert_eq!(result.rows_affected(), 2);
+
+    tx.rollback().await?;
 
     Ok(())
 }

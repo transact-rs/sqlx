@@ -86,6 +86,14 @@ test_type!(string_vec<Vec<String>>(Postgres,
 
     "array['Hello, World', '', 'Goodbye']::text[]"
         == vec!["Hello, World", "", "Goodbye"],
+
+    "array['NULL', 'null']::text[]"
+        == vec!["NULL", "null"],
+));
+
+test_type!(string_vec_opt<Vec<Option<String>>>(Postgres,
+    "array['NULL', NULL, 'null']::text[]"
+        == vec![Some("NULL".to_string()), None, Some("null".to_string())],
 ));
 
 test_type!(string_array<[String; 3]>(Postgres,
@@ -294,6 +302,36 @@ test_type!(mac_address_vec<Vec<sqlx::types::mac_address::MacAddress>>(Postgres,
         ]
 ));
 
+// Postgres can store dates and times that `chrono` and `time` cannot represent,
+// such as `infinity`, years far outside their range, or `24:00:00`.
+// These should fail to decode, in both text and binary format, instead of panicking or wrapping.
+#[cfg(any(feature = "chrono", feature = "time"))]
+async fn assert_decode_error<T>(
+    conn: &mut sqlx::PgConnection,
+    sql: &'static str,
+) -> anyhow::Result<()>
+where
+    T: for<'r> sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres> + std::fmt::Debug,
+{
+    use sqlx::Row;
+
+    let row = conn.fetch_one(sql).await?;
+    let result = row.try_get::<T, _>(0);
+    assert!(
+        result.is_err(),
+        "{sql} (text): expected an error, got {result:?}"
+    );
+
+    let row = sqlx::query(sql).fetch_one(&mut *conn).await?;
+    let result = row.try_get::<T, _>(0);
+    assert!(
+        result.is_err(),
+        "{sql} (binary): expected an error, got {result:?}"
+    );
+
+    Ok(())
+}
+
 #[cfg(feature = "chrono")]
 mod chrono {
     use super::*;
@@ -356,6 +394,40 @@ mod chrono {
         "TIMETZ '05:10:20.115100-05'" == PgTimeTz { time: NaiveTime::from_hms_micro_opt(5, 10, 20, 115100).unwrap(), offset: FixedOffset::west_opt(60 * 60 * 5).unwrap() },
         "TIMETZ '05:10:20+02'" == PgTimeTz { time: NaiveTime::from_hms_opt(5, 10, 20).unwrap(), offset: FixedOffset::east_opt(60 * 60 * 2 ).unwrap() }
     ));
+
+    #[sqlx_macros::test]
+    async fn chrono_out_of_range() -> anyhow::Result<()> {
+        let mut conn = new::<Postgres>().await?;
+
+        assert_decode_error::<NaiveDate>(&mut conn, "SELECT DATE 'infinity'").await?;
+        assert_decode_error::<NaiveDate>(&mut conn, "SELECT DATE '-infinity'").await?;
+        assert_decode_error::<NaiveDate>(&mut conn, "SELECT DATE '5874897-12-31'").await?;
+
+        assert_decode_error::<NaiveDateTime>(&mut conn, "SELECT TIMESTAMP 'infinity'").await?;
+        assert_decode_error::<NaiveDateTime>(&mut conn, "SELECT TIMESTAMP '-infinity'").await?;
+        assert_decode_error::<NaiveDateTime>(&mut conn, "SELECT TIMESTAMP '294276-12-31 23:59:59'")
+            .await?;
+
+        assert_decode_error::<DateTime<Utc>>(&mut conn, "SELECT TIMESTAMPTZ 'infinity'").await?;
+        assert_decode_error::<DateTime<FixedOffset>>(&mut conn, "SELECT TIMESTAMPTZ '-infinity'")
+            .await?;
+
+        assert_decode_error::<NaiveTime>(&mut conn, "SELECT TIME '24:00:00'").await?;
+        assert_decode_error::<PgTimeTz>(&mut conn, "SELECT TIMETZ '24:00:00+00'").await?;
+
+        assert_decode_error::<Vec<NaiveDateTime>>(
+            &mut conn,
+            "SELECT array['2019-01-02 05:10:20', 'infinity']::timestamp[]",
+        )
+        .await?;
+        assert_decode_error::<PgRange<DateTime<Utc>>>(
+            &mut conn,
+            "SELECT tstzrange('-infinity', 'infinity')",
+        )
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "time")]
@@ -399,6 +471,42 @@ mod time_tests {
         "TIMETZ '05:10:20.115100-05'" == PgTimeTz { time: time!(5:10:20.115100), offset: UtcOffset::from_whole_seconds(-(60 * 60 * 5)).unwrap() },
         "TIMETZ '05:10:20+02'" == PgTimeTz { time: time!(5:10:20), offset: UtcOffset::from_whole_seconds(60 * 60 * 2 ).unwrap() }
     ));
+
+    #[sqlx_macros::test]
+    async fn time_out_of_range() -> anyhow::Result<()> {
+        let mut conn = new::<Postgres>().await?;
+
+        assert_decode_error::<Date>(&mut conn, "SELECT DATE 'infinity'").await?;
+        assert_decode_error::<Date>(&mut conn, "SELECT DATE '-infinity'").await?;
+        assert_decode_error::<Date>(&mut conn, "SELECT DATE '5874897-12-31'").await?;
+
+        assert_decode_error::<PrimitiveDateTime>(&mut conn, "SELECT TIMESTAMP 'infinity'").await?;
+        assert_decode_error::<PrimitiveDateTime>(&mut conn, "SELECT TIMESTAMP '-infinity'").await?;
+        assert_decode_error::<PrimitiveDateTime>(
+            &mut conn,
+            "SELECT TIMESTAMP '294276-12-31 23:59:59'",
+        )
+        .await?;
+
+        assert_decode_error::<OffsetDateTime>(&mut conn, "SELECT TIMESTAMPTZ 'infinity'").await?;
+        assert_decode_error::<OffsetDateTime>(&mut conn, "SELECT TIMESTAMPTZ '-infinity'").await?;
+
+        assert_decode_error::<Time>(&mut conn, "SELECT TIME '24:00:00'").await?;
+        assert_decode_error::<PgTimeTz>(&mut conn, "SELECT TIMETZ '24:00:00+00'").await?;
+
+        assert_decode_error::<Vec<PrimitiveDateTime>>(
+            &mut conn,
+            "SELECT array['2019-01-02 05:10:20', 'infinity']::timestamp[]",
+        )
+        .await?;
+        assert_decode_error::<PgRange<OffsetDateTime>>(
+            &mut conn,
+            "SELECT tstzrange('-infinity', 'infinity')",
+        )
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(feature = "json")]
@@ -665,6 +773,16 @@ test_prepared_type!(interval<PgInterval>(
             days: 0,
             microseconds: (3 * 3_600 + 10 * 60 + 20) * 1_000_000 + 116100
         },
+));
+
+// Not supported before Postgres 17
+#[cfg(any(postgres = "17", postgres = "18"))]
+test_prepared_type!(interval_infinity<PgInterval>(
+    Postgres,
+    "INTERVAL 'infinity'"
+        == PgInterval::INFINITY,
+    "INTERVAL '-infinity'"
+        == PgInterval::NEG_INFINITY,
 ));
 
 test_prepared_type!(money<PgMoney>(Postgres, "123.45::money" == PgMoney(12345)));
