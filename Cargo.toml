@@ -78,6 +78,7 @@ _unstable-all-types = [
     "json",
     "time",
     "chrono",
+    "jiff",
     "ipnet",
     "ipnetwork",
     "mac_address",
@@ -156,6 +157,7 @@ bigdecimal = ["sqlx-core/bigdecimal", "sqlx-macros?/bigdecimal", "sqlx-mysql?/bi
 bit-vec = ["sqlx-core/bit-vec", "sqlx-macros?/bit-vec", "sqlx-postgres?/bit-vec"]
 chrono = ["sqlx-core/chrono", "sqlx-macros?/chrono", "sqlx-mysql?/chrono", "sqlx-postgres?/chrono", "sqlx-sqlite?/chrono"]
 ipnet = ["sqlx-core/ipnet", "sqlx-macros?/ipnet", "sqlx-postgres?/ipnet"]
+jiff = ["sqlx-core/jiff", "sqlx-macros?/jiff", "sqlx-mysql?/jiff", "sqlx-postgres?/jiff", "sqlx-sqlite?/jiff"]
 ipnetwork = ["sqlx-core/ipnetwork", "sqlx-macros?/ipnetwork", "sqlx-postgres?/ipnetwork"]
 mac_address = ["sqlx-core/mac_address", "sqlx-macros?/mac_address", "sqlx-postgres?/mac_address"]
 rust_decimal = ["sqlx-core/rust_decimal", "sqlx-macros?/rust_decimal", "sqlx-mysql?/rust_decimal", "sqlx-postgres?/rust_decimal"]
@@ -184,6 +186,7 @@ bigdecimal = "0.4.0"
 bit-vec = "0.8"
 chrono = { version = "0.4.34", default-features = false, features = ["std", "clock"] }
 ipnet = "2.3.0"
+jiff = { version = "1.0.3", default-features = false, features = ["std"] }
 ipnetwork = "0.21.1"
 mac_address = "1.1.5"
 rust_decimal = { version = "1.36.0", default-features = false, features = ["std"] }

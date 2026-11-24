@@ -19,6 +19,7 @@ offline = ["json", "sqlx-core/offline", "smallvec/serde"]
 bigdecimal = ["dep:bigdecimal", "dep:num-bigint", "sqlx-core/bigdecimal"]
 bit-vec = ["dep:bit-vec", "sqlx-core/bit-vec"]
 chrono = ["dep:chrono", "sqlx-core/chrono"]
+jiff = ["dep:jiff", "sqlx-core/jiff"]
 ipnet = ["dep:ipnet", "sqlx-core/ipnet"]
 ipnetwork = ["dep:ipnetwork", "sqlx-core/ipnetwork"]
 mac_address = ["dep:mac_address", "sqlx-core/mac_address"]
@@ -44,6 +45,7 @@ sha2 = { workspace = true }
 bigdecimal = { workspace = true, optional = true }
 bit-vec = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 ipnet = { workspace = true, optional = true }
 ipnetwork = { workspace = true, optional = true }
 mac_address = { workspace = true, optional = true }

@@ -60,6 +60,17 @@ pub mod time {
     pub use time::{Date, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 }
 
+#[cfg(feature = "jiff")]
+#[cfg_attr(docsrs, doc(cfg(feature = "jiff")))]
+pub mod jiff {
+    #[doc(no_inline)]
+    pub use jiff::{
+        civil::{Date, DateTime, Time},
+        tz::Offset,
+        SignedDuration, Timestamp,
+    };
+}
+
 #[cfg(feature = "bigdecimal")]
 #[cfg_attr(docsrs, doc(cfg(feature = "bigdecimal")))]
 #[doc(no_inline)]

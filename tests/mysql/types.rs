@@ -279,6 +279,98 @@ mod time_tests {
     }
 }
 
+#[cfg(feature = "jiff")]
+mod jiff_tests {
+    use sqlx::types::jiff::{Date, DateTime, Offset, SignedDuration, Time, Timestamp};
+    use sqlx_test::test_decode_type;
+
+    use super::*;
+
+    test_type!(jiff_date<Date>(
+        MySql,
+        "DATE '2001-01-05'" == Date::constant(2001, 1, 5),
+        "DATE '2050-11-23'" == Date::constant(2050, 11, 23)
+    ));
+
+    test_type!(jiff_time_zero<Time>(
+        MySql,
+        "TIME '00:00:00.000000'" == Time::midnight()
+    ));
+
+    test_type!(jiff_time<Time>(
+        MySql,
+        "TIME '05:10:20.115100'" == Time::constant(5, 10, 20, 115_100_000)
+    ));
+
+    test_type!(jiff_date_time<DateTime>(
+        MySql,
+        "TIMESTAMP '2019-01-02 05:10:20'" == Date::constant(2019, 1, 2).at(5, 10, 20, 0),
+        "TIMESTAMP '2019-01-02 05:10:20.115100'" == Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_000)
+    ));
+
+    test_type!(jiff_timestamp<Timestamp>(
+        MySql,
+        "TIMESTAMP '2019-01-02 05:10:20.115100'"
+            == Offset::UTC.to_timestamp(Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_000)).unwrap()
+    ));
+
+    test_decode_type!(jiff_signed_duration<SignedDuration>(
+        MySql,
+        "TIME '00:00:00.000000'" == SignedDuration::ZERO,
+        "TIME '838:59:59.0'" == SignedDuration::from_secs(838 * 3600 + 59 * 60 + 59),
+        "TIME '-838:59:59.0'" == SignedDuration::from_secs(-(838 * 3600 + 59 * 60 + 59)),
+        "TIME '-123:45:56.890011'" == -SignedDuration::new(123 * 3600 + 45 * 60 + 56, 890_011_000),
+    ));
+
+    #[test]
+    fn jiff_signed_duration_to_mysql_time() {
+        assert_eq!(
+            MySqlTime::try_from(-SignedDuration::new(123 * 3600 + 45 * 60 + 56, 890_011_000))
+                .unwrap(),
+            MySqlTime::new(MySqlTimeSign::Negative, 123, 45, 56, 890_011).unwrap()
+        );
+        assert!(MySqlTime::try_from(SignedDuration::from_hours(839)).is_err());
+    }
+
+    #[sqlx_macros::test]
+    async fn test_type_jiff_zero_date() -> anyhow::Result<()> {
+        let mut conn = sqlx_test::new::<MySql>().await?;
+
+        // ensure that zero dates are turned on
+        // newer MySQL has these disabled by default
+
+        conn.execute("SET @@sql_mode := REPLACE(@@sql_mode, 'NO_ZERO_IN_DATE', '');")
+            .await?;
+
+        conn.execute("SET @@sql_mode := REPLACE(@@sql_mode, 'NO_ZERO_DATE', '');")
+            .await?;
+
+        // date
+
+        let row = sqlx::query("SELECT DATE '0000-00-00'")
+            .fetch_one(&mut conn)
+            .await?;
+
+        let val: Option<Date> = row.get(0);
+
+        assert_eq!(val, None);
+        assert!(row.try_get::<Date, _>(0).is_err());
+
+        // datetime
+
+        let row = sqlx::query("SELECT TIMESTAMP '0000-00-00 00:00:00'")
+            .fetch_one(&mut conn)
+            .await?;
+
+        let val: Option<DateTime> = row.get(0);
+
+        assert_eq!(val, None);
+        assert!(row.try_get::<DateTime, _>(0).is_err());
+
+        Ok(())
+    }
+}
+
 #[cfg(feature = "bigdecimal")]
 test_type!(bigdecimal<sqlx::types::BigDecimal>(
     MySql,

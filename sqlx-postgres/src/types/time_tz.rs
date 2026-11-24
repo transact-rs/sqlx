@@ -13,11 +13,17 @@ type DefaultTime = ::time::Time;
 #[cfg(all(not(feature = "time"), feature = "chrono"))]
 type DefaultTime = ::chrono::NaiveTime;
 
+#[cfg(all(not(feature = "time"), not(feature = "chrono"), feature = "jiff"))]
+type DefaultTime = ::jiff::civil::Time;
+
 #[cfg(feature = "time")]
 type DefaultOffset = ::time::UtcOffset;
 
 #[cfg(all(not(feature = "time"), feature = "chrono"))]
 type DefaultOffset = ::chrono::FixedOffset;
+
+#[cfg(all(not(feature = "time"), not(feature = "chrono"), feature = "jiff"))]
+type DefaultOffset = ::jiff::tz::Offset;
 
 /// Represents a moment of time, in a specified timezone.
 ///
@@ -191,5 +197,83 @@ mod time {
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "jiff")]
+mod jiff {
+    use super::*;
+    use crate::types::jiff::time::{time_from_micros, time_to_micros};
+    use ::jiff::civil::Time;
+    use ::jiff::fmt::temporal::{Pieces, PiecesOffset};
+    use ::jiff::tz::Offset;
+
+    impl Type<Postgres> for PgTimeTz<Time, Offset> {
+        fn type_info() -> PgTypeInfo {
+            PgTypeInfo::TIMETZ
+        }
+    }
+
+    impl Encode<'_, Postgres> for PgTimeTz<Time, Offset> {
+        fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+            let _: IsNull = <i64 as Encode<'_, Postgres>>::encode(time_to_micros(self.time), buf)?;
+            // OFFSET is encoded as seconds _west_ of UTC
+            let _: IsNull = <i32 as Encode<'_, Postgres>>::encode(-self.offset.seconds(), buf)?;
+
+            Ok(IsNull::No)
+        }
+
+        fn size_hint(&self) -> usize {
+            mem::size_of::<i64>() + mem::size_of::<i32>()
+        }
+    }
+
+    impl<'r> Decode<'r, Postgres> for PgTimeTz<Time, Offset> {
+        fn decode(value: PgValueRef<'r>) -> Result<Self, BoxDynError> {
+            match value.format() {
+                PgValueFormat::Binary => {
+                    let mut buf = Cursor::new(value.as_bytes()?);
+
+                    // TIME is encoded as the microseconds since midnight
+                    let us = buf.read_i64::<BigEndian>()?;
+                    let time = time_from_micros(us).ok_or_else(|| {
+                        format!("Postgres TIMETZ out of range for jiff::civil::Time: {us} microseconds from midnight")
+                    })?;
+
+                    // OFFSET is encoded as seconds _west_ of UTC
+                    let offset_seconds = buf.read_i32::<BigEndian>()?;
+                    let offset = offset_seconds
+                        .checked_neg()
+                        .and_then(|seconds| Offset::from_seconds(seconds).ok())
+                        .ok_or_else(|| {
+                            format!("server returned out-of-range offset for `TIMETZ`: {offset_seconds} seconds")
+                        })?;
+
+                    Ok(PgTimeTz { time, offset })
+                }
+
+                PgValueFormat::Text => try_parse_timetz(value.as_str()?),
+            }
+        }
+    }
+
+    fn try_parse_timetz(s: &str) -> Result<PgTimeTz<Time, Offset>, BoxDynError> {
+        // e.g. `05:10:20.1151+06:30`, `05:10:20-05`
+        //
+        // Jiff doesn't parse a time with an offset on its own, so prefix an arbitrary date.
+        let tmp = format!("2001-07-08T{s}");
+        let pieces = Pieces::parse(&tmp)?;
+
+        let time = pieces
+            .time()
+            .ok_or_else(|| format!("invalid `TIMETZ` value: {s}"))?;
+
+        let offset = match pieces.offset() {
+            Some(PiecesOffset::Numeric(offset)) => offset.offset(),
+            Some(PiecesOffset::Zulu) | None => Offset::UTC,
+            Some(_) => return Err(format!("invalid offset in `TIMETZ` value: {s}").into()),
+        };
+
+        Ok(PgTimeTz { time, offset })
     }
 }

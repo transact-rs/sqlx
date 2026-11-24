@@ -189,6 +189,44 @@ impl_type_checking!(
             Vec<sqlx::postgres::types::PgRange<sqlx::types::time::OffsetDateTime>> |
                 &[sqlx::postgres::types::PgRange<sqlx::types::time::OffsetDateTime>],
         },
+        jiff: {
+            // Scalar types
+            sqlx::types::jiff::Time,
+
+            sqlx::types::jiff::Date,
+
+            sqlx::types::jiff::DateTime,
+
+            sqlx::types::jiff::Timestamp,
+
+            sqlx::postgres::types::PgTimeTz<sqlx::types::jiff::Time, sqlx::types::jiff::Offset>,
+
+            // Array types
+            Vec<sqlx::types::jiff::Time> | &[sqlx::types::jiff::Time],
+
+            Vec<sqlx::types::jiff::Date> | &[sqlx::types::jiff::Date],
+
+            Vec<sqlx::types::jiff::DateTime> | &[sqlx::types::jiff::DateTime],
+
+            Vec<sqlx::types::jiff::Timestamp> | &[sqlx::types::jiff::Timestamp],
+
+            // Range types
+            sqlx::postgres::types::PgRange<sqlx::types::jiff::Date>,
+
+            sqlx::postgres::types::PgRange<sqlx::types::jiff::DateTime>,
+
+            sqlx::postgres::types::PgRange<sqlx::types::jiff::Timestamp>,
+
+            // Arrays of ranges
+            Vec<sqlx::postgres::types::PgRange<sqlx::types::jiff::Date>> |
+                &[sqlx::postgres::types::PgRange<sqlx::types::jiff::Date>],
+
+            Vec<sqlx::postgres::types::PgRange<sqlx::types::jiff::DateTime>> |
+                &[sqlx::postgres::types::PgRange<sqlx::types::jiff::DateTime>],
+
+            Vec<sqlx::postgres::types::PgRange<sqlx::types::jiff::Timestamp>> |
+                &[sqlx::postgres::types::PgRange<sqlx::types::jiff::Timestamp>],
+        },
     },
     numeric-types: {
         bigdecimal: {
@@ -218,6 +256,7 @@ impl_type_checking!(
     test,
     feature = "time",
     feature = "chrono",
+    feature = "jiff",
     feature = "bigdecimal",
     feature = "rust_decimal"
 ))]
@@ -251,6 +290,17 @@ mod tests {
         prefs.date_time = DateTimeCrate::Chrono;
         assert!(Postgres::param_type_for_id(&timestamptz, &prefs).is_ok());
         assert!(Postgres::return_type_for_id(&timestamptz, &prefs).is_ok());
+
+        // Explicit Jiff should succeed even with time and chrono enabled
+        prefs.date_time = DateTimeCrate::Jiff;
+        assert_eq!(
+            Postgres::param_type_for_id(&timestamptz, &prefs).unwrap(),
+            "sqlx::types::jiff::Timestamp"
+        );
+        assert_eq!(
+            Postgres::return_type_for_id(&timestamptz, &prefs).unwrap(),
+            "sqlx::types::jiff::Timestamp"
+        );
     }
 
     #[test]

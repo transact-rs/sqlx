@@ -247,6 +247,53 @@ impl TryFrom<time::Duration> for PgInterval {
     }
 }
 
+#[cfg(feature = "jiff")]
+impl Type<Postgres> for jiff::SignedDuration {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::INTERVAL
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl PgHasArrayType for jiff::SignedDuration {
+    fn array_type_info() -> PgTypeInfo {
+        PgTypeInfo::INTERVAL_ARRAY
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl Encode<'_, Postgres> for jiff::SignedDuration {
+    fn encode_by_ref(&self, buf: &mut PgArgumentBuffer) -> Result<IsNull, BoxDynError> {
+        let pg_interval = PgInterval::try_from(*self)?;
+        pg_interval.encode_by_ref(buf)
+    }
+
+    fn size_hint(&self) -> usize {
+        2 * mem::size_of::<i64>()
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl TryFrom<jiff::SignedDuration> for PgInterval {
+    type Error = BoxDynError;
+
+    /// Convert a `jiff::SignedDuration` to a `PgInterval`.
+    ///
+    /// This returns an error if there is a loss of precision using nanoseconds or if there is a
+    /// microsecond overflow.
+    fn try_from(value: jiff::SignedDuration) -> Result<Self, BoxDynError> {
+        if value.subsec_nanos() % 1000 != 0 {
+            return Err("PostgreSQL `INTERVAL` does not support nanoseconds precision".into());
+        }
+
+        Ok(Self {
+            months: 0,
+            days: 0,
+            microseconds: value.as_micros().try_into()?,
+        })
+    }
+}
+
 #[test]
 fn test_encode_interval() {
     let mut buf = PgArgumentBuffer::default();
@@ -441,4 +488,40 @@ fn test_pginterval_time() {
     // Case when microsecond overflow occurs
     assert!(PgInterval::try_from(time::Duration::seconds(10_000_000_000_000)).is_err());
     assert!(PgInterval::try_from(time::Duration::seconds(-10_000_000_000_000)).is_err());
+}
+
+#[test]
+#[cfg(feature = "jiff")]
+fn test_pginterval_jiff() {
+    use jiff::SignedDuration;
+
+    // Case for positive duration
+    let interval = PgInterval {
+        days: 0,
+        months: 0,
+        microseconds: 27_000,
+    };
+    assert_eq!(
+        &PgInterval::try_from(SignedDuration::from_micros(27_000)).unwrap(),
+        &interval
+    );
+
+    // Case for negative duration
+    let interval = PgInterval {
+        days: 0,
+        months: 0,
+        microseconds: -27_000,
+    };
+    assert_eq!(
+        &PgInterval::try_from(SignedDuration::from_micros(-27_000)).unwrap(),
+        &interval
+    );
+
+    // Case when precision loss occurs
+    assert!(PgInterval::try_from(SignedDuration::from_nanos(27_000_001)).is_err());
+    assert!(PgInterval::try_from(SignedDuration::from_nanos(-27_000_001)).is_err());
+
+    // Case when microsecond overflow occurs
+    assert!(PgInterval::try_from(SignedDuration::MAX).is_err());
+    assert!(PgInterval::try_from(SignedDuration::MIN).is_err());
 }

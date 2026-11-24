@@ -142,6 +142,35 @@
 //! Note that non-constant offsets may still cause issues when comparing timestamps,
 //! as the comparison operators are not timezone-aware.
 //!
+//! ### [`jiff`](https://crates.io/crates/jiff)
+//!
+//! Requires the `jiff` Cargo feature flag.
+//!
+//! | Rust type                             | Sqlite type(s)                                       |
+//! |---------------------------------------|------------------------------------------------------|
+//! | `jiff::civil::DateTime`               | DATETIME (TEXT, INTEGER, REAL)                       |
+//! | `jiff::Timestamp`                     | DATETIME (TEXT, INTEGER, REAL)                       |
+//! | `jiff::civil::Date`                   | DATE (TEXT only)                                     |
+//! | `jiff::civil::Time`                   | TIME (TEXT only)                                     |
+//!
+//! ##### NOTE: `DATETIME` conversions
+//! The behavior here is identical to the corresponding `chrono` types:
+//!
+//! * If `TEXT`, the value is parsed as an ISO 8601/RFC 3339 compatible datetime string.
+//!   `jiff::Timestamp` assumes UTC if the string has no offset.
+//!   `jiff::civil::DateTime` ignores any offset and returns the local date and time
+//!   (with the exception of a `Z` offset, which is UTC anyway).
+//! * If `INTEGER`, it is expected to be the number of seconds since January 1, 1970 00:00 UTC.
+//! * If `REAL`, it is expected to be the (possibly fractional) number of days since the Julian epoch,
+//!   November 24, 4714 BCE 12:00 UTC, as if returned from the `julianday()` function.
+//!
+//! `jiff::civil::DateTime` encodes to SQLite's own format, `YYYY-MM-DD HH:MM:SS.SSS`,
+//! while `jiff::Timestamp` encodes to RFC 3339 format in UTC, `YYYY-MM-DDTHH:MM:SS.SSSZ`.
+//! See the note on `CURRENT_TIMESTAMP` above for why you should choose one consistently:
+//!
+//! * RFC 3339 format: `jiff::Timestamp`
+//! * SQLite format: `jiff::civil::DateTime`
+//!
 //! ### [`uuid`](https://crates.io/crates/uuid)
 //!
 //! Requires the `uuid` Cargo feature flag.
@@ -229,6 +258,8 @@ mod bytes;
 mod chrono;
 mod float;
 mod int;
+#[cfg(feature = "jiff")]
+mod jiff;
 #[cfg(feature = "json")]
 mod json;
 mod str;

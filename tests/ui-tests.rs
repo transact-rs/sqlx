@@ -9,7 +9,10 @@ fn ui_tests() {
         t.compile_fail("tests/ui/postgres/*.rs");
 
         // UI tests for column types that require gated features
-        if cfg!(not(feature = "chrono")) && cfg!(not(feature = "time")) {
+        if cfg!(not(feature = "chrono"))
+            && cfg!(not(feature = "time"))
+            && cfg!(not(feature = "jiff"))
+        {
             t.compile_fail("tests/ui/postgres/gated/chrono.rs");
         }
 
@@ -26,7 +29,10 @@ fn ui_tests() {
         t.compile_fail("tests/ui/mysql/*.rs");
 
         // UI tests for column types that require gated features
-        if cfg!(not(feature = "chrono")) && cfg!(not(feature = "time")) {
+        if cfg!(not(feature = "chrono"))
+            && cfg!(not(feature = "time"))
+            && cfg!(not(feature = "jiff"))
+        {
             t.compile_fail("tests/ui/mysql/gated/chrono.rs");
         }
     }

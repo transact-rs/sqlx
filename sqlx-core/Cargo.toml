@@ -64,6 +64,7 @@ rustls-native-certs = { version = "0.8.0", optional = true }
 bit-vec = { workspace = true, optional = true }
 bigdecimal = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 rust_decimal = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 ipnet = { workspace = true, optional = true }

@@ -95,6 +95,34 @@
 //!
 //! To encode a `time::Duration`, convert it to [`MySqlTime`] first using `TryFrom`/`TryInto`.
 //!
+//! ### [`jiff`](https://crates.io/crates/jiff)
+//!
+//! Requires the `jiff` Cargo feature flag.
+//!
+//! | Rust type                             | MySQL/MariaDB type(s)                                |
+//! |---------------------------------------|------------------------------------------------------|
+//! | `jiff::civil::DateTime`               | DATETIME                                             |
+//! | `jiff::Timestamp`                     | TIMESTAMP                                            |
+//! | `jiff::civil::Date`                   | DATE                                                 |
+//! | `jiff::civil::Time`                   | TIME (time-of-day only)                              |
+//! | `jiff::SignedDuration`                | TIME (decodes full range; see note for encoding)     |
+//!
+//! ### NOTE: MySQL's `TIME` type is dual-purpose
+//! MySQL's `TIME` type can be used as either a time-of-day value, or an interval.
+//! However, `jiff::civil::Time` is designed only to represent a time-of-day.
+//!
+//! Decoding a `TIME` value as `jiff::civil::Time` will return an error if the value is out of range.
+//!
+//! The [`MySqlTime`] type supports the full range, and it also implements
+//! `TryInto<jiff::civil::Time>`.
+//!
+//! Decoding a `jiff::SignedDuration` also supports the full range.
+//!
+//! To encode a `jiff::SignedDuration`, convert it to [`MySqlTime`] first using `TryFrom`/`TryInto`.
+//!
+//! Jiff types have nanosecond precision, while MySQL has (at most) microsecond precision.
+//! When encoding, the sub-microsecond part of a value is truncated.
+//!
 //! ### [`bigdecimal`](https://crates.io/crates/bigdecimal)
 //! Requires the `bigdecimal` Cargo feature flag.
 //!
@@ -186,6 +214,9 @@ mod chrono;
 
 #[cfg(feature = "time")]
 mod time;
+
+#[cfg(feature = "jiff")]
+mod jiff;
 
 #[cfg(feature = "uuid")]
 mod uuid;

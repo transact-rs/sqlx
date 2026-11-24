@@ -214,6 +214,8 @@ be removed in the future.
 
 -   `time`: Add support for date and time types from `time` crate (alternative to `chrono`, which is preferred by `query!` macro, if both enabled)
 
+-   `jiff`: Add support for date and time types from `jiff` crate (alternative to `chrono` and `time`; the `query!` macros prefer either of those if also enabled)
+
 -   `bstr`: Add support for `bstr::BString`.
 
 -   `bigdecimal`: Add support for `NUMERIC` using the `bigdecimal` crate.
