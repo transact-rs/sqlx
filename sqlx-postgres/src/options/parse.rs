@@ -61,6 +61,10 @@ impl PgConnectOptions {
 
                 "sslkey" | "ssl-key" => options = options.ssl_client_key(&*value),
 
+                "danger-custom-rustls-config" => {
+                    options.ssl.options_mut().danger_custom_rustls_config = true
+                }
+
                 "statement-cache-capacity" => {
                     options =
                         options.statement_cache_capacity(value.parse().map_err(Error::config)?);
@@ -143,7 +147,7 @@ impl PgConnectOptions {
             url_query.append_pair("hostaddr", &hostaddr.to_string());
         }
 
-        let ssl_mode = match self.ssl_options.ssl_mode {
+        let ssl_mode = match self.ssl.options().ssl_mode {
             PgSslMode::Allow => "allow",
             PgSslMode::Disable => "disable",
             PgSslMode::Prefer => "prefer",
@@ -154,16 +158,22 @@ impl PgConnectOptions {
 
         url_query.append_pair("sslmode", ssl_mode);
 
-        if let Some(ssl_root_cert) = &self.ssl_options.ssl_root_cert {
+        if let Some(ssl_root_cert) = &self.ssl.options().ssl_root_cert {
             url_query.append_pair("sslrootcert", &ssl_root_cert.to_string());
         }
 
-        if let Some(ssl_client_cert) = &self.ssl_options.ssl_client_cert {
+        if let Some(ssl_client_cert) = &self.ssl.options().ssl_client_cert {
             url_query.append_pair("sslcert", &ssl_client_cert.to_string());
         }
 
-        if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
+        if let Some(ssl_client_key) = &self.ssl.options().ssl_client_key {
             url_query.append_pair("sslkey", &ssl_client_key.to_string());
+        }
+
+        // Signal that a custom `rustls::ClientConfig` was previously set
+        // and that any `PgConnectOptions` built from this URL should also have one set.
+        if self.ssl.options().danger_custom_rustls_config {
+            url_query.append_pair("danger-custom-rustls-config", "true");
         }
 
         url_query.append_pair(

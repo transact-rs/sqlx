@@ -119,13 +119,7 @@ The SQLite driver directly invokes the SQLite3 API via `libsqlite3-sys`, which r
 
 ## Install
 
-SQLx is compatible with the [`async-std`], [`tokio`], and [`actix`] runtimes; and, the [`native-tls`] and [`rustls`] TLS backends. When adding the dependency, you must choose a runtime feature that is `runtime` + `tls`.
-
-[`async-std`]: https://github.com/async-rs/async-std
-[`tokio`]: https://github.com/tokio-rs/tokio
-[`actix`]: https://github.com/actix/actix-net
-[`native-tls`]: https://crates.io/crates/native-tls
-[`rustls`]: https://crates.io/crates/rustls
+When adding the dependency, you must choose a runtime feature, and optionally a TLS feature (see below for details):
 
 ```toml
 # Cargo.toml
@@ -159,33 +153,128 @@ sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-aws-lc-r
 sqlx = { version = "0.9", features = [ "runtime-async-std", "tls-rustls-aws-lc-rs-native-roots" ] }
 ```
 
-#### Cargo Feature Flags
+### Cargo Feature Flags
 
-For backward-compatibility reasons, the runtime and TLS features can either be chosen together as a single feature,
-or separately.
+#### Runtimes
 
-For forward compatibility, you should use the separate runtime and TLS features as the combination features may
-be removed in the future.
+SQLx supports multiple async runtimes, which to our knowledge it is the only SQL client to do so.
 
--   `runtime-async-std`: Use the `async-std` runtime without enabling a TLS backend.
+Except for Tokio, all other runtime features use [`async-io`] for non-blocking I/O.
+The primary difference is what global task executor is used.
 
--   `runtime-tokio`: Use the `tokio` runtime without enabling a TLS backend.
+-   `runtime-async-global-executor`: use [`async-global-executor`] for spawning tasks and [`async-io`] for non-blocking I/O.
 
-    - Actix-web is fully compatible with Tokio and so a separate runtime feature is no longer needed.
+-   `runtime-async-std`: use the [`async-std`] runtime for spawning tasks and [`async-io`] for non-blocking I/O.
+    * Deprecated: `async-std` is no longer maintained. 
+      The authors recommend switching to [`smol`], which builds on the same underlying crates.
 
--   `tls-native-tls`: Use the `native-tls` TLS backend (OpenSSL on *nix, SChannel on Windows, Secure Transport on macOS).
+-   `runtime-smol`: use the [`smol`] runtime for spawning tasks, and [`async-io`] for non-blocking I/O.
 
--   `tls-rustls`: Use the `rustls` TLS backend (cross-platform backend, only supports TLS 1.2 and 1.3).
--   `tls-rustls-aws-lc-rs`: Use the `rustls` TLS backend with `aws-lc-rs` and bundled WebPKI CA certificates.
--   `tls-rustls-aws-lc-rs-native-roots`: Use the `rustls` TLS backend with `aws-lc-rs` and the platform's native CA certificates.
+-   `runtime-tokio`: Use the [Tokio] runtime for spawning tasks and non-blocking I/O.
+    * Recommended for maximum compatibility with the Rust async ecosystem (e.g. [Axum], [Hyper])
+    * Actix-web is fully compatible with Tokio and so a separate runtime feature is no longer needed. 
+
+The addition of further runtime features is not considered feasible at this time without better abstractions
+due to the code duplication required. To save time, please consider the implications before requesting support
+for a new runtime.
+
+**Existing users note**: combination runtime + TLS feature flags were deleted in 0.9.0.
+
+[`async-global-executor`]: https://docs.rs/async-global-executor
+[`async-io`]: https://docs.rs/async-io
+[`async-std`]: https://docs.rs/async-std
+[`smol`]: https://docs.rs/smol
+[Tokio]: https://docs.rs/tokio
+
+[Axum]: https://docs.rs/axum
+[Hyper]: https://docs.rs/hyper
+
+#### TLS Backends
+
+SQLx supports TLS through platform APIs with [`native-tls`] or through [`rustls`].
+
+-   `tls-native-tls`: use the [`native-tls`] TLS backend.
+    * Platform-dependent implementation: OpenSSL on *nix, SChannel on Windows, Secure Transport on macOS
+    * Uses system TLS roots.
+    * Takes precedent over `tls-rustls` if enabled.
+
+When using [`rustls`], additional features must be chosen. This is because `rustls` supports pluggable
+[crypto providers] and [server certificate verifiers] with different tradeoffs, and SQLx exposes these options
+for maximum flexibility.
+
+-   `tls-rustls`: enable the [`rustls`] TLS backend. 
+    * Cross-platform
+    * Only supports TLS 1.2 and 1.3.
+    * **BREAKING CHANGE PLANNED**: currently an alias of `tls-rustls-ring` for historical reasons;
+      this will be changed in 0.10 to be a _base_ feature that does not enable any specific crypto provider
+      or TLS root store.
+    * To opt in to this change now, use `tls-rustls-base` instead.
+
+-   `tls-rustls-aws-lc-rs`: use the `rustls` TLS backend with the [`aws-lc-rs`] crypto provider.
+     * **BREAKING CHANGE PLANNED**: currently an alias of `tls-rustls-aws-lc-rs-webpki`; 
+       this will be changed in 0.10 to _only_ enable `aws-lc-rs`.
+     * To opt in to this change now, use `tls-rustls-aws-lc-rs-no-roots` instead.
+
+-   `tls-rustls-aws-lc-rs-native-roots`: use the `rustls` TLS backend with `aws-lc-rs` 
+    and load the platform's native CA certificates with [`rustls-native-certs`].
+    * **DEPRECATED**: will be replaced with `tls-rustls-aws-lc-rs` + `tls-rustls-native-roots` in 0.10. 
+    * To opt in to this change now, use `tls-rustls-aws-lc-rs-no-roots` + `tls-rustls-native-roots` instead.
+
+-   `tls-rustls-aws-lc-rs-webpki`: use the `rustls` TLS backend with `aws-lc-rs`
+    and load the platform's native CA certificates with [`rustls-native-certs`]
+    * **DEPRECATED**: will be replaced with `tls-rustls-aws-lc-rs` + `tls-rustls-webpki-roots` in 0.10.    
+    * To opt in to this change now, use `tls-rustls-aws-lc-rs-no-roots` + `tls-rustls-webpki-roots` instead.
+
+- `tls-rustls-ring`: use the `rustls` TLS backend with the [`ring`] crypto provider.
+    * **BREAKING CHANGE PLANNED**: currently an alias of `tls-rustls-ring-webpki`; 
+         this will be changed in 0.10 to _only_ enable `ring`.
+    * To opt in to this change now, use `tls-rustls-ring-no-roots` instead.
+
+-   `tls-rustls-ring-native-roots`: use the `rustls` TLS backend with `ring` 
+    and load the platform's native CA certificates with [`rustls-native-certs`].
+    * **DEPRECATED**: will be replaced with `tls-rustls-ring` + `tls-rustls-native-roots` in 0.10. 
+    * To opt in to this change now, use `tls-rustls-ring-no-roots` + `tls-rustls-native-roots` instead.
+
+-   `tls-rustls-ring-webpki`: use the `rustls` TLS backend with `ring`
+    and load the platform's native CA certificates with [`rustls-native-certs`]
+    * **DEPRECATED**: will be replaced with `tls-rustls-ring` + `tls-rustls-webpki-roots` in 0.10.    
+    * To opt in to this change now, use `tls-rustls-ring-no-roots` + `tls-rustls-webpki-roots` instead.
+
+**Temporary features** have been added that will be deleted in 0.10 once their existing counterparts are changed:
+
+-  `tls-rustls-base`: enable the [`rustls`] TLS backend _without_ configuring a crypto provider or TLS roots. 
+    * Requires a process-global crypto provider to be installed with [`CryptoProvider::install_default()`]
+    * Will be folded into `tls-rustls` in 0.10.
+
+- `tls-rustls-aws-lc-rs-no-roots`: enable the [`aws-lc-rs`] crypto provider _without_ configuring TLS roots.
+    * If server certificate verification is required, either an explicit root certificate bundle or a custom
+      `rustls::ClientConfig` must be set.
+    * Will be folded into `tls-rustls-aws-lc-rs` in 0.10.
+
+- `tls-rustls-ring-no-roots`: enable the [`ring`] crypto provider _without_ configuring TLS roots.
+    * If server certificate verification is required, either an explicit root certificate bundle or a custom
+      `rustls::ClientConfig` must be set.
+    * Will be folded into `tls-rustls-ring` in 0.10.
+
+[`native-tls`]: https://docs.rs/native-tls
+[`rustls`]: https://docs.rs/rustls
+
+[crypto providers]: https://docs.rs/rustls/latest/rustls/#cryptography-providers
+[server certificate verifiers]: https://docs.rs/rustls/latest/rustls/struct.ConfigBuilder.html#clientconfig-certificate-configuration
+
+[`aws-lc-rs`]: https://docs.rs/aws-lc-rs
+[`ring`]: https://docs.rs/ring
+[`rustls-native-certs`]: https://docs.rs/rustls-native-certs
+
+[`CryptoProvider::install_default()`]: https://docs.rs/rustls/latest/rustls/crypto/struct.CryptoProvider.html#method.install_default
+
+#### Databases
 
 -   `postgres`: Add support for the Postgres database server.
 
 -   `mysql`: Add support for the MySQL/MariaDB database server.
--   Note: RSA auth without TLS requires `mysql-rsa` (not enabled by `mysql`).
--   `mysql-rsa`: Enable RSA password encryption for `caching_sha2_password`/`sha256_password` when TLS is off. Only enable it if you must connect without TLS to servers that require RSA auth. Prefer using TLS.
-
--   `mssql`: Add support for the MSSQL database server.
+    *   Note: RSA auth without TLS requires `mysql-rsa` (not enabled by `mysql`).
+-   `mysql-rsa`: Enable RSA password encryption for `caching_sha2_password`/`sha256_password` when TLS is off.
 
 -   `sqlite`: Add support for the self-contained [SQLite](https://sqlite.org/) database engine with SQLite bundled and statically-linked.
 
@@ -200,6 +289,9 @@ be removed in the future.
     * Exposed as a separate feature because it's generally not enabled by default.
     * Using this feature with `sqlite-unbundled` may cause linker failures if the system SQLite version does not support it.
 
+
+#### Optional APIs
+
 -   `any`: Add support for the `Any` database driver, which can proxy to a database driver at runtime.
 
 -   `derive`: Add support for the derive family macros, those are `FromRow`, `Type`, `Encode`, `Decode`.
@@ -207,6 +299,12 @@ be removed in the future.
 -   `macros`: Add support for the `query*!` macros, which allows compile-time checked queries.
 
 -   `migrate`: Add support for the migration management and `migrate!` macro, which allow compile-time embedded migrations.
+
+-   Offline mode is now always enabled. See [sqlx-cli/README.md][readme-offline].
+
+[readme-offline]: sqlx-cli/README.md#enable-building-in-offline-mode-with-query
+
+#### Third-Party Integrations
 
 -   `uuid`: Add support for UUID.
 
@@ -225,10 +323,6 @@ be removed in the future.
 -   `ipnetwork`: Add support for `INET` and `CIDR` (in postgres) using the `ipnetwork` crate.
 
 -   `json`: Add support for `JSON` and `JSONB` (in postgres) using the `serde_json` crate.
-
--   Offline mode is now always enabled. See [sqlx-cli/README.md][readme-offline].
-
-[readme-offline]: sqlx-cli/README.md#enable-building-in-offline-mode-with-query
 
 ## SQLx is not an ORM!
 

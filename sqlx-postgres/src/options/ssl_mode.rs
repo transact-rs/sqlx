@@ -6,13 +6,19 @@ use std::str::FromStr;
 /// It is used by the [`ssl_mode`](super::PgConnectOptions::ssl_mode) method.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum PgSslMode {
-    /// Only try a non-SSL connection.
+    /// Only try a non-SSL (plaintext) connection.
     Disable,
 
-    /// First try a non-SSL connection; if that fails, try an SSL connection.
+    /// First try a non-SSL (plaintext) connection; if that fails, try an SSL connection.
+    ///
+    /// # Note: Not Implemented
+    /// As currently implemented, this functions the same as `Disable` (plaintext only).
+    ///
+    /// Modern applications should default to `Prefer` or stronger if SSL/TLS is desired.
+    /// There is little reason to implement this option as it was designed.
     Allow,
 
-    /// First try an SSL connection; if that fails, try a non-SSL connection.
+    /// First try an SSL connection; if that fails, try a non-SSL (plaintext) connection.
     ///
     /// This is the default if no other mode is specified.
     #[default]

@@ -2,7 +2,7 @@ use std::io::{self, Read, Write};
 
 use crate::io::ReadBuf;
 use crate::net::tls::util::StdSocket;
-use crate::net::tls::TlsConfig;
+use crate::net::tls::TlsOptions;
 use crate::net::Socket;
 use crate::rt;
 use crate::Error;
@@ -44,7 +44,7 @@ pub struct NativeTlsConnector {
     connector: native_tls::TlsConnector,
 }
 
-pub async fn connector(config: TlsConfig<'_>) -> crate::Result<NativeTlsConnector> {
+pub async fn connector(config: TlsOptions<'_>) -> crate::Result<NativeTlsConnector> {
     let mut builder = native_tls::TlsConnector::builder();
 
     builder

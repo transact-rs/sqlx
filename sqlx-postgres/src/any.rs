@@ -242,6 +242,12 @@ impl<'a> TryFrom<&'a AnyConnectOptions> for PgConnectOptions {
     fn try_from(value: &'a AnyConnectOptions) -> Result<Self, Self::Error> {
         let mut opts = PgConnectOptions::parse_from_url(&value.database_url)?;
         opts.log_settings = value.log_settings.clone();
+
+        #[cfg(feature = "_tls-rustls")]
+        if let Some(config) = &value.rustls_config {
+            opts = opts.rustls_config(config.clone());
+        }
+
         Ok(opts)
     }
 }

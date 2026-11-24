@@ -1,8 +1,4 @@
-use std::future;
-use std::io::{self, Read, Write};
-use std::sync::Arc;
-use std::task::{ready, Context, Poll};
-
+use cfg_if::cfg_if;
 use rustls::{
     client::{
         danger::{ServerCertVerified, ServerCertVerifier},
@@ -15,11 +11,15 @@ use rustls::{
     },
     CertificateError, ClientConfig, ClientConnection, Error as TlsError, RootCertStore,
 };
+use std::future;
+use std::io::{self, Read, Write};
+use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 
 use crate::error::Error;
 use crate::io::ReadBuf;
 use crate::net::tls::util::StdSocket;
-use crate::net::tls::TlsConfig;
+use crate::net::tls::{TlsConfig, TlsOptions};
 use crate::net::Socket;
 
 pub struct RustlsSocket<S: Socket> {
@@ -103,24 +103,27 @@ impl<S: Socket> Socket for RustlsSocket<S> {
 
 #[derive(Debug, Clone)]
 pub struct RustlsConnector {
-    config: Arc<ClientConfig>,
+    pub config: Arc<ClientConfig>,
 }
 
 pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {
-    #[cfg(all(
-        any(
-            feature = "_tls-rustls-aws-lc-rs",
-            feature = "_tls-rustls-aws-lc-rs-native-roots"
-        ),
-        not(feature = "_tls-rustls-ring-webpki"),
-        not(feature = "_tls-rustls-ring-native-roots")
-    ))]
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    #[cfg(any(
-        feature = "_tls-rustls-ring-webpki",
-        feature = "_tls-rustls-ring-native-roots"
-    ))]
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = match tls_config {
+        TlsConfig::Options(options) => build_config(options).await?,
+        TlsConfig::PrebuiltRustls(config) => config.clone(),
+    };
+
+    Ok(RustlsConnector { config })
+}
+
+async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig>, Error> {
+    // The global `CryptoProvider` (as determined by [`CryptoProvider::get_default()`]) is
+    // deliberately ignored by SQLx. This is because, in the coming 0.24 release,
+    // [this API has been deleted from RusTLS](https://docs.rs/rustls/0.24.0-dev.3/rustls/index.html#cryptography-providers),
+    // so it makes little sense to write code that depends on it at this point.
+    let provider = match options.rustls_crypto_provider {
+        Some(provider) => Arc::clone(provider),
+        None => default_crypto_provider()?,
+    };
 
     // Unwrapping is safe here because we use a default provider.
     let config = ClientConfig::builder_with_provider(provider.clone())
@@ -128,7 +131,7 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
         .unwrap();
 
     // authentication using user's key and its associated certificate
-    let user_auth = match (tls_config.client_cert_path, tls_config.client_key_path) {
+    let user_auth = match (options.client_cert_path, options.client_key_path) {
         (Some(cert_path), Some(key_path)) => {
             let cert_chain = certs_from_pem(cert_path.data().await?)?;
             let key_der = private_key_from_pem(key_path.data().await?)?;
@@ -142,7 +145,7 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
         }
     };
 
-    let config = if tls_config.accept_invalid_certs {
+    let config = if options.accept_invalid_certs {
         if let Some(user_auth) = user_auth {
             config
                 .dangerous()
@@ -158,7 +161,7 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
     } else {
         let mut cert_store = import_root_certs();
 
-        if let Some(ca) = tls_config.root_cert_path {
+        if let Some(ca) = options.root_cert_path {
             let data = ca.data().await?;
 
             for result in CertificateDer::pem_slice_iter(&data) {
@@ -170,7 +173,7 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
             }
         }
 
-        if tls_config.accept_invalid_hostnames {
+        if options.accept_invalid_hostnames {
             let verifier = WebPkiServerVerifier::builder(Arc::new(cert_store))
                 .build()
                 .map_err(|err| Error::Tls(err.into()))?;
@@ -199,9 +202,23 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
         }
     };
 
-    Ok(RustlsConnector {
-        config: Arc::new(config),
-    })
+    Ok(Arc::new(config))
+}
+
+fn default_crypto_provider() -> Result<Arc<CryptoProvider>, Error> {
+    cfg_if! {
+        if #[cfg(feature = "_tls-rustls-ring")] {
+            Ok(Arc::new(rustls::crypto::ring::default_provider()))
+        } else if #[cfg(feature = "_tls-rustls-aws-lc-rs")] {
+            Ok(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        } else {
+            Err(Error::tls(
+                "SQLx is unable to build a `rustls::ClientConfig`: \
+                 a custom `CryptoProvider` was not provided and neither \
+                 the `tls-rustls-aws-lc-rs` or `tls-rustls-ring` features are enabled"
+            ))
+        }
+    }
 }
 
 pub async fn handshake<S>(
@@ -262,7 +279,6 @@ fn import_root_certs() -> RootCertStore {
     root_cert_store
 }
 
-// Not currently used but allows for a "tls-rustls-no-roots" feature.
 #[cfg(not(any(feature = "rustls-native-certs", feature = "webpki-roots")))]
 fn import_root_certs() -> RootCertStore {
     RootCertStore::empty()
@@ -460,13 +476,14 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
         let mut cx = Context::from_waker(Waker::noop());
 
         // The client's config as `sslmode=require` builds it; loading no files, it's ready at once.
-        let tls_config = TlsConfig {
+        let tls_config = TlsConfig::Options(TlsOptions {
             accept_invalid_certs: true,
             accept_invalid_hostnames: true,
             root_cert_path: None,
             client_cert_path: None,
             client_key_path: None,
-        };
+            rustls_crypto_provider: None,
+        });
         let Poll::Ready(Ok(RustlsConnector { config })) = pin!(connector(tls_config)).poll(&mut cx)
         else {
             panic!("`connector()` should be ready at once");

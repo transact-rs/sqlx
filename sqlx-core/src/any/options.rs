@@ -19,6 +19,15 @@ use url::Url;
 pub struct AnyConnectOptions {
     pub database_url: Url,
     pub log_settings: LogSettings,
+
+    /// A custom [`rustls::ClientConfig`] for TLS connections.
+    ///
+    /// For details, see the corresponding setter on `MySqlConnectOptions` or `PgConnectOptions`,
+    /// respectively.
+    ///
+    /// May not be applicable to some drivers (e.g. SQLite).
+    #[cfg(feature = "_tls-rustls")]
+    pub rustls_config: Option<std::sync::Arc<rustls::ClientConfig>>,
 }
 impl FromStr for AnyConnectOptions {
     type Err = Error;
@@ -29,6 +38,8 @@ impl FromStr for AnyConnectOptions {
                 .parse::<Url>()
                 .map_err(|e| Error::Configuration(e.into()))?,
             log_settings: LogSettings::default(),
+            #[cfg(feature = "_tls-rustls")]
+            rustls_config: None,
         })
     }
 }
@@ -40,6 +51,8 @@ impl ConnectOptions for AnyConnectOptions {
         Ok(AnyConnectOptions {
             database_url: url.clone(),
             log_settings: LogSettings::default(),
+            #[cfg(feature = "_tls-rustls")]
+            rustls_config: None,
         })
     }
 

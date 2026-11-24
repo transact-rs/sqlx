@@ -26,6 +26,9 @@ rust_decimal = ["dep:rust_decimal", "rust_decimal/maths", "sqlx-core/rust_decima
 time = ["dep:time", "sqlx-core/time"]
 uuid = ["dep:uuid", "sqlx-core/uuid"]
 
+# Enables `PgConnectOptions::rustls_config()`
+_tls-rustls = ["sqlx-core/_tls-rustls", "rustls"]
+
 [dependencies]
 # Futures crates
 futures-channel = { version = "0.3.32", default-features = false, features = ["sink", "alloc", "std"] }
@@ -39,6 +42,8 @@ hmac = { workspace = true }
 md-5 = { workspace = true }
 rand = { workspace = true }
 sha2 = { workspace = true }
+
+rustls = { workspace = true, optional = true }
 
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
 bigdecimal = { workspace = true, optional = true }
@@ -56,6 +61,7 @@ atoi = "2.0"
 base64.workspace = true
 bitflags = { version = "2.4", default-features = false }
 byteorder = { version = "1.4.3", default-features = false, features = ["std"] }
+cfg-if = { workspace = true }
 hex = "0.4.3"
 itoa = "1.0.5"
 log = "0.4.18"

@@ -162,7 +162,7 @@ impl Error {
 
     #[doc(hidden)]
     #[inline]
-    pub fn config(err: impl StdError + Send + Sync + 'static) -> Self {
+    pub fn config(err: impl Into<Box<dyn StdError + Send + Sync + 'static>>) -> Self {
         Error::Configuration(err.into())
     }
 
