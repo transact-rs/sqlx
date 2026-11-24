@@ -305,7 +305,7 @@ test_type!(mac_address_vec<Vec<sqlx::types::mac_address::MacAddress>>(Postgres,
 // Postgres can store dates and times that `chrono` and `time` cannot represent,
 // such as `infinity`, years far outside their range, or `24:00:00`.
 // These should fail to decode, in both text and binary format, instead of panicking or wrapping.
-#[cfg(any(feature = "chrono", feature = "time"))]
+#[cfg(any(feature = "chrono", feature = "time", feature = "jiff"))]
 async fn assert_decode_error<T>(
     conn: &mut sqlx::PgConnection,
     sql: &'static str,
@@ -500,6 +500,153 @@ mod time_tests {
         )
         .await?;
         assert_decode_error::<PgRange<OffsetDateTime>>(
+            &mut conn,
+            "SELECT tstzrange('-infinity', 'infinity')",
+        )
+        .await?;
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "jiff")]
+mod jiff_tests {
+    use super::*;
+    use sqlx::types::jiff::{Date, DateTime, Offset, SignedDuration, Time, Timestamp};
+
+    type PgTimeTz = sqlx::postgres::types::PgTimeTz<Time, Offset>;
+
+    test_type!(jiff_date<Date>(
+        Postgres,
+        "DATE '2001-01-05'" == Date::constant(2001, 1, 5),
+        "DATE '2050-11-23'" == Date::constant(2050, 11, 23),
+        "DATE '1970-01-01'" == Date::constant(1970, 1, 1),
+        "DATE '0001-01-01'" == Date::constant(1, 1, 1),
+        "DATE '9999-12-31'" == Date::constant(9999, 12, 31)
+    ));
+
+    test_type!(jiff_time<Time>(
+        Postgres,
+        "TIME '05:10:20.115100'" == Time::constant(5, 10, 20, 115_100_000),
+        "TIME '05:10:20'" == Time::constant(5, 10, 20, 0),
+        "TIME '00:00:00'" == Time::midnight(),
+        "TIME '23:59:59.999999'" == Time::constant(23, 59, 59, 999_999_000)
+    ));
+
+    test_type!(jiff_date_time<DateTime>(
+        Postgres,
+        "TIMESTAMP '2019-01-02 05:10:20'" == Date::constant(2019, 1, 2).at(5, 10, 20, 0),
+        "TIMESTAMP '2019-01-02 05:10:20.1151'" == Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_000),
+        "TIMESTAMP '1999-12-31 23:59:59.999999'" == Date::constant(1999, 12, 31).at(23, 59, 59, 999_999_000)
+    ));
+
+    test_type!(jiff_date_time_vec<Vec<DateTime>>(
+        Postgres,
+        "array['2019-01-02 05:10:20']::timestamp[]" == vec![Date::constant(2019, 1, 2).at(5, 10, 20, 0)]
+    ));
+
+    test_type!(jiff_timestamp<Timestamp>(
+        Postgres,
+        "TIMESTAMPTZ '2019-01-02 05:10:20.115100+00'"
+            == Offset::UTC.to_timestamp(Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_000)).unwrap(),
+        "TIMESTAMPTZ '2019-01-02 05:10:20.115100+06:30'"
+            == Offset::UTC.to_timestamp(Date::constant(2019, 1, 1).at(22, 40, 20, 115_100_000)).unwrap(),
+        "TIMESTAMPTZ '1970-01-01 00:00:00+00'" == Timestamp::UNIX_EPOCH
+    ));
+
+    test_type!(jiff_timestamp_vec<Vec<Timestamp>>(
+        Postgres,
+        "array['2019-01-02 05:10:20.115100+00']::timestamptz[]"
+            == vec![Offset::UTC.to_timestamp(Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_000)).unwrap()]
+    ));
+
+    test_type!(jiff_time_tz<PgTimeTz>(Postgres,
+        "TIMETZ '05:10:20.115100+00'" == PgTimeTz { time: Time::constant(5, 10, 20, 115_100_000), offset: Offset::UTC },
+        "TIMETZ '05:10:20.115100+06:30'" == PgTimeTz { time: Time::constant(5, 10, 20, 115_100_000), offset: Offset::from_seconds(60 * 60 * 6 + 1800).unwrap() },
+        "TIMETZ '05:10:20.115100-05'" == PgTimeTz { time: Time::constant(5, 10, 20, 115_100_000), offset: Offset::constant(-5) },
+        "TIMETZ '05:10:20+02'" == PgTimeTz { time: Time::constant(5, 10, 20, 0), offset: Offset::constant(2) }
+    ));
+
+    test_type!(jiff_date_range<PgRange<Date>>(
+        Postgres,
+        "daterange('2001-01-05', '2001-02-05')"
+            == PgRange::from(Date::constant(2001, 1, 5)..Date::constant(2001, 2, 5))
+    ));
+
+    test_type!(jiff_timestamp_range<PgRange<Timestamp>>(
+        Postgres,
+        "tstzrange('1970-01-01 00:00:00+00', NULL)"
+            == PgRange::from(Timestamp::UNIX_EPOCH..)
+    ));
+
+    // `SignedDuration` only implements `Encode`, so it can only be bound as a parameter
+    #[sqlx_macros::test]
+    async fn jiff_signed_duration() -> anyhow::Result<()> {
+        use sqlx::Row;
+
+        let mut conn = new::<Postgres>().await?;
+
+        let row = sqlx::query("SELECT $1 = INTERVAL '03:10:20.116100', $2 = INTERVAL '-1 hour'")
+            .bind(SignedDuration::new(3 * 3600 + 10 * 60 + 20, 116_100_000))
+            .bind(SignedDuration::from_hours(-1))
+            .fetch_one(&mut conn)
+            .await?;
+
+        assert!(row.get::<bool, _>(0));
+        assert!(row.get::<bool, _>(1));
+
+        Ok(())
+    }
+
+    // Jiff has nanosecond precision, Postgres only has microsecond precision.
+    #[sqlx_macros::test]
+    async fn jiff_truncates_nanoseconds() -> anyhow::Result<()> {
+        let mut conn = new::<Postgres>().await?;
+
+        let (time, datetime, timestamp): (Time, DateTime, Timestamp) =
+            sqlx::query_as("SELECT $1::time, $2::timestamp, $3::timestamptz")
+                .bind(Time::constant(5, 10, 20, 115_100_999))
+                .bind(Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_999))
+                // Before the Postgres epoch, truncation must still round towards the past
+                .bind(Timestamp::new(-1, -1).unwrap())
+                .fetch_one(&mut conn)
+                .await?;
+
+        assert_eq!(time, Time::constant(5, 10, 20, 115_100_000));
+        assert_eq!(
+            datetime,
+            Date::constant(2019, 1, 2).at(5, 10, 20, 115_100_000)
+        );
+        assert_eq!(timestamp, Timestamp::new(-1, -1_000).unwrap());
+
+        Ok(())
+    }
+
+    #[sqlx_macros::test]
+    async fn jiff_out_of_range() -> anyhow::Result<()> {
+        let mut conn = new::<Postgres>().await?;
+
+        assert_decode_error::<Date>(&mut conn, "SELECT DATE 'infinity'").await?;
+        assert_decode_error::<Date>(&mut conn, "SELECT DATE '-infinity'").await?;
+        assert_decode_error::<Date>(&mut conn, "SELECT DATE '5874897-12-31'").await?;
+
+        assert_decode_error::<DateTime>(&mut conn, "SELECT TIMESTAMP 'infinity'").await?;
+        assert_decode_error::<DateTime>(&mut conn, "SELECT TIMESTAMP '-infinity'").await?;
+        assert_decode_error::<DateTime>(&mut conn, "SELECT TIMESTAMP '294276-12-31 23:59:59'")
+            .await?;
+
+        assert_decode_error::<Timestamp>(&mut conn, "SELECT TIMESTAMPTZ 'infinity'").await?;
+        assert_decode_error::<Timestamp>(&mut conn, "SELECT TIMESTAMPTZ '-infinity'").await?;
+
+        assert_decode_error::<Time>(&mut conn, "SELECT TIME '24:00:00'").await?;
+        assert_decode_error::<PgTimeTz>(&mut conn, "SELECT TIMETZ '24:00:00+00'").await?;
+
+        assert_decode_error::<Vec<DateTime>>(
+            &mut conn,
+            "SELECT array['2019-01-02 05:10:20', 'infinity']::timestamp[]",
+        )
+        .await?;
+        assert_decode_error::<PgRange<Timestamp>>(
             &mut conn,
             "SELECT tstzrange('-infinity', 'infinity')",
         )

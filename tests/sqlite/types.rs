@@ -128,6 +128,98 @@ mod chrono {
     ));
 }
 
+#[cfg(feature = "jiff")]
+mod jiff_tests {
+    use super::*;
+    use sqlx::types::jiff::{Date, DateTime, Offset, Time, Timestamp};
+
+    fn utc(dt: DateTime) -> Timestamp {
+        Offset::UTC.to_timestamp(dt).unwrap()
+    }
+
+    test_type!(jiff_timestamp<Timestamp>(
+        Sqlite,
+        "SELECT datetime({0}) is datetime(?), {0}, ?",
+        "'2015-11-19 01:01:39+01:00'" == utc(Date::constant(2015, 11, 19).at(0, 1, 39, 0)),
+        "'2014-10-18 00:00:38.697+00:00'" == utc(Date::constant(2014, 10, 18).at(0, 0, 38, 697_000_000)),
+        "'2013-09-17 23:59-01:00'" == utc(Date::constant(2013, 9, 18).at(0, 59, 0, 0)),
+        "'2016-03-07T22:36:55.135+03:30'" == utc(Date::constant(2016, 3, 7).at(19, 6, 55, 135_000_000)),
+        "'2017-04-11T14:35+02:00'" == utc(Date::constant(2017, 4, 11).at(12, 35, 0, 0)),
+        "'1996-12-20T00:39:57Z'" == utc(Date::constant(1996, 12, 20).at(0, 39, 57, 0)),
+        // No offset: assumed to be UTC
+        "'2019-01-02 05:10:20'" == utc(Date::constant(2019, 1, 2).at(5, 10, 20, 0)),
+    ));
+
+    test_type!(jiff_date_time<DateTime>(
+        Sqlite,
+        "SELECT datetime({0}) is datetime(?), {0}, ?",
+        "'2019-01-02 05:10:20'" == Date::constant(2019, 1, 2).at(5, 10, 20, 0),
+        "'2018-12-01 04:09:19.543'" == Date::constant(2018, 12, 1).at(4, 9, 19, 543_000_000),
+        "'2017-11-30 03:08'" == Date::constant(2017, 11, 30).at(3, 8, 0, 0),
+        "'2016-10-29T02:07:17'" == Date::constant(2016, 10, 29).at(2, 7, 17, 0),
+        "'2015-09-28T01:06:16.432'" == Date::constant(2015, 9, 28).at(1, 6, 16, 432_000_000),
+        "'2014-08-27T00:05'" == Date::constant(2014, 8, 27).at(0, 5, 0, 0),
+        "'2013-07-26 23:04:14Z'" == Date::constant(2013, 7, 26).at(23, 4, 14, 0),
+        "'2012-06-25 22:03:13.321Z'" == Date::constant(2012, 6, 25).at(22, 3, 13, 321_000_000),
+        "'2011-05-24 21:02Z'" == Date::constant(2011, 5, 24).at(21, 2, 0, 0),
+        "'2010-04-23T20:01:11Z'" == Date::constant(2010, 4, 23).at(20, 1, 11, 0),
+        "'2009-03-22T19:00:10.21Z'" == Date::constant(2009, 3, 22).at(19, 0, 10, 210_000_000),
+        "'2008-02-21T18:59Z'" == Date::constant(2008, 2, 21).at(18, 59, 0, 0),
+    ));
+
+    test_type!(jiff_date<Date>(
+        Sqlite,
+        "SELECT date({0}) is date(?), {0}, ?",
+        "'2002-06-04'" == Date::constant(2002, 6, 4),
+    ));
+
+    test_type!(jiff_time<Time>(
+        Sqlite,
+        "SELECT time({0}) is time(?), {0}, ?",
+        "'21:46:32'" == Time::constant(21, 46, 32, 0),
+        "'20:45:31.133'" == Time::constant(20, 45, 31, 133_000_000),
+        "'19:44'" == Time::constant(19, 44, 0, 0),
+    ));
+
+    #[sqlx_macros::test]
+    async fn it_decodes_jiff_from_integer_and_real() -> anyhow::Result<()> {
+        let mut conn = new::<Sqlite>().await?;
+
+        let expected = Date::constant(2019, 1, 2).at(5, 10, 20, 0);
+
+        let (from_int, from_real): (DateTime, Timestamp) = sqlx::query_as(
+            "SELECT unixepoch('2019-01-02 05:10:20'), julianday('2019-01-02 05:10:20')",
+        )
+        .fetch_one(&mut conn)
+        .await?;
+
+        assert_eq!(from_int, expected);
+        // Allow for floating-point round-off in the Julian day
+        assert!(
+            from_real.duration_since(utc(expected)).abs()
+                < sqlx::types::jiff::SignedDuration::from_millis(1),
+            "{from_real} != {expected}"
+        );
+
+        Ok(())
+    }
+
+    // An INTEGER holding a Unix timestamp that is out of range for `jiff` (for example a
+    // millisecond timestamp far in the future) must fail to decode instead of panicking.
+    #[sqlx_macros::test]
+    async fn it_errors_on_out_of_range_integer_jiff() -> anyhow::Result<()> {
+        let mut conn = new::<Sqlite>().await?;
+
+        let result = sqlx::query_scalar::<_, Timestamp>("SELECT 1700000000000000")
+            .fetch_one(&mut conn)
+            .await;
+
+        assert!(result.is_err(), "expected a decode error, got {result:?}");
+
+        Ok(())
+    }
+}
+
 #[cfg(feature = "time")]
 mod time_tests {
     use super::*;

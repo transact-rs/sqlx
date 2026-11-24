@@ -20,6 +20,7 @@ rsa = ["dep:rand", "dep:rsa"]
 # Type Integration features
 bigdecimal = ["dep:bigdecimal", "sqlx-core/bigdecimal"]
 chrono = ["dep:chrono", "sqlx-core/chrono"]
+jiff = ["dep:jiff", "sqlx-core/jiff"]
 rust_decimal = ["dep:rust_decimal", "rust_decimal/maths", "sqlx-core/rust_decimal"]
 time = ["dep:time", "sqlx-core/time"]
 uuid = ["dep:uuid", "sqlx-core/uuid"]
@@ -42,6 +43,7 @@ sha2 = { workspace = true }
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
 bigdecimal = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 rust_decimal = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }

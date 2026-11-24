@@ -220,6 +220,39 @@ impl Type<Postgres> for PgRange<time::OffsetDateTime> {
     }
 }
 
+#[cfg(feature = "jiff")]
+impl Type<Postgres> for PgRange<jiff::civil::Date> {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::DATE_RANGE
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        range_compatible::<jiff::civil::Date>(ty)
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl Type<Postgres> for PgRange<jiff::civil::DateTime> {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::TS_RANGE
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        range_compatible::<jiff::civil::DateTime>(ty)
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl Type<Postgres> for PgRange<jiff::Timestamp> {
+    fn type_info() -> PgTypeInfo {
+        PgTypeInfo::TSTZ_RANGE
+    }
+
+    fn compatible(ty: &PgTypeInfo) -> bool {
+        range_compatible::<jiff::Timestamp>(ty)
+    }
+}
+
 impl PgHasArrayType for PgRange<i32> {
     fn array_type_info() -> PgTypeInfo {
         PgTypeInfo::INT4_RANGE_ARRAY
@@ -283,6 +316,27 @@ impl PgHasArrayType for PgRange<time::PrimitiveDateTime> {
 
 #[cfg(feature = "time")]
 impl PgHasArrayType for PgRange<time::OffsetDateTime> {
+    fn array_type_info() -> PgTypeInfo {
+        PgTypeInfo::TSTZ_RANGE_ARRAY
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl PgHasArrayType for PgRange<jiff::civil::Date> {
+    fn array_type_info() -> PgTypeInfo {
+        PgTypeInfo::DATE_RANGE_ARRAY
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl PgHasArrayType for PgRange<jiff::civil::DateTime> {
+    fn array_type_info() -> PgTypeInfo {
+        PgTypeInfo::TS_RANGE_ARRAY
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl PgHasArrayType for PgRange<jiff::Timestamp> {
     fn array_type_info() -> PgTypeInfo {
         PgTypeInfo::TSTZ_RANGE_ARRAY
     }

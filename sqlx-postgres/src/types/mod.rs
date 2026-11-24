@@ -77,6 +77,21 @@
 //! | `time::Time`                          | TIME                                                 |
 //! | [`PgTimeTz`]                          | TIMETZ                                               |
 //!
+//! ### [`jiff`](https://crates.io/crates/jiff)
+//!
+//! Requires the `jiff` Cargo feature flag.
+//!
+//! | Rust type                             | Postgres type(s)                                     |
+//! |---------------------------------------|------------------------------------------------------|
+//! | `jiff::civil::DateTime`               | TIMESTAMP                                            |
+//! | `jiff::Timestamp`                     | TIMESTAMPTZ                                          |
+//! | `jiff::civil::Date`                   | DATE                                                 |
+//! | `jiff::civil::Time`                   | TIME                                                 |
+//! | [`PgTimeTz`]                          | TIMETZ                                               |
+//!
+//! Jiff types have nanosecond precision, while Postgres has microsecond precision.
+//! When encoding, the sub-microsecond part of a value is truncated.
+//!
 //! ### [`uuid`](https://crates.io/crates/uuid)
 //!
 //! Requires the `uuid` Cargo feature flag.
@@ -236,7 +251,7 @@ mod text;
 mod tuple;
 mod void;
 
-#[cfg(any(feature = "chrono", feature = "time"))]
+#[cfg(any(feature = "chrono", feature = "time", feature = "jiff"))]
 mod time_tz;
 
 #[cfg(feature = "bigdecimal")]
@@ -257,6 +272,9 @@ mod chrono;
 
 #[cfg(feature = "time")]
 mod time;
+
+#[cfg(feature = "jiff")]
+mod jiff;
 
 #[cfg(feature = "uuid")]
 mod uuid;
@@ -296,7 +314,7 @@ pub use money::PgMoney;
 pub use oid::Oid;
 pub use range::PgRange;
 
-#[cfg(any(feature = "chrono", feature = "time"))]
+#[cfg(any(feature = "chrono", feature = "time", feature = "jiff"))]
 pub use time_tz::PgTimeTz;
 
 // used in derive(Type) for `struct`

@@ -17,6 +17,7 @@ migrate = ["sqlx-core/migrate"]
 
 # Type integrations
 chrono = ["dep:chrono", "sqlx-core/chrono"]
+jiff = ["dep:jiff", "sqlx-core/jiff"]
 time = ["dep:time", "sqlx-core/time"]
 uuid = ["dep:uuid", "sqlx-core/uuid"]
 
@@ -38,7 +39,7 @@ bigdecimal = []
 rust_decimal = []
 
 _unstable-all-types = [
-    "json", "chrono", "time", "uuid",
+    "json", "chrono", "jiff", "time", "uuid",
 ]
 
 _unstable-all-sqlite-features = [
@@ -72,6 +73,7 @@ futures-intrusive = "0.5.0"
 futures-util = { version = "0.3.32", default-features = false, features = ["alloc", "sink"] }
 
 chrono = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 time = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 

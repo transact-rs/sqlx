@@ -65,12 +65,16 @@ bar = true
 [macros.preferred-crates]
 # Force the macros to use the `chrono` crate for date/time types, even if `time` is enabled.
 #
-# Defaults to "inferred": use whichever crate is enabled (`time` takes precedence over `chrono`).
+# Defaults to "inferred": use whichever crate is enabled
+# (`time` takes precedence over `chrono`, which takes precedence over `jiff`).
 date-time = "chrono"
 
 # Or, ensure the macros always prefer `time`
 # in case new date/time crates are added in the future:
 # date-time = "time"
+
+# Or, use `jiff`:
+# date-time = "jiff"
 
 # Force the macros to use the `rust_decimal` crate for `NUMERIC`, even if `bigdecimal` is enabled.
 #

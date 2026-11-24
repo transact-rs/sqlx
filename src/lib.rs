@@ -186,10 +186,14 @@ pub mod _unstable {
 
 #[doc(hidden)]
 #[cfg_attr(
-    all(feature = "chrono", feature = "time"),
-    deprecated = "SQLx has both `chrono` and `time` features enabled, \
+    any(
+        all(feature = "chrono", feature = "time"),
+        all(feature = "chrono", feature = "jiff"),
+        all(feature = "time", feature = "jiff"),
+    ),
+    deprecated = "SQLx has more than one of the `chrono`, `time` and `jiff` features enabled, \
         which presents an ambiguity when the `query!()` macros are mapping date/time types. \
-        The `query!()` macros prefer types from `time` by default, \
+        The `query!()` macros prefer types from `time`, then `chrono`, then `jiff` by default, \
         but this behavior should not be relied upon; \
         to resolve the ambiguity, we recommend specifying the preferred crate in a `sqlx.toml` file: \
         https://docs.rs/sqlx/latest/sqlx/config/macros/PreferredCrates.html#field.date_time"
