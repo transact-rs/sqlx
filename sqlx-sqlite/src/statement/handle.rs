@@ -273,7 +273,7 @@ impl StatementHandle {
                     .to_bytes()
                     .eq_ignore_ascii_case("integer".as_bytes());
 
-Ok(if is_rowid_alias {
+            Ok(if is_rowid_alias {
                 Some(false)
             } else {
                 Some(not_null == 0)
