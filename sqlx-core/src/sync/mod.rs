@@ -1,6 +1,9 @@
 use cfg_if::cfg_if;
 use std::future::Future;
 
+#[cfg(feature = "_rt-async-io")]
+mod rt_async_io;
+
 // For types with identical signatures that don't require runtime support,
 // we can just arbitrarily pick one to use based on what's enabled.
 //
@@ -8,24 +11,8 @@ use std::future::Future;
 // (including `tokio-console` support) and more widely deployed.
 
 pub struct AsyncSemaphore {
-    // We use the semaphore from futures-intrusive as the one from async-lock
-    // is missing the ability to add arbitrary permits, and is not guaranteed to be fair:
-    // * https://github.com/smol-rs/async-lock/issues/22
-    // * https://github.com/smol-rs/async-lock/issues/23
-    //
-    // We're on the look-out for a replacement, however, as futures-intrusive is not maintained
-    // and there are some soundness concerns (although it turns out any intrusive future is unsound
-    // in MIRI due to the necessitated mutable aliasing):
-    // https://github.com/launchbadge/sqlx/issues/1668
-    #[cfg(all(
-        any(
-            feature = "_rt-async-global-executor",
-            feature = "_rt-async-std",
-            feature = "_rt-smol"
-        ),
-        not(feature = "_rt-tokio")
-    ))]
-    inner: futures_intrusive::sync::Semaphore,
+    #[cfg(all(feature = "_rt-async-io", not(feature = "_rt-tokio")))]
+    inner: rt_async_io::FairSemaphore,
 
     #[cfg(feature = "_rt-tokio")]
     inner: tokio::sync::Semaphore,
@@ -34,12 +21,7 @@ pub struct AsyncSemaphore {
 impl AsyncSemaphore {
     #[track_caller]
     pub fn new(fair: bool, permits: usize) -> Self {
-        if cfg!(not(any(
-            feature = "_rt-async-global-executor",
-            feature = "_rt-async-std",
-            feature = "_rt-smol",
-            feature = "_rt-tokio"
-        ))) {
+        if cfg!(not(any(feature = "_rt-async-io", feature = "_rt-tokio",))) {
             crate::rt::missing_rt((fair, permits));
         }
 
