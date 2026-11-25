@@ -117,7 +117,7 @@ impl PgConnection {
     }
 
     #[inline(always)]
-    fn handle_ready_for_query(&mut self, message: ReceivedMessage) -> Result<(), Error> {
+    pub(crate) fn handle_ready_for_query(&mut self, message: ReceivedMessage) -> Result<(), Error> {
         self.inner.pending_ready_for_query_count = self
             .inner
             .pending_ready_for_query_count
@@ -267,6 +267,15 @@ impl Connection for PgConnection {
     #[doc(hidden)]
     fn should_flush(&self) -> bool {
         !self.inner.stream.write_buffer().is_empty()
+    }
+
+    #[doc(hidden)]
+    fn is_protocol_idle(&self) -> bool {
+        // Every message sequence that expects a reply ends in `Sync` or `Query`, and each one counts the `ReadyForQuery` it is owed before its first await. A future dropped at any await therefore leaves either buffered bytes or an owed `ReadyForQuery`. With neither, the last `ReadyForQuery` ended every exchange, and its status tells us whether the server is still inside a transaction block.
+        self.inner.pending_ready_for_query_count == 0
+            && self.inner.stream.write_buffer().is_empty()
+            && self.inner.transaction_depth == 0
+            && matches!(self.inner.transaction_status, TransactionStatus::Idle)
     }
 }
 
