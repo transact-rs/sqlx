@@ -1,8 +1,9 @@
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgConnection, Postgres};
 use sqlx::Executor;
 use sqlx::Row;
+use sqlx::SqlSafeStr;
 use std::path::Path;
 
 #[sqlx::test(migrations = false)]
@@ -52,6 +53,30 @@ async fn run_releases_lock_on_error(mut conn: PoolConnection<Postgres>) -> anyho
         .run(&mut conn)
         .await
         .expect_err("migrator with missing migrations should fail");
+
+    assert_eq!(advisory_locks_held(&mut conn).await?, 0);
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn run_releases_lock_on_failed_migration(
+    mut conn: PoolConnection<Postgres>,
+) -> anyhow::Result<()> {
+    clean_up(&mut conn).await?;
+
+    let failing = Migrator::with_migrations(vec![Migration::new(
+        1,
+        "fail".into(),
+        MigrationType::Simple,
+        "SELECT * FROM table_that_does_not_exist".into_sql_str(),
+        false,
+    )]);
+
+    failing
+        .run(&mut conn)
+        .await
+        .expect_err("failing migration should fail");
 
     assert_eq!(advisory_locks_held(&mut conn).await?, 0);
 
