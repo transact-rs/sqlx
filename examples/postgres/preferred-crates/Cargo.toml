@@ -35,3 +35,6 @@ package = "sqlx-example-postgres-preferred-crates-uses-time"
 
 [lints]
 workspace = true
+
+[lints]
+workspace=true

@@ -21,3 +21,6 @@ package = "sqlx-example-postgres-multi-tenant-accounts"
 
 [dev-dependencies]
 sqlx = { workspace = true, features = ["runtime-tokio"] }
+
+[lints]
+workspace=true

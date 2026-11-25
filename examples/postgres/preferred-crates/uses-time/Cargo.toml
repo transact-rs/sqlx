@@ -19,3 +19,6 @@ features = ["runtime-tokio", "postgres", "time", "json", "uuid"]
 
 [lints]
 workspace = true
+
+[lints]
+workspace=true

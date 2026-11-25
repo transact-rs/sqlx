@@ -34,3 +34,6 @@ package = "sqlx-example-postgres-multi-tenant-payments"
 
 [lints]
 workspace = true
+
+[lints]
+workspace=true

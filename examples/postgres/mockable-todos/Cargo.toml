@@ -12,3 +12,6 @@ tokio = { version = "1.25.0", features = ["rt", "macros"]}
 dotenvy = "0.15.7"
 async-trait = "0.1.43"
 mockall = "0.11"
+
+[lints]
+workspace=true

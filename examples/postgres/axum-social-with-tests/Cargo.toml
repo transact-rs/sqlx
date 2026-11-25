@@ -31,3 +31,6 @@ tracing = "0.1.37"
 http-body-util = "0.1"
 serde_json = "1.0.142"
 tower = "0.5.2"
+
+[lints]
+workspace=true

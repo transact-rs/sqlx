@@ -10,3 +10,6 @@ tokio = { version = "1.25.0", features = [ "rt-multi-thread", "macros" ] }
 ratatui = "0.30.0"
 crossterm = "0.29.0"
 unicode-width = "0.2.2"
+
+[lints]
+workspace=true
