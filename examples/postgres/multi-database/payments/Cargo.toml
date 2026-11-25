@@ -18,3 +18,6 @@ package = "sqlx-example-postgres-multi-database-accounts"
 
 [dev-dependencies]
 sqlx = { workspace = true, features = ["runtime-tokio"] }
+
+[lints]
+workspace=true

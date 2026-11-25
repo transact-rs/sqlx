@@ -1,15 +1,16 @@
+use sqlx_core::net::tls::WithCachedTlsConnector;
+use sqlx_core::net::UrlHost;
+pub use ssl_mode::PgSslMode;
 use std::borrow::Cow;
 use std::env::var;
 use std::fmt::{self, Display, Write};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
-
-use sqlx_core::net::tls::TlsConnector;
-use sqlx_core::net::UrlHost;
-pub use ssl_mode::PgSslMode;
 
 use crate::{connection::LogSettings, net::tls::CertificateInput};
+
+#[cfg(feature = "_tls-rustls")]
+use std::sync::Arc;
 
 mod connect;
 mod parse;
@@ -26,7 +27,7 @@ pub struct PgConnectOptions {
     pub(crate) username: String,
     pub(crate) password: Option<String>,
     pub(crate) database: Option<String>,
-    pub(crate) ssl_options: SslOptions,
+    pub(crate) ssl: WithCachedTlsConnector<SslOptions>,
     pub(crate) statement_cache_capacity: usize,
     pub(crate) application_name: Option<String>,
     pub(crate) log_settings: LogSettings,
@@ -46,7 +47,12 @@ pub(crate) struct SslOptions {
     pub(crate) ssl_root_cert: Option<CertificateInput>,
     pub(crate) ssl_client_cert: Option<CertificateInput>,
     pub(crate) ssl_client_key: Option<CertificateInput>,
-    pub(crate) cached_connector: Arc<OnceLock<TlsConnector>>,
+
+    pub(crate) include_root_bundle: bool,
+    pub(crate) danger_custom_rustls_config: bool,
+
+    #[cfg(feature = "_tls-rustls")]
+    pub(crate) rustls_crypto_provider: Option<Arc<rustls::crypto::CryptoProvider>>,
 }
 
 impl PgConnectOptions {
@@ -93,19 +99,22 @@ impl PgConnectOptions {
             username,
             password: var("PGPASSWORD").ok(),
             database,
-            ssl_options: SslOptions {
+            ssl: WithCachedTlsConnector::new(SslOptions {
+                ssl_mode: var("PGSSLMODE")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_default(),
                 ssl_root_cert: var("PGSSLROOTCERT").ok().map(CertificateInput::from),
                 ssl_client_cert: var("PGSSLCERT").ok().map(CertificateInput::from),
                 // As of writing, the implementation of `From<String>` only looks for
                 // `-----BEGIN CERTIFICATE-----` and so will not attempt to parse
                 // a PEM-encoded private key.
                 ssl_client_key: var("PGSSLKEY").ok().map(CertificateInput::from),
-                ssl_mode: var("PGSSLMODE")
-                    .ok()
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or_default(),
-                cached_connector: Arc::new(OnceLock::new()),
-            },
+                include_root_bundle: true,
+                danger_custom_rustls_config: false,
+                #[cfg(feature = "_tls-rustls")]
+                rustls_crypto_provider: None,
+            }),
             statement_cache_capacity: 100,
             application_name: var("PGAPPNAME").ok(),
             extra_float_digits: Some("2".into()),
@@ -236,11 +245,6 @@ impl PgConnectOptions {
         self
     }
 
-    fn ssl_options_mut(&mut self) -> &mut SslOptions {
-        Arc::make_mut(&mut self.ssl_options.cached_connector).take();
-        &mut self.ssl_options
-    }
-
     /// Sets whether or with what priority a secure SSL TCP/IP connection will be negotiated
     /// with the server.
     ///
@@ -257,13 +261,15 @@ impl PgConnectOptions {
     ///     .ssl_mode(PgSslMode::Require);
     /// ```
     pub fn ssl_mode(mut self, mode: PgSslMode) -> Self {
-        self.ssl_options_mut().ssl_mode = mode;
+        self.ssl.options_mut().ssl_mode = mode;
         self
     }
 
     /// Sets the name of a file containing SSL certificate authority (CA) certificate(s).
     /// If the file exists, the server's certificate will be verified to be signed by
     /// one of these authorities.
+    ///
+    /// Ignored if a custom [`rustls::ClientConfig`] is set.
     ///
     /// # Example
     ///
@@ -275,12 +281,14 @@ impl PgConnectOptions {
     ///     .ssl_root_cert("./ca-certificate.crt");
     /// ```
     pub fn ssl_root_cert(mut self, cert: impl AsRef<Path>) -> Self {
-        self.ssl_options_mut().ssl_root_cert =
+        self.ssl.options_mut().ssl_root_cert =
             Some(CertificateInput::File(cert.as_ref().to_path_buf()));
         self
     }
 
     /// Sets the name of a file containing SSL client certificate.
+    ///
+    /// Ignored if a custom [`rustls::ClientConfig`] is set.
     ///
     /// # Example
     ///
@@ -292,7 +300,7 @@ impl PgConnectOptions {
     ///     .ssl_client_cert("./client.crt");
     /// ```
     pub fn ssl_client_cert(mut self, cert: impl AsRef<Path>) -> Self {
-        self.ssl_options_mut().ssl_client_cert =
+        self.ssl.options_mut().ssl_client_cert =
             Some(CertificateInput::File(cert.as_ref().to_path_buf()));
         self
     }
@@ -300,6 +308,8 @@ impl PgConnectOptions {
     /// Sets the SSL client certificate as a PEM-encoded byte slice.
     ///
     /// This should be an ASCII-encoded blob that starts with `-----BEGIN CERTIFICATE-----`.
+    ///
+    /// Ignored if a custom [`rustls::ClientConfig`] is set.
     ///
     /// # Example
     /// Note: embedding SSL certificates and keys in the binary is not advised.
@@ -319,12 +329,14 @@ impl PgConnectOptions {
     ///     .ssl_client_cert_from_pem(CERT);
     /// ```
     pub fn ssl_client_cert_from_pem(mut self, cert: impl AsRef<[u8]>) -> Self {
-        self.ssl_options_mut().ssl_client_cert =
+        self.ssl.options_mut().ssl_client_cert =
             Some(CertificateInput::Inline(cert.as_ref().to_vec()));
         self
     }
 
     /// Sets the name of a file containing SSL client key.
+    ///
+    /// Ignored if a custom [`rustls::ClientConfig`] is set.
     ///
     /// # Example
     ///
@@ -336,7 +348,7 @@ impl PgConnectOptions {
     ///     .ssl_client_key("./client.key");
     /// ```
     pub fn ssl_client_key(mut self, key: impl AsRef<Path>) -> Self {
-        self.ssl_options_mut().ssl_client_key =
+        self.ssl.options_mut().ssl_client_key =
             Some(CertificateInput::File(key.as_ref().to_path_buf()));
         self
     }
@@ -344,6 +356,8 @@ impl PgConnectOptions {
     /// Sets the SSL client key as a PEM-encoded byte slice.
     ///
     /// This should be an ASCII-encoded blob that starts with `-----BEGIN PRIVATE KEY-----`.
+    ///
+    /// Ignored if a custom [`rustls::ClientConfig`] is set.
     ///
     /// # Example
     /// Note: embedding SSL certificates and keys in the binary is not advised.
@@ -363,12 +377,14 @@ impl PgConnectOptions {
     ///     .ssl_client_key_from_pem(KEY);
     /// ```
     pub fn ssl_client_key_from_pem(mut self, key: impl AsRef<[u8]>) -> Self {
-        self.ssl_options_mut().ssl_client_key =
+        self.ssl.options_mut().ssl_client_key =
             Some(CertificateInput::Inline(key.as_ref().to_vec()));
         self
     }
 
     /// Sets PEM encoded trusted SSL Certificate Authorities (CA).
+    ///
+    /// Ignored if a custom [`rustls::ClientConfig`] is set.
     ///
     /// # Example
     ///
@@ -380,7 +396,123 @@ impl PgConnectOptions {
     ///     .ssl_root_cert_from_pem(vec![]);
     /// ```
     pub fn ssl_root_cert_from_pem(mut self, pem_certificate: Vec<u8>) -> Self {
-        self.ssl_options_mut().ssl_root_cert = Some(CertificateInput::Inline(pem_certificate));
+        self.ssl.options_mut().ssl_root_cert = Some(CertificateInput::Inline(pem_certificate));
+        self
+    }
+
+    /// If `true`, include the root certificate bundle if enabled in the `sqlx` crate features.
+    ///
+    /// If `tls-rustls-native-roots` is enabled, this loads the system root certificates
+    /// using [`rustls-native-certs`](https://docs.rs/rustls-native-certs/latest/rustls_native_certs/).
+    ///
+    /// If `tls-rustls-webpki-roots` is enabled, this includes
+    /// [`webpki_roots::TLS_SERVER_ROOTS`](https://docs.rs/webpki-roots/latest/webpki_roots/constant.TLS_SERVER_ROOTS.html).
+    ///
+    /// If neither feature is enabled, or a custom `rustls::ClientConfig` is set, this does nothing.
+    pub fn ssl_include_root_bundle(mut self, flag: bool) -> Self {
+        self.ssl.options_mut().include_root_bundle = flag;
+        self
+    }
+
+    /// Set a custom [`CryptoProvider`][rustls::crypto::CryptoProvider] for RusTLS.
+    ///
+    /// Must be set if a default crypto provider feature is not enabled (`tls-rustls-aws-lc-rs` or
+    /// `tls-rustls-ring`). Overrides the default crypto provider features if they are enabled.
+    ///
+    /// This is a no-op if the `tls-native-tls` feature is also enabled,
+    /// or an explicit `rustls::ClientConfig` is set (with [`Self::rustls_client_config()`].
+    ///
+    /// # Example: `rustls-graviola`
+    /// [`rustls-graviola`] is a pure Rust cryptography provider being developed by some of RusTLS's
+    /// core maintainers. It is difficult to recommend as the default choice yet (see [issue #4213]),
+    /// but it can be used today with this API:
+    ///
+    /// ```
+    /// use sqlx::postgres::PgConnectOptions;
+    ///
+    /// let opts = PgConnectOptions::new()
+    ///     .rustls_crypto_provider(rustls_graviola::default_provider());
+    /// ```
+    ///
+    /// [`rustls-graviola`]:
+    /// [issue #4213]: https://github.com/transact-rs/sqlx/issues/4213
+    ///
+    /// # Note: Global Crypto Provider is Ignored
+    /// The global `CryptoProvider` (as determined by [`CryptoProvider::get_default()`]) is
+    /// deliberately ignored by SQLx. This is because, in the coming RusTLS 0.24 release,
+    /// [this API has been deleted from RusTLS](https://docs.rs/rustls/0.24.0-dev.3/rustls/index.html#cryptography-providers),
+    /// so it makes little sense to write code that depends on it at this point.
+    ///
+    /// If you want to use the global `CryptoProvider`, you can set it yourself:
+    /// ```rust
+    /// use sqlx::postgres::PgConnectOptions;
+    ///
+    /// let opts = PgConnectOptions::new()
+    ///     .rustls_crypto_provider(
+    ///         rustls::crypto::CryptoProvider::get_default()
+    ///             .expect("a RusTLS CryptoProvider must be set")
+    ///     );
+    /// ```
+    ///
+    /// [`CryptoProvider::get_default()`]: rustls::crypto::CryptoProvider::get_default
+    #[cfg(feature = "_tls-rustls")]
+    pub fn rustls_crypto_provider(
+        mut self,
+        provider: impl Into<Arc<rustls::crypto::CryptoProvider>>,
+    ) -> Self {
+        self.ssl.options_mut().rustls_crypto_provider = Some(provider.into());
+        self
+    }
+
+    /// Set a custom [`ClientConfig`][rustls::ClientConfig] for RusTLS.
+    ///
+    /// This may be used to override nearly all of SQLx's TLS behavior, including
+    /// client and server certificate verification, and `CryptoProvider` configuration.
+    ///
+    /// This takes precedent **even if the `tls-native-tls` feature is enabled**.
+    /// This can be used to override the default behavior if a transitive dependency
+    /// unconditionally enables this feature.
+    ///
+    /// # Interaction with SSL Options
+    ///
+    /// ## [`ssl_mode`][Self::ssl_mode]
+    ///
+    /// * [`PgSslMode::Disable`], [`Allow`][PgSslMode::Allow], [`Prefer`][PgSslMode::Prefer],
+    ///   and [`Require`] function as documented.
+    ///
+    /// * [`PgSslMode::VerifyCa`] and [`VerifyFull`] function the same as [`Require`].
+    ///
+    /// [`Require`]: PgSslMode::Require
+    ///
+    /// ## All Other Options
+    ///
+    /// All other SSL options are no-ops when a custom `ClientConfig` is set.
+    /// All behavior must be configured or implemented through the `ClientConfig` itself.
+    ///
+    /// For client authentication (mTLS), use one of [`ConfigBuilder::with_client_auth_cert()`],
+    /// [`ConfigBuilder::with_client_cert_resolver()`] or [`ConfigBuilder::with_no_client_auth()`].
+    ///
+    /// Server certificate verification and Server Name Identification (SNI) must be handled
+    /// (or bypassed) by the [`ServerCertVerifier`] set when building the `ClientConfig`.
+    /// Default implementations are offered by [`ClientConfig::with_root_certificates()`]
+    /// and [`ClientConfig::with_webpki_verifier()`].
+    ///
+    /// See also [`rustls-platform-verifier`](https://docs.rs/rustls-platform-verifier/latest/rustls_platform_verifier/)
+    /// for the way to handle system TLS roots as recommended by the RusTLS maintainers.
+    #[cfg(feature = "_tls-rustls")]
+    pub fn rustls_config(mut self, config: impl Into<Arc<rustls::ClientConfig>>) -> Self {
+        use sqlx_core::net::tls::RustlsConnector;
+
+        self.ssl.options_mut().danger_custom_rustls_config = true;
+
+        // Directly set the connector since no further initialization is required.
+        self.ssl.set_connector(
+            RustlsConnector {
+                config: config.into(),
+            }
+            .into(),
+        );
+
         self
     }
 
@@ -591,7 +723,7 @@ impl PgConnectOptions {
     /// assert!(matches!(options.get_ssl_mode(), PgSslMode::Prefer));
     /// ```
     pub fn get_ssl_mode(&self) -> PgSslMode {
-        self.ssl_options.ssl_mode
+        self.ssl.options().ssl_mode
     }
 
     /// Get the application name.

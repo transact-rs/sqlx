@@ -1,11 +1,10 @@
-use std::io;
-
 use crate::error::Error;
-use crate::net::tls::{self, TlsConfig};
-use crate::net::{Socket, SocketIntoBox, WithSocket};
-
 use crate::message::SslRequest;
+use crate::net::tls::{self};
+use crate::net::{Socket, SocketIntoBox, WithSocket};
 use crate::{PgConnectOptions, PgSslMode};
+use sqlx_core::net::tls::TlsConfig;
+use std::io;
 
 pub struct MaybeUpgradeTls<'a>(pub &'a PgConnectOptions);
 
@@ -22,7 +21,7 @@ async fn maybe_upgrade<S: Socket>(
     options: &PgConnectOptions,
 ) -> Result<Box<dyn Socket>, Error> {
     // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
-    match options.ssl_options.ssl_mode {
+    match options.ssl.options().ssl_mode {
         // FIXME: Implement ALLOW
         PgSslMode::Allow | PgSslMode::Disable => return Ok(Box::new(socket)),
 
@@ -47,28 +46,29 @@ async fn maybe_upgrade<S: Socket>(
         }
     }
 
-    let connector = if let Some(c) = options.ssl_options.cached_connector.get() {
+    let connector = if let Some(c) = options.ssl.get_connector() {
         c
     } else {
+        let ssl_options = options.ssl.options();
+
         let accept_invalid_certs = !matches!(
-            options.ssl_options.ssl_mode,
+            ssl_options.ssl_mode,
             PgSslMode::VerifyCa | PgSslMode::VerifyFull
         );
-        let accept_invalid_hostnames =
-            !matches!(options.ssl_options.ssl_mode, PgSslMode::VerifyFull);
+        let accept_invalid_hostnames = !matches!(ssl_options.ssl_mode, PgSslMode::VerifyFull);
 
-        let config = TlsConfig {
+        let tls_config = TlsConfig {
             accept_invalid_certs,
             accept_invalid_hostnames,
-            root_cert_path: options.ssl_options.ssl_root_cert.as_ref(),
-            client_cert_path: options.ssl_options.ssl_client_cert.as_ref(),
-            client_key_path: options.ssl_options.ssl_client_key.as_ref(),
+            root_cert_path: ssl_options.ssl_root_cert.as_ref(),
+            client_cert_path: ssl_options.ssl_client_cert.as_ref(),
+            client_key_path: ssl_options.ssl_client_key.as_ref(),
+            include_root_bundle: ssl_options.include_root_bundle,
+            #[cfg(feature = "_tls-rustls")]
+            rustls_crypto_provider: ssl_options.rustls_crypto_provider.as_ref(),
         };
-        let connector = tls::connector(config).await?;
-        options
-            .ssl_options
-            .cached_connector
-            .get_or_init(|| connector)
+        let connector = tls::connector(tls_config).await?;
+        options.ssl.get_connector_or_init(|| connector)
     };
 
     tls::handshake(socket, options.host.stripped(), connector, SocketIntoBox).await

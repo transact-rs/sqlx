@@ -24,6 +24,9 @@ rust_decimal = ["dep:rust_decimal", "rust_decimal/maths", "sqlx-core/rust_decima
 time = ["dep:time", "sqlx-core/time"]
 uuid = ["dep:uuid", "sqlx-core/uuid"]
 
+# Enables `MySqlConnectOptions::rustls_config()`
+_tls-rustls = ["sqlx-core/_tls-rustls", "rustls"]
+
 [dependencies]
 sqlx-core = { workspace = true }
 
@@ -38,6 +41,8 @@ rand = { workspace = true, optional = true }
 rsa = { workspace = true, optional = true }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+
+rustls = { workspace = true, optional = true }
 
 # Type Integrations (versions inherited from `[workspace.dependencies]`)
 bigdecimal = { workspace = true, optional = true }

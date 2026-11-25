@@ -16,6 +16,22 @@ use super::PgConnectionInner;
 
 impl PgConnection {
     pub(crate) async fn establish(options: &PgConnectOptions) -> Result<Self, Error> {
+        if options.ssl.options().danger_custom_rustls_config {
+            #[cfg(feature = "_tls-rustls")]
+            if options.ssl.get_connector().is_none() {
+                return Err(Error::config(
+                    "Database URL requires a custom `rustls::ClientConfig` to be set \
+                         on `PgConnectOptions` (signaled by `danger-custom-rustls-config=true)",
+                ));
+            }
+
+            return Err(Error::config(
+                "Database URL requires a custom `rustls::ClientConfig` to be set \
+                     on `PgConnectOptions` (signaled by `danger-custom-rustls-config=true); \
+                     this requires one of the `tls-rustls` features to be enabled",
+            ));
+        }
+
         // Upgrade to TLS if we were asked to and the server supports it
         let mut stream = PgStream::connect(options).await?;
 

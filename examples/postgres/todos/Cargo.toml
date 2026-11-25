@@ -10,3 +10,6 @@ sqlx = { path = "../../../", features = [ "postgres", "runtime-tokio", "tls-nati
 clap = { version = "4.4.7", features = ["derive"] }
 tokio = { version = "1.25.0", features = ["rt", "macros"]}
 dotenvy = "0.15.7"
+
+[lints]
+workspace=true

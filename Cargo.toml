@@ -101,12 +101,40 @@ runtime-tokio = ["_rt-tokio", "sqlx-core/_rt-tokio", "sqlx-macros?/_rt-tokio"]
 
 # TLS features
 tls-native-tls = ["sqlx-core/_tls-native-tls", "sqlx-macros?/_tls-native-tls"]
-tls-rustls = ["tls-rustls-ring"] # For backwards compatibility
-tls-rustls-aws-lc-rs = ["sqlx-core/_tls-rustls-aws-lc-rs", "sqlx-macros?/_tls-rustls-aws-lc-rs"]
-tls-rustls-aws-lc-rs-native-roots = ["sqlx-core/_tls-rustls-aws-lc-rs-native-roots", "sqlx-macros?/_tls-rustls-aws-lc-rs-native-roots"]
-tls-rustls-ring = ["tls-rustls-ring-webpki"] # For backwards compatibility
-tls-rustls-ring-webpki = ["sqlx-core/_tls-rustls-ring-webpki", "sqlx-macros?/_tls-rustls-ring-webpki"]
-tls-rustls-ring-native-roots = ["sqlx-core/_tls-rustls-ring-native-roots", "sqlx-macros?/_tls-rustls-ring-native-roots"]
+
+# BREAKING CHANGE PLANNED: will no longer be an alias of `tls-rustls-ring` in 0.10
+tls-rustls = ["tls-rustls-ring"]
+
+# BREAKING CHANGE PLANNED: will no longer imply `tls-rustls-webpki-roots` in 0.10
+tls-rustls-ring = ["tls-rustls-ring-no-roots", "tls-rustls-webpki-roots"]
+
+# DEPRECATED: combination features will be removed in 0.10
+tls-rustls-ring-webpki = ["tls-rustls-ring", "tls-rustls-webpki-roots"]
+tls-rustls-ring-native-roots = ["tls-rustls-ring", "tls-rustls-native-roots"]
+
+# BREAKING CHANGE PLANNED: will no longer imply `tls-rustls-webpki-roots` in 0.10
+tls-rustls-aws-lc-rs = ["tls-rustls-aws-lc-rs-no-roots", "tls-rustls-webpki-roots"]
+
+# DEPRECATED: combination features will be removed in 0.10
+tls-rustls-aws-lc-rs-webpki = ["tls-rustls-aws-lc-rs-no-roots", "tls-rustls-webpki-roots"]
+tls-rustls-aws-lc-rs-native-roots = ["tls-rustls-aws-lc-rs-no-roots", "tls-rustls-native-roots"]
+
+tls-rustls-native-roots = ["sqlx-core/_tls-rustls-native-roots", "sqlx-macros?/_tls-rustls-native-roots"]
+tls-rustls-webpki-roots = ["sqlx-core/_tls-rustls-webpki-roots", "sqlx-macros?/_tls-rustls-webpki-roots"]
+
+# Temporary replacement features to make composing the feature matrix easier
+
+# Enable RusTLS without _any_ additional features.
+# A custom `rustls::ClientConfig`,  or a `CryptoProvider` and custom TLS certificate, must be set to use TLS.
+# Will be folded into `tls-rustls` in 0.10.
+tls-rustls-base = ["sqlx-core/_tls-rustls", "sqlx-macros?/_tls-rustls", "sqlx-mysql?/_tls-rustls", "sqlx-postgres?/_tls-rustls"]
+
+# Enable `aws-lc-rs` crypto provider without enabling any roots.
+# Will be folded into `tls-rustls-aws-lc-rs` in 0.10.
+tls-rustls-aws-lc-rs-no-roots = ["tls-rustls-base", "sqlx-core/_tls-rustls-aws-lc-rs", "sqlx-macros?/_tls-rustls-aws-lc-rs"]
+
+# Will be folded into `tls-rustls-ring` in 0.10.
+tls-rustls-ring-no-roots = ["tls-rustls-base", "sqlx-core/_tls-rustls-ring", "sqlx-macros?/_tls-rustls-ring"]
 
 # No-op feature used by the workflows to compile without TLS enabled. Not meant for general use.
 tls-none = []
@@ -225,6 +253,12 @@ version = "1.25.0"
 features = ["time", "net", "sync", "fs", "io-util", "rt"]
 default-features = false
 
+# For `rustls::ClientConfig`
+[workspace.dependencies.rustls]
+version = "0.23.46"
+default-features = false # Default features enable `aws-lc-rs`
+features = ["logging", "std", "tls12"]
+
 [dependencies]
 sqlx-core = { workspace = true, features = ["migrate"] }
 sqlx-macros = { workspace = true, optional = true }
@@ -253,6 +287,8 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 libsqlite3-sys = { version = "0.37.0" }
 
 rand.workspace = true
+
+rustls-graviola = "0.4.0"
 
 # If this is an unconditional dev-dependency then Cargo will *always* try to build `libsqlite3-sys`,
 # even when SQLite isn't the intended test target, and fail if the build environment is not set up for compiling C code.
@@ -469,6 +505,11 @@ required-features = ["postgres", "macros", "migrate"]
 name = "postgres-query-builder"
 path = "tests/postgres/query_builder.rs"
 required-features = ["postgres"]
+
+[[test]]
+name = "postgres-rustls"
+path = "tests/postgres/rustls.rs"
+required-features = ["postgres", "tls-rustls-base"]
 
 [[test]]
 name = "postgres-rustsec"

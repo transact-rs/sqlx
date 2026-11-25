@@ -1,8 +1,4 @@
-use std::future;
-use std::io::{self, Read, Write};
-use std::sync::Arc;
-use std::task::{ready, Context, Poll};
-
+use cfg_if::cfg_if;
 use rustls::{
     client::{
         danger::{ServerCertVerified, ServerCertVerifier},
@@ -15,6 +11,10 @@ use rustls::{
     },
     CertificateError, ClientConfig, ClientConnection, Error as TlsError, RootCertStore,
 };
+use std::future;
+use std::io::{self, Read, Write};
+use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 
 use crate::error::Error;
 use crate::io::ReadBuf;
@@ -103,24 +103,18 @@ impl<S: Socket> Socket for RustlsSocket<S> {
 
 #[derive(Debug, Clone)]
 pub struct RustlsConnector {
-    config: Arc<ClientConfig>,
+    pub config: Arc<ClientConfig>,
 }
 
 pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {
-    #[cfg(all(
-        any(
-            feature = "_tls-rustls-aws-lc-rs",
-            feature = "_tls-rustls-aws-lc-rs-native-roots"
-        ),
-        not(feature = "_tls-rustls-ring-webpki"),
-        not(feature = "_tls-rustls-ring-native-roots")
-    ))]
-    let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    #[cfg(any(
-        feature = "_tls-rustls-ring-webpki",
-        feature = "_tls-rustls-ring-native-roots"
-    ))]
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    // The global `CryptoProvider` (as determined by [`CryptoProvider::get_default()`]) is
+    // deliberately ignored by SQLx. This is because, in the coming 0.24 release,
+    // [this API has been deleted from RusTLS](https://docs.rs/rustls/0.24.0-dev.3/rustls/index.html#cryptography-providers),
+    // so it makes little sense to write code that depends on it at this point.
+    let provider = match tls_config.rustls_crypto_provider {
+        Some(provider) => Arc::clone(provider),
+        None => default_crypto_provider()?,
+    };
 
     // Unwrapping is safe here because we use a default provider.
     let config = ClientConfig::builder_with_provider(provider.clone())
@@ -156,7 +150,11 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
                 .with_no_client_auth()
         }
     } else {
-        let mut cert_store = import_root_certs();
+        let mut cert_store = if tls_config.include_root_bundle {
+            import_root_certs().await
+        } else {
+            RootCertStore::empty()
+        };
 
         if let Some(ca) = tls_config.root_cert_path {
             let data = ca.data().await?;
@@ -204,6 +202,22 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
     })
 }
 
+fn default_crypto_provider() -> Result<Arc<CryptoProvider>, Error> {
+    cfg_if! {
+        if #[cfg(feature = "_tls-rustls-ring")] {
+            Ok(Arc::new(rustls::crypto::ring::default_provider()))
+        } else if #[cfg(feature = "_tls-rustls-aws-lc-rs")] {
+            Ok(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
+        } else {
+            Err(Error::tls(
+                "SQLx is unable to build a `rustls::ClientConfig`: \
+                 a custom `CryptoProvider` was not provided and neither \
+                 the `tls-rustls-aws-lc-rs` or `tls-rustls-ring` features are enabled"
+            ))
+        }
+    }
+}
+
 pub async fn handshake<S>(
     socket: S,
     hostname: &str,
@@ -241,30 +255,35 @@ fn private_key_from_pem(pem: Vec<u8>) -> Result<PrivateKeyDer<'static>, Error> {
 }
 
 #[cfg(all(feature = "webpki-roots", not(feature = "rustls-native-certs")))]
-fn import_root_certs() -> RootCertStore {
+async fn import_root_certs() -> RootCertStore {
     RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned())
 }
 
 #[cfg(feature = "rustls-native-certs")]
-fn import_root_certs() -> RootCertStore {
-    let mut root_cert_store = RootCertStore::empty();
+async fn import_root_certs() -> RootCertStore {
+    // Loading the native cert store may involve file I/O, so we need to do this in a blocking task
+    // See https://github.com/transact-rs/sqlx/issues/4026#issuecomment-3304810753
+    // which affected `native-tls`
+    crate::rt::spawn_blocking(move || {
+        let mut root_cert_store = RootCertStore::empty();
 
-    let load_results = rustls_native_certs::load_native_certs();
-    for e in load_results.errors {
-        log::warn!("Error loading native certificates: {e:?}");
-    }
-    for cert in load_results.certs {
-        if let Err(e) = root_cert_store.add(cert) {
-            log::warn!("rustls failed to parse native certificate: {e:?}");
+        let load_results = rustls_native_certs::load_native_certs();
+        for e in load_results.errors {
+            log::warn!("Error loading native certificates: {e:?}");
         }
-    }
+        for cert in load_results.certs {
+            if let Err(e) = root_cert_store.add(cert) {
+                log::warn!("rustls failed to parse native certificate: {e:?}");
+            }
+        }
 
-    root_cert_store
+        root_cert_store
+    })
+    .await
 }
 
-// Not currently used but allows for a "tls-rustls-no-roots" feature.
 #[cfg(not(any(feature = "rustls-native-certs", feature = "webpki-roots")))]
-fn import_root_certs() -> RootCertStore {
+async fn import_root_certs() -> RootCertStore {
     RootCertStore::empty()
 }
 
@@ -466,6 +485,8 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
             root_cert_path: None,
             client_cert_path: None,
             client_key_path: None,
+            rustls_crypto_provider: None,
+            include_root_bundle: false,
         };
         let Poll::Ready(Ok(RustlsConnector { config })) = pin!(connector(tls_config)).poll(&mut cx)
         else {

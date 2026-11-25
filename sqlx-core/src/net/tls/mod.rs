@@ -1,16 +1,20 @@
 #![allow(dead_code)]
 
-use std::path::PathBuf;
-
 use crate::error::Error;
 use crate::net::socket::WithSocket;
 use crate::net::Socket;
+use cfg_if::cfg_if;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(feature = "_tls-rustls")]
 mod tls_rustls;
 
 #[cfg(feature = "_tls-native-tls")]
 mod tls_native_tls;
+
+#[cfg(feature = "_tls-rustls")]
+pub use tls_rustls::RustlsConnector;
 
 mod util;
 
@@ -63,27 +67,80 @@ pub struct TlsConfig<'a> {
     pub root_cert_path: Option<&'a CertificateInput>,
     pub client_cert_path: Option<&'a CertificateInput>,
     pub client_key_path: Option<&'a CertificateInput>,
+
+    pub include_root_bundle: bool,
+
+    #[cfg(feature = "_tls-rustls")]
+    pub rustls_crypto_provider: Option<&'a Arc<rustls::crypto::CryptoProvider>>,
 }
 
-#[cfg(feature = "_tls-native-tls")]
-pub use self::tls_native_tls::NativeTlsConnector as TlsConnector;
-#[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
-pub use self::tls_rustls::RustlsConnector as TlsConnector;
-#[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
 #[derive(Debug, Clone)]
-pub struct TlsConnector(std::convert::Infallible);
-
-pub async fn connector(config: TlsConfig<'_>) -> crate::Result<TlsConnector> {
+pub enum TlsConnector {
     #[cfg(feature = "_tls-native-tls")]
-    return tls_native_tls::connector(config).await;
-
-    #[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
-    return tls_rustls::connector(config).await;
+    NativeTls(tls_native_tls::NativeTlsConnector),
+    #[cfg(feature = "_tls-rustls")]
+    Rustls(RustlsConnector),
 
     #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
-    {
-        _ = config;
-        panic!("one of the `runtime-*-native-tls` or `runtime-*-rustls` features must be enabled")
+    Noop,
+}
+
+#[cfg(feature = "_tls-rustls")]
+impl From<RustlsConnector> for TlsConnector {
+    fn from(value: RustlsConnector) -> Self {
+        Self::Rustls(value)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct WithCachedTlsConnector<Opts> {
+    options: Opts,
+    connector: Arc<OnceLock<TlsConnector>>,
+}
+
+impl<Opts> WithCachedTlsConnector<Opts> {
+    pub fn new(options: Opts) -> Self {
+        Self {
+            options,
+            connector: Arc::new(OnceLock::new()),
+        }
+    }
+
+    pub fn options(&self) -> &Opts {
+        &self.options
+    }
+
+    /// Invalidate the cached connector and mutate the options.
+    pub fn options_mut(&mut self) -> &mut Opts {
+        self.connector = Arc::new(OnceLock::new());
+        &mut self.options
+    }
+
+    pub fn get_connector(&self) -> Option<&TlsConnector> {
+        self.connector.get()
+    }
+
+    pub fn get_connector_or_init(&self, init: impl FnOnce() -> TlsConnector) -> &TlsConnector {
+        self.connector.get_or_init(init)
+    }
+
+    pub fn set_connector(&mut self, connector: TlsConnector) {
+        *Arc::make_mut(&mut self.connector) = connector.into();
+    }
+}
+
+pub async fn connector(config: TlsConfig<'_>) -> crate::Result<TlsConnector> {
+    cfg_if! {
+        if #[cfg(feature = "_tls-native-tls")] {
+            Ok(TlsConnector::NativeTls(
+                tls_native_tls::connector(config).await?,
+            ))
+        } else if #[cfg(feature = "_tls-rustls")] {
+            Ok(TlsConnector::Rustls(tls_rustls::connector(config).await?))
+        } else {
+            let _ = config;
+            Ok(TlsConnector::Noop)
+        }
     }
 }
 
@@ -97,20 +154,21 @@ where
     S: Socket,
     Ws: WithSocket,
 {
-    #[cfg(feature = "_tls-native-tls")]
-    return Ok(with_socket
-        .with_socket(tls_native_tls::handshake(socket, hostname, connector).await?)
-        .await);
-
-    #[cfg(all(feature = "_tls-rustls", not(feature = "_tls-native-tls")))]
-    return Ok(with_socket
-        .with_socket(tls_rustls::handshake(socket, hostname, connector).await?)
-        .await);
-
-    #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
-    {
-        drop((socket, hostname, with_socket));
-        match connector.0 {}
+    // If only one backend is enabled, this `match` should be a no-op.
+    match connector {
+        #[cfg(feature = "_tls-native-tls")]
+        TlsConnector::NativeTls(connector) => Ok(with_socket
+            .with_socket(tls_native_tls::handshake(socket, hostname, connector).await?)
+            .await),
+        #[cfg(feature = "_tls-rustls")]
+        TlsConnector::Rustls(connector) => Ok(with_socket
+            .with_socket(tls_rustls::handshake(socket, hostname, connector).await?)
+            .await),
+        #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
+        TlsConnector::Noop => {
+            drop((socket, hostname, with_socket));
+            Err(Error::config("SQLx driver expected TLS upgrade but no TLS feature was enabled (`tls-native-tls` or `tls-rustls`)"))
+        }
     }
 }
 

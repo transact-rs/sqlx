@@ -25,3 +25,6 @@ features = ["postgres", "time", "uuid", "macros", "sqlx-toml", "migrate"]
 
 [dev-dependencies]
 sqlx = { workspace = true, features = ["runtime-tokio"] }
+
+[lints]
+workspace=true

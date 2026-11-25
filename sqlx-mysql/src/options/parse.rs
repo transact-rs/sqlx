@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
+use sqlx_core::common::is_truthy_bool;
 use sqlx_core::Url;
 
 use crate::{error::Error, MySqlSslMode};
@@ -67,6 +68,10 @@ impl MySqlConnectOptions {
 
                 "sslkey" | "ssl-key" => options = options.ssl_client_key(&*value),
 
+                "danger-custom-rustls-config" => {
+                    options.ssl.options_mut().danger_custom_rustls_config = is_truthy_bool(&value);
+                }
+
                 "tls-sni-servername" => options = options.tls_sni_servername(&value),
 
                 "statement-cache-capacity" => {
@@ -105,45 +110,51 @@ impl MySqlConnectOptions {
             url.set_path(database);
         }
 
-        let ssl_mode = match self.ssl_options.ssl_mode {
+        let ssl_options = self.ssl.options();
+
+        let mut query_pairs = url.query_pairs_mut();
+
+        let ssl_mode = match ssl_options.ssl_mode {
             MySqlSslMode::Disabled => "DISABLED",
             MySqlSslMode::Preferred => "PREFERRED",
             MySqlSslMode::Required => "REQUIRED",
             MySqlSslMode::VerifyCa => "VERIFY_CA",
             MySqlSslMode::VerifyIdentity => "VERIFY_IDENTITY",
         };
-        url.query_pairs_mut().append_pair("ssl-mode", ssl_mode);
+        query_pairs.append_pair("ssl-mode", ssl_mode);
 
-        if let Some(ssl_ca) = &self.ssl_options.ssl_ca {
-            url.query_pairs_mut()
-                .append_pair("ssl-ca", &ssl_ca.to_string());
+        if let Some(ssl_ca) = &ssl_options.ssl_ca {
+            query_pairs.append_pair("ssl-ca", &ssl_ca.to_string());
         }
 
-        url.query_pairs_mut().append_pair("charset", &self.charset);
+        query_pairs.append_pair("charset", &self.charset);
 
         if let Some(collation) = &self.collation {
-            url.query_pairs_mut().append_pair("charset", collation);
+            query_pairs.append_pair("charset", collation);
         }
 
-        if let Some(ssl_client_cert) = &self.ssl_options.ssl_client_cert {
-            url.query_pairs_mut()
-                .append_pair("ssl-cert", &ssl_client_cert.to_string());
+        if let Some(ssl_client_cert) = &ssl_options.ssl_client_cert {
+            query_pairs.append_pair("ssl-cert", &ssl_client_cert.to_string());
         }
 
-        if let Some(ssl_client_key) = &self.ssl_options.ssl_client_key {
-            url.query_pairs_mut()
-                .append_pair("ssl-key", &ssl_client_key.to_string());
+        if let Some(ssl_client_key) = &ssl_options.ssl_client_key {
+            query_pairs.append_pair("ssl-key", &ssl_client_key.to_string());
         }
 
-        url.query_pairs_mut().append_pair(
+        if ssl_options.danger_custom_rustls_config {
+            query_pairs.append_pair("danger-custom-rustls-config", "true");
+        }
+
+        query_pairs.append_pair(
             "statement-cache-capacity",
             &self.statement_cache_capacity.to_string(),
         );
 
         if let Some(socket) = &self.socket {
-            url.query_pairs_mut()
-                .append_pair("socket", &socket.to_string_lossy());
+            query_pairs.append_pair("socket", &socket.to_string_lossy());
         }
+
+        drop(query_pairs);
 
         url
     }

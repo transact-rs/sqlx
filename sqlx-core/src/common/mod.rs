@@ -26,3 +26,8 @@ impl<F: ?Sized> Debug for DebugFn<F> {
         f.debug_tuple("Function").finish()
     }
 }
+
+/// Returns `true` if `val` is `"true"` (case-insensitive) or `"1"`.
+pub fn is_truthy_bool(val: &str) -> bool {
+    val.eq_ignore_ascii_case("true") || val == "1"
+}

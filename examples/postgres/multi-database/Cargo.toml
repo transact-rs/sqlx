@@ -33,4 +33,4 @@ path = "payments"
 package = "sqlx-example-postgres-multi-database-payments"
 
 [lints]
-workspace = true
+workspace=true

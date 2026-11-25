@@ -20,19 +20,20 @@ pub(super) async fn maybe_upgrade<S: Socket>(
 ) -> Result<MySqlStream, Error> {
     let server_supports_tls = stream.capabilities.contains(Capabilities::SSL);
 
-    if matches!(options.ssl_options.ssl_mode, MySqlSslMode::Disabled) || !tls::available() {
-        // remove the SSL capability if SSL has been explicitly disabled
-        stream.capabilities.remove(Capabilities::SSL);
-    }
-
     // https://www.postgresql.org/docs/12/libpq-ssl.html#LIBPQ-SSL-SSLMODE-STATEMENTS
-    match options.ssl_options.ssl_mode {
-        MySqlSslMode::Disabled => return Ok(stream.boxed_socket()),
+    match options.ssl.options().ssl_mode {
+        MySqlSslMode::Disabled => {
+            // remove the SSL capability if SSL has been explicitly disabled
+            stream.capabilities.remove(Capabilities::SSL);
+            return Ok(stream.boxed_socket());
+        }
 
         MySqlSslMode::Preferred => {
             if !tls::available() {
                 // Client doesn't support TLS
                 tracing::debug!("not performing TLS upgrade: TLS support not compiled in");
+                // don't advertise the capability if not available
+                stream.capabilities.remove(Capabilities::SSL);
                 return Ok(stream.boxed_socket());
             }
 
@@ -53,27 +54,28 @@ pub(super) async fn maybe_upgrade<S: Socket>(
         }
     }
 
-    let connector = if let Some(c) = options.ssl_options.cached_connector.get() {
+    let connector = if let Some(c) = options.ssl.get_connector() {
         c
     } else {
+        let ssl_options = options.ssl.options();
+
         let tls_config = TlsConfig {
             accept_invalid_certs: !matches!(
-                options.ssl_options.ssl_mode,
+                ssl_options.ssl_mode,
                 MySqlSslMode::VerifyCa | MySqlSslMode::VerifyIdentity
             ),
-            accept_invalid_hostnames: !matches!(
-                options.ssl_options.ssl_mode,
-                MySqlSslMode::VerifyIdentity
-            ),
-            root_cert_path: options.ssl_options.ssl_ca.as_ref(),
-            client_cert_path: options.ssl_options.ssl_client_cert.as_ref(),
-            client_key_path: options.ssl_options.ssl_client_key.as_ref(),
+            accept_invalid_hostnames: !matches!(ssl_options.ssl_mode, MySqlSslMode::VerifyIdentity),
+            root_cert_path: ssl_options.ssl_ca.as_ref(),
+            client_cert_path: ssl_options.ssl_client_cert.as_ref(),
+            client_key_path: ssl_options.ssl_client_key.as_ref(),
+
+            include_root_bundle: ssl_options.include_root_bundle,
+
+            #[cfg(feature = "_tls-rustls")]
+            rustls_crypto_provider: None,
         };
         let connector = tls::connector(tls_config).await?;
-        options
-            .ssl_options
-            .cached_connector
-            .get_or_init(|| connector)
+        options.ssl.get_connector_or_init(|| connector)
     };
 
     // Request TLS upgrade

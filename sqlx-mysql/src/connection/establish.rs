@@ -43,7 +43,7 @@ impl<'a> DoHandshake<'a> {
     fn new(options: &'a MySqlConnectOptions) -> Result<Self, Error> {
         if options.enable_cleartext_plugin
             && matches!(
-                options.ssl_options.ssl_mode,
+                options.ssl.options().ssl_mode,
                 MySqlSslMode::Disabled | MySqlSslMode::Preferred
             )
         {
