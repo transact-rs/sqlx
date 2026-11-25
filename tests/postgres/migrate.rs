@@ -1,8 +1,9 @@
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migration, MigrationType, Migrator};
 use sqlx::pool::PoolConnection;
 use sqlx::postgres::{PgConnection, Postgres};
 use sqlx::Executor;
 use sqlx::Row;
+use sqlx::SqlSafeStr;
 use std::path::Path;
 
 #[sqlx::test(migrations = false)]
@@ -23,6 +24,81 @@ async fn simple(mut conn: PoolConnection<Postgres>) -> anyhow::Result<()> {
 
     // running it a 2nd time should still work
     migrator.run(&mut conn).await?;
+
+    Ok(())
+}
+
+async fn advisory_locks_held(conn: &mut PgConnection) -> anyhow::Result<i64> {
+    let held = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted \
+         AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+    )
+    .fetch_one(conn)
+    .await?;
+
+    Ok(held)
+}
+
+#[sqlx::test(migrations = false)]
+async fn run_releases_lock_on_error(mut conn: PoolConnection<Postgres>) -> anyhow::Result<()> {
+    clean_up(&mut conn).await?;
+
+    let simple = Migrator::new(Path::new("tests/postgres/migrations_simple")).await?;
+    let reversible = Migrator::new(Path::new("tests/postgres/migrations_reversible")).await?;
+
+    simple.run(&mut conn).await?;
+
+    // the applied migrations of `simple` are unknown to `reversible`
+    reversible
+        .run(&mut conn)
+        .await
+        .expect_err("migrator with missing migrations should fail");
+
+    assert_eq!(advisory_locks_held(&mut conn).await?, 0);
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn run_releases_lock_on_failed_migration(
+    mut conn: PoolConnection<Postgres>,
+) -> anyhow::Result<()> {
+    clean_up(&mut conn).await?;
+
+    let failing = Migrator::with_migrations(vec![Migration::new(
+        1,
+        "fail".into(),
+        MigrationType::Simple,
+        "SELECT * FROM table_that_does_not_exist".into_sql_str(),
+        false,
+    )]);
+
+    failing
+        .run(&mut conn)
+        .await
+        .expect_err("failing migration should fail");
+
+    assert_eq!(advisory_locks_held(&mut conn).await?, 0);
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn undo_releases_lock_on_error(mut conn: PoolConnection<Postgres>) -> anyhow::Result<()> {
+    clean_up(&mut conn).await?;
+
+    let simple = Migrator::new(Path::new("tests/postgres/migrations_simple")).await?;
+    let reversible = Migrator::new(Path::new("tests/postgres/migrations_reversible")).await?;
+
+    reversible.run(&mut conn).await?;
+
+    // the applied migrations of `reversible` are unknown to `simple`
+    simple
+        .undo(&mut conn, 0)
+        .await
+        .expect_err("migrator with missing migrations should fail");
+
+    assert_eq!(advisory_locks_held(&mut conn).await?, 0);
 
     Ok(())
 }
