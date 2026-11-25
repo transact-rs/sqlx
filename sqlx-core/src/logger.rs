@@ -167,3 +167,52 @@ pub fn parse_query_summary(sql: &str) -> String {
         .collect::<Vec<&str>>()
         .join(" ")
 }
+
+/// Log a migration before polling its execution, then report its outcome.
+#[cfg(feature = "migrate")]
+pub async fn log_migration(
+    migration: &crate::migrate::Migration,
+    execution: impl std::future::Future<
+        Output = Result<std::time::Duration, crate::migrate::MigrateError>,
+    >,
+) -> Result<std::time::Duration, crate::migrate::MigrateError> {
+    let direction = if migration.migration_type.is_down_migration() {
+        "down"
+    } else {
+        "up"
+    };
+
+    tracing::info!(
+        target: "sqlx::migrate",
+        version = migration.version,
+        description = %migration.description,
+        direction,
+        "starting migration"
+    );
+
+    match execution.await {
+        Ok(elapsed) => {
+            tracing::info!(
+                target: "sqlx::migrate",
+                version = migration.version,
+                description = %migration.description,
+                direction,
+                ?elapsed,
+                elapsed_secs = elapsed.as_secs_f64(),
+                "migration completed"
+            );
+            Ok(elapsed)
+        }
+        Err(error) => {
+            tracing::error!(
+                target: "sqlx::migrate",
+                version = migration.version,
+                description = %migration.description,
+                direction,
+                %error,
+                "migration failed"
+            );
+            Err(error)
+        }
+    }
+}

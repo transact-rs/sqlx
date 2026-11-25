@@ -6,6 +6,7 @@ use sqlx_cli::Opt;
 async fn main() {
     // Checks for `--no-dotenv` before parsing.
     sqlx_cli::maybe_apply_dotenv();
+    sqlx_cli::init_logging();
 
     sqlx::any::install_default_drivers();
 
