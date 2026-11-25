@@ -1345,6 +1345,13 @@ async fn test_serialize_invalid_schema() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn it_accepts_send_only_transaction_callbacks() -> anyhow::Result<()> {
+    let mut conn = SqliteConnection::connect(":memory:").await?;
+
+    sqlx_test::test_send_only_transaction_callbacks(&mut conn).await
+}
+
+#[sqlx_macros::test]
 async fn it_can_use_transaction_options() -> anyhow::Result<()> {
     async fn check_txn_state(conn: &mut SqliteConnection, expected: SqliteTransactionState) {
         let state = transaction_state(&mut conn.lock_handle().await.unwrap());
