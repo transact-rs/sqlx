@@ -121,7 +121,7 @@ tokio = { version = "1.25.0", features = ["rt"] }
 # workspace = true
 path = ".."
 default-features = false
-features = ["postgres", "sqlite", "mysql", "migrate", "macros", "time", "uuid"]
+features = ["postgres", "sqlite", "mysql", "migrate", "macros", "time", "uuid", "tls-rustls-base"]
 
 [lints]
 workspace = true

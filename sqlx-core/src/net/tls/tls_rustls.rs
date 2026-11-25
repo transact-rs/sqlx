@@ -479,7 +479,7 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
         let mut cx = Context::from_waker(Waker::noop());
 
         // The client's config as `sslmode=require` builds it; loading no files, it's ready at once.
-        let tls_config = TlsConfig::Options(TlsOptions {
+        let tls_config = TlsConfig {
             accept_invalid_certs: true,
             accept_invalid_hostnames: true,
             root_cert_path: None,
@@ -487,7 +487,7 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
             client_key_path: None,
             rustls_crypto_provider: None,
             include_root_bundle: false,
-        });
+        };
         let Poll::Ready(Ok(RustlsConnector { config })) = pin!(connector(tls_config)).poll(&mut cx)
         else {
             panic!("`connector()` should be ready at once");
