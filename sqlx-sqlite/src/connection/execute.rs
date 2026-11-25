@@ -29,7 +29,7 @@ pub(crate) fn iter(
     // fetch the cached statement or allocate a new one
     let statement = conn.statements.get(query.as_str(), persistent)?;
 
-    let logger = QueryLogger::new(query, conn.log_settings.clone());
+    let logger = QueryLogger::new(query, conn.log_settings.clone()).with_db_system_name("sqlite");
 
     Ok(ExecuteIter {
         handle: &mut conn.handle,
