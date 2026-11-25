@@ -1,10 +1,10 @@
 use crate::error::Error;
-use crate::net::tls::{self, TlsOptions};
-use crate::net::{Socket, SocketIntoBox, WithSocket};
-use std::io;
-
 use crate::message::SslRequest;
+use crate::net::tls::{self};
+use crate::net::{Socket, SocketIntoBox, WithSocket};
 use crate::{PgConnectOptions, PgSslMode};
+use sqlx_core::net::tls::TlsConfig;
+use std::io;
 
 pub struct MaybeUpgradeTls<'a>(pub &'a PgConnectOptions);
 
@@ -57,7 +57,7 @@ async fn maybe_upgrade<S: Socket>(
         );
         let accept_invalid_hostnames = !matches!(ssl_options.ssl_mode, PgSslMode::VerifyFull);
 
-        let tls_options = TlsOptions {
+        let tls_config = TlsConfig {
             accept_invalid_certs,
             accept_invalid_hostnames,
             root_cert_path: ssl_options.ssl_root_cert.as_ref(),
@@ -67,7 +67,7 @@ async fn maybe_upgrade<S: Socket>(
             #[cfg(feature = "_tls-rustls")]
             rustls_crypto_provider: ssl_options.rustls_crypto_provider.as_ref(),
         };
-        let connector = tls::connector(tls_options.into()).await?;
+        let connector = tls::connector(tls_config).await?;
         options.ssl.get_connector_or_init(|| connector)
     };
 

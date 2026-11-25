@@ -1,4 +1,4 @@
-use sqlx_core::net::tls::{RustlsConnector, WithCachedTlsConnector};
+use sqlx_core::net::tls::WithCachedTlsConnector;
 use sqlx_core::net::UrlHost;
 pub use ssl_mode::PgSslMode;
 use std::borrow::Cow;

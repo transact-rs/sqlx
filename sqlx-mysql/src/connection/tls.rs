@@ -1,6 +1,6 @@
 use crate::connection::{MySqlStream, Waiting};
 use crate::error::Error;
-use crate::net::tls::TlsOptions;
+use crate::net::tls::TlsConfig;
 use crate::net::{tls, BufferedSocket, Socket, WithSocket};
 use crate::protocol::connect::SslRequest;
 use crate::protocol::Capabilities;
@@ -59,7 +59,7 @@ pub(super) async fn maybe_upgrade<S: Socket>(
     } else {
         let ssl_options = options.ssl.options();
 
-        let tls_config = TlsOptions {
+        let tls_config = TlsConfig {
             accept_invalid_certs: !matches!(
                 ssl_options.ssl_mode,
                 MySqlSslMode::VerifyCa | MySqlSslMode::VerifyIdentity
