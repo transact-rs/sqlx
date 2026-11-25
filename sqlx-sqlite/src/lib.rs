@@ -79,6 +79,7 @@ pub use column::SqliteColumn;
 #[cfg(feature = "deserialize")]
 #[cfg_attr(docsrs, doc(cfg(feature = "deserialize")))]
 pub use connection::deserialize::SqliteOwnedBuf;
+pub use connection::function::{SqliteFunction, SqliteFunctionArgs};
 #[cfg(feature = "preupdate-hook")]
 #[cfg_attr(docsrs, doc(cfg(feature = "preupdate-hook")))]
 pub use connection::PreupdateHookResult;
