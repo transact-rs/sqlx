@@ -15,6 +15,3 @@ anyhow = "1.0.58"
 
 [lints]
 workspace = true
-
-[lints]
-workspace=true
