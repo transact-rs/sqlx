@@ -69,6 +69,8 @@ pub(super) async fn maybe_upgrade<S: Socket>(
             client_cert_path: ssl_options.ssl_client_cert.as_ref(),
             client_key_path: ssl_options.ssl_client_key.as_ref(),
 
+            include_root_bundle: ssl_options.include_root_bundle,
+
             #[cfg(feature = "_tls-rustls")]
             rustls_crypto_provider: None,
         };

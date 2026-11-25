@@ -122,8 +122,6 @@ tls-rustls-aws-lc-rs-native-roots = ["tls-rustls-aws-lc-rs-no-roots", "tls-rustl
 tls-rustls-native-roots = ["sqlx-core/_tls-rustls-native-roots", "sqlx-macros?/_tls-rustls-native-roots"]
 tls-rustls-webpki-roots = ["sqlx-core/_tls-rustls-webpki-roots", "sqlx-macros?/_tls-rustls-webpki-roots"]
 
-tls-rustls-platform-verifier = ["sqlx-core/_tls-rustls-platform-verifier", "sqlx-macros?/_tls-rustls-platform-verifier"]
-
 # Temporary replacement features to make composing the feature matrix easier
 
 # Enable RusTLS without _any_ additional features.

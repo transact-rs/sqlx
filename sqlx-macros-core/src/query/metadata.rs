@@ -1,11 +1,11 @@
+use crate::query::cache::{MtimeCache, MtimeCacheBuilder};
+use sqlx_core::common::is_truthy_bool;
 use sqlx_core::config::Config;
+use sqlx_core::HashMap;
 use std::hash::{BuildHasherDefault, DefaultHasher};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-
-use crate::query::cache::{MtimeCache, MtimeCacheBuilder};
-use sqlx_core::HashMap;
 
 pub struct Metadata {
     pub manifest_dir: PathBuf,
@@ -224,11 +224,6 @@ fn has_query_source_without_dotenv(from_env: &MacrosEnv, from_dotenv: &MacrosEnv
         .or(from_dotenv.database_url.as_deref());
 
     offline == Some(true) || database_url.is_some_and(|url| !url.is_empty())
-}
-
-/// Returns `true` if `val` is `"true"` (case-insensitive) or `"1"`.
-fn is_truthy_bool(val: &str) -> bool {
-    val.eq_ignore_ascii_case("true") || val == "1"
 }
 
 #[cfg(test)]

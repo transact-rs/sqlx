@@ -73,6 +73,8 @@ pub struct TlsOptions<'a> {
     pub client_cert_path: Option<&'a CertificateInput>,
     pub client_key_path: Option<&'a CertificateInput>,
 
+    pub include_root_bundle: bool,
+
     #[cfg(feature = "_tls-rustls")]
     pub rustls_crypto_provider: Option<&'a Arc<rustls::crypto::CryptoProvider>>,
 }

@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
+use sqlx_core::common::is_truthy_bool;
 use sqlx_core::Url;
 
 use crate::{error::Error, MySqlSslMode};
@@ -68,7 +69,7 @@ impl MySqlConnectOptions {
                 "sslkey" | "ssl-key" => options = options.ssl_client_key(&*value),
 
                 "danger-custom-rustls-config" => {
-                    options.ssl.options_mut().danger_custom_rustls_config = true
+                    options.ssl.options_mut().danger_custom_rustls_config = is_truthy_bool(&value);
                 }
 
                 "tls-sni-servername" => options = options.tls_sni_servername(&value),

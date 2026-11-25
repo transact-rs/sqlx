@@ -217,6 +217,8 @@ for maximum flexibility.
       or TLS root store.
     * To opt in to this change now, use `tls-rustls-base` instead.
 
+##### Crypto Providers
+
 -   `tls-rustls-aws-lc-rs`: use the `rustls` TLS backend with the [`aws-lc-rs`] crypto provider.
      * **BREAKING CHANGE PLANNED**: currently an alias of `tls-rustls-aws-lc-rs-webpki`; 
        this will be changed in 0.10 to _only_ enable `aws-lc-rs`.
@@ -228,7 +230,7 @@ for maximum flexibility.
     * To opt in to this change now, use `tls-rustls-aws-lc-rs-no-roots` + `tls-rustls-native-roots` instead.
 
 -   `tls-rustls-aws-lc-rs-webpki`: use the `rustls` TLS backend with `aws-lc-rs`
-    and load the platform's native CA certificates with [`rustls-native-certs`]
+    and load a static set of CA certificates provided by [`webpki-roots`]
     * **DEPRECATED**: will be replaced with `tls-rustls-aws-lc-rs` + `tls-rustls-webpki-roots` in 0.10.    
     * To opt in to this change now, use `tls-rustls-aws-lc-rs-no-roots` + `tls-rustls-webpki-roots` instead.
 
@@ -243,9 +245,27 @@ for maximum flexibility.
     * To opt in to this change now, use `tls-rustls-ring-no-roots` + `tls-rustls-native-roots` instead.
 
 -   `tls-rustls-ring-webpki`: use the `rustls` TLS backend with `ring`
-    and load the platform's native CA certificates with [`rustls-native-certs`]
+    and load a static set of CA certificates provided by [`webpki-roots`]
     * **DEPRECATED**: will be replaced with `tls-rustls-ring` + `tls-rustls-webpki-roots` in 0.10.    
     * To opt in to this change now, use `tls-rustls-ring-no-roots` + `tls-rustls-webpki-roots` instead.
+
+##### TLS Root (CA certificate) Bundles
+
+For the TLS backend to verify the identity of the server, it relies on a set of Certificate Authority
+certificates (a.k.a. TLS roots) that the server's TLS certificate must be cryptographically verifiable with. 
+These are normally managed by the operating system.
+
+SQLx provides two different options for CA certificate bundles: 
+
+-  `tls-rustls-native-roots`: load the platform's native CA certificates with [`rustls-native-certs`].
+-  `tls-rustls-webpki-roots`: load a static set of CA certificates provided by [`webpki-roots`].
+
+Use of these features is optional. If you're always connecting with an explicitly set root certificate bundle,
+these are likely unnecessary.
+
+The `tls-native-tls` feature uses the platform's native CA certificates by default.
+
+##### Temporary Replacement Features
 
 **Temporary features** have been added that will be deleted in 0.10 once their existing counterparts are changed:
 
@@ -272,6 +292,7 @@ for maximum flexibility.
 [`aws-lc-rs`]: https://docs.rs/aws-lc-rs
 [`ring`]: https://docs.rs/ring
 [`rustls-native-certs`]: https://docs.rs/rustls-native-certs
+[`webpki-roots`]: https://docs.rs/webpki-roots
 
 [`CryptoProvider::install_default()`]: https://docs.rs/rustls/latest/rustls/crypto/struct.CryptoProvider.html#method.install_default
 </details>

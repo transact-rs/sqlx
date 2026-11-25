@@ -159,7 +159,11 @@ async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig
                 .with_no_client_auth()
         }
     } else {
-        let mut cert_store = import_root_certs();
+        let mut cert_store = if options.include_root_bundle {
+            import_root_certs().await
+        } else {
+            RootCertStore::empty()
+        };
 
         if let Some(ca) = options.root_cert_path {
             let data = ca.data().await?;
@@ -258,29 +262,35 @@ fn private_key_from_pem(pem: Vec<u8>) -> Result<PrivateKeyDer<'static>, Error> {
 }
 
 #[cfg(all(feature = "webpki-roots", not(feature = "rustls-native-certs")))]
-fn import_root_certs() -> RootCertStore {
+async fn import_root_certs() -> RootCertStore {
     RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned())
 }
 
 #[cfg(feature = "rustls-native-certs")]
-fn import_root_certs() -> RootCertStore {
-    let mut root_cert_store = RootCertStore::empty();
+async fn import_root_certs() -> RootCertStore {
+    // Loading the native cert store may involve file I/O, so we need to do this in a blocking task
+    // See https://github.com/transact-rs/sqlx/issues/4026#issuecomment-3304810753
+    // which affected `native-tls`
+    crate::rt::spawn_blocking(move || {
+        let mut root_cert_store = RootCertStore::empty();
 
-    let load_results = rustls_native_certs::load_native_certs();
-    for e in load_results.errors {
-        log::warn!("Error loading native certificates: {e:?}");
-    }
-    for cert in load_results.certs {
-        if let Err(e) = root_cert_store.add(cert) {
-            log::warn!("rustls failed to parse native certificate: {e:?}");
+        let load_results = rustls_native_certs::load_native_certs();
+        for e in load_results.errors {
+            log::warn!("Error loading native certificates: {e:?}");
         }
-    }
+        for cert in load_results.certs {
+            if let Err(e) = root_cert_store.add(cert) {
+                log::warn!("rustls failed to parse native certificate: {e:?}");
+            }
+        }
 
-    root_cert_store
+        root_cert_store
+    })
+    .await
 }
 
 #[cfg(not(any(feature = "rustls-native-certs", feature = "webpki-roots")))]
-fn import_root_certs() -> RootCertStore {
+async fn import_root_certs() -> RootCertStore {
     RootCertStore::empty()
 }
 
@@ -483,6 +493,7 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
             client_cert_path: None,
             client_key_path: None,
             rustls_crypto_provider: None,
+            include_root_bundle: false,
         });
         let Poll::Ready(Ok(RustlsConnector { config })) = pin!(connector(tls_config)).poll(&mut cx)
         else {
