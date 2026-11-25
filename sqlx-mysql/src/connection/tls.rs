@@ -74,7 +74,7 @@ pub(super) async fn maybe_upgrade<S: Socket>(
             #[cfg(feature = "_tls-rustls")]
             rustls_crypto_provider: None,
         };
-        let connector = tls::connector(tls_config.into()).await?;
+        let connector = tls::connector(tls_config).await?;
         options.ssl.get_connector_or_init(|| connector)
     };
 
