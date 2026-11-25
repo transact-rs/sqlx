@@ -149,20 +149,15 @@ impl<Opts> WithCachedTlsConnector<Opts> {
 
 pub async fn connector(config: TlsConfig<'_>) -> crate::Result<TlsConnector> {
     // New behavior: `rustls` takes precedent if an explicit `rustls::ClientConfig` is set
-    #[cfg(feature = "_tls-native-tls")]
-    if let TlsConfig::Options(options) = config {
-        return Ok(TlsConnector::NativeTls(
+    match config {
+        #[cfg(feature = "_tls-native-tls")]
+        TlsConfig::Options(options) => Ok(TlsConnector::NativeTls(
             tls_native_tls::connector(options).await?,
-        ));
-    }
-
-    #[cfg(feature = "_tls-rustls")]
-    return Ok(TlsConnector::Rustls(tls_rustls::connector(config).await?));
-
-    #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
-    {
-        let _ = config;
-        Ok(TlsConnector::Noop)
+        )),
+        #[cfg(feature = "_tls-rustls")]
+        _ => Ok(TlsConnector::Rustls(tls_rustls::connector(config).await?)),
+        #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
+        _ => Ok(TlsConnector::Noop),
     }
 }
 
