@@ -1,4 +1,4 @@
-use sqlx::{error::ErrorKind, sqlite::Sqlite, Connection, Error};
+use sqlx::{error::ErrorKind, sqlite::Sqlite, sqlite::SqliteError, Connection, Error};
 use sqlx_test::new;
 
 #[sqlx_macros::test]
@@ -14,6 +14,27 @@ async fn it_fails_with_unique_violation() -> anyhow::Result<()> {
     let err = err.into_database_error().unwrap();
 
     assert_eq!(err.kind(), ErrorKind::UniqueViolation);
+    assert_eq!(err.downcast_ref::<SqliteError>().byte_offset(), None);
+
+    Ok(())
+}
+
+#[cfg(feature = "sqlite-error-offset")]
+#[sqlx_macros::test]
+async fn it_reports_the_byte_offset_in_the_submitted_sql() -> anyhow::Result<()> {
+    let mut conn = new::<Sqlite>().await?;
+
+    for (sql, token) in [
+        ("SELEC 1", Some("SELEC")),
+        ("\u{2003}  SELECT 'é', FROM t", Some("FROM")),
+        ("\tSELECT 'é'; ; -- skip this\n SELEC 2  ", Some("SELEC ")),
+        ("SELECT * FROM missing_table", None),
+    ] {
+        let err = sqlx::raw_sql(sql).execute(&mut conn).await.unwrap_err();
+        let err = err.into_database_error().unwrap();
+        let offset = err.downcast_ref::<SqliteError>().byte_offset();
+        assert_eq!(offset, token.map(|t| sql.find(t).unwrap()), "{sql}");
+    }
 
     Ok(())
 }

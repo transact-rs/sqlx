@@ -34,6 +34,9 @@ pub struct VirtualStatement {
     /// tail of the most recently prepared SQL statement within this container
     tail: Bytes,
 
+    /// Byte offset where `tail` ends in the original SQL.
+    tail_end: usize,
+
     /// underlying sqlite handles for each inner statement
     /// a SQL query string in SQLite is broken up into N statements
     /// we use a [`SmallVec`] to optimize for the most likely case of a single statement
@@ -53,8 +56,10 @@ pub struct PreparedStatement<'a> {
 }
 
 impl VirtualStatement {
-    pub(crate) fn new(mut query: &str, persistent: bool) -> Result<Self, Error> {
-        query = query.trim();
+    pub(crate) fn new(query: &str, persistent: bool) -> Result<Self, Error> {
+        let query = query.trim_end();
+        let tail_end = query.len();
+        let query = query.trim_start();
 
         if query.len() > i32::MAX as usize {
             return Err(err_protocol!(
@@ -66,6 +71,7 @@ impl VirtualStatement {
         Ok(Self {
             persistent,
             tail: Bytes::from(String::from(query)),
+            tail_end,
             handles: SmallVec::with_capacity(1),
             index: None,
             columns: SmallVec::with_capacity(1),
@@ -88,7 +94,12 @@ impl VirtualStatement {
                 return Ok(None);
             }
 
-            if let Some(statement) = prepare(conn.as_ptr(), &mut self.tail, self.persistent)? {
+            if let Some(statement) = prepare(
+                conn.as_ptr(),
+                &mut self.tail,
+                self.tail_end,
+                self.persistent,
+            )? {
                 let num = statement.column_count();
 
                 let mut columns = Vec::with_capacity(num);
@@ -144,6 +155,7 @@ impl VirtualStatement {
 fn prepare(
     conn: *mut sqlite3,
     query: &mut Bytes,
+    tail_end: usize,
     persistent: bool,
 ) -> Result<Option<StatementHandle>, Error> {
     let mut flags = 0;
@@ -185,7 +197,7 @@ fn prepare(
         };
 
         if status != SQLITE_OK {
-            return Err(unsafe { SqliteError::new(conn).into() });
+            return Err(unsafe { SqliteError::from_prepare(conn, tail_end - query.len()).into() });
         }
 
         // tail should point to the first byte past the end of the first SQL

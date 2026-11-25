@@ -196,6 +196,8 @@ be removed in the future.
     * May result in link errors if the SQLite version is too old. Version `3.20.0` or newer is recommended.
     * Can increase build time due to the use of bindgen.
 
+-   `sqlite-error-offset`: Report the byte offset of SQL errors when SQLite identifies the offending token. Enabled by `sqlite`. With `sqlite-unbundled`, this requires SQLite 3.38.0 or newer.
+
 -   `sqlite-preupdate-hook`: enables SQLite's [preupdate hook](https://sqlite.org/c3ref/preupdate_count.html) API.
     * Exposed as a separate feature because it's generally not enabled by default.
     * Using this feature with `sqlite-unbundled` may cause linker failures if the system SQLite version does not support it.
