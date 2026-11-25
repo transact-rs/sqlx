@@ -12,7 +12,7 @@ async fn connects_with_rustls_graviola() -> anyhow::Result<()> {
 
     let mut conn = opts.connect().await?;
 
-    let res: i64 = sqlx::query_scalar("SELECT 1").fetch_one(&mut conn).await?;
+    let res: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&mut conn).await?;
 
     assert_eq!(res, 1);
 
