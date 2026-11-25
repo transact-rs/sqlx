@@ -25,6 +25,8 @@ _tls-rustls-ring-native-roots = ["sqlx-core/_tls-rustls-ring-native-roots"]
 
 _sqlite = []
 
+_gssapi-auth-cross-krb5 = ["sqlx-postgres?/gssapi-auth-cross-krb5"]
+
 # SQLx features
 derive = []
 macros = ["thiserror"]

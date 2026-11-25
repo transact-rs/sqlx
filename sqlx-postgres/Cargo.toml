@@ -26,6 +26,9 @@ rust_decimal = ["dep:rust_decimal", "rust_decimal/maths", "sqlx-core/rust_decima
 time = ["dep:time", "sqlx-core/time"]
 uuid = ["dep:uuid", "sqlx-core/uuid"]
 
+# Authentication features
+gssapi-auth-cross-krb5 = ["dep:cross-krb5"]
+
 [dependencies]
 # Futures crates
 futures-channel = { version = "0.3.32", default-features = false, features = ["sink", "alloc", "std"] }
@@ -71,6 +74,7 @@ thiserror.workspace = true
 
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 serde_json = { version = "1.0.142", optional = true, features = ["raw_value"] }
+cross-krb5 = { version = "0.5.0", optional = true, default-features = false }
 
 [dependencies.sqlx-core]
 workspace = true
