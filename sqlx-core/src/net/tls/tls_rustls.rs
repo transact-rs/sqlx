@@ -19,7 +19,7 @@ use std::task::{ready, Context, Poll};
 use crate::error::Error;
 use crate::io::ReadBuf;
 use crate::net::tls::util::StdSocket;
-use crate::net::tls::{TlsConfig, TlsOptions};
+use crate::net::tls::TlsConfig;
 use crate::net::Socket;
 
 pub struct RustlsSocket<S: Socket> {
@@ -107,20 +107,11 @@ pub struct RustlsConnector {
 }
 
 pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Error> {
-    let config = match tls_config {
-        TlsConfig::Options(options) => build_config(options).await?,
-        TlsConfig::PrebuiltRustls(config) => config.clone(),
-    };
-
-    Ok(RustlsConnector { config })
-}
-
-async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig>, Error> {
     // The global `CryptoProvider` (as determined by [`CryptoProvider::get_default()`]) is
     // deliberately ignored by SQLx. This is because, in the coming 0.24 release,
     // [this API has been deleted from RusTLS](https://docs.rs/rustls/0.24.0-dev.3/rustls/index.html#cryptography-providers),
     // so it makes little sense to write code that depends on it at this point.
-    let provider = match options.rustls_crypto_provider {
+    let provider = match tls_config.rustls_crypto_provider {
         Some(provider) => Arc::clone(provider),
         None => default_crypto_provider()?,
     };
@@ -131,7 +122,7 @@ async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig
         .unwrap();
 
     // authentication using user's key and its associated certificate
-    let user_auth = match (options.client_cert_path, options.client_key_path) {
+    let user_auth = match (tls_config.client_cert_path, tls_config.client_key_path) {
         (Some(cert_path), Some(key_path)) => {
             let cert_chain = certs_from_pem(cert_path.data().await?)?;
             let key_der = private_key_from_pem(key_path.data().await?)?;
@@ -145,7 +136,7 @@ async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig
         }
     };
 
-    let config = if options.accept_invalid_certs {
+    let config = if tls_config.accept_invalid_certs {
         if let Some(user_auth) = user_auth {
             config
                 .dangerous()
@@ -159,13 +150,13 @@ async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig
                 .with_no_client_auth()
         }
     } else {
-        let mut cert_store = if options.include_root_bundle {
+        let mut cert_store = if tls_config.include_root_bundle {
             import_root_certs().await
         } else {
             RootCertStore::empty()
         };
 
-        if let Some(ca) = options.root_cert_path {
+        if let Some(ca) = tls_config.root_cert_path {
             let data = ca.data().await?;
 
             for result in CertificateDer::pem_slice_iter(&data) {
@@ -177,7 +168,7 @@ async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig
             }
         }
 
-        if options.accept_invalid_hostnames {
+        if tls_config.accept_invalid_hostnames {
             let verifier = WebPkiServerVerifier::builder(Arc::new(cert_store))
                 .build()
                 .map_err(|err| Error::Tls(err.into()))?;
@@ -206,7 +197,9 @@ async fn build_config(options: TlsOptions<'_>) -> crate::Result<Arc<ClientConfig
         }
     };
 
-    Ok(Arc::new(config))
+    Ok(RustlsConnector {
+        config: Arc::new(config),
+    })
 }
 
 fn default_crypto_provider() -> Result<Arc<CryptoProvider>, Error> {

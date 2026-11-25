@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::net::socket::WithSocket;
 use crate::net::Socket;
+use cfg_if::cfg_if;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
@@ -60,13 +61,7 @@ impl std::fmt::Display for CertificateInput {
     }
 }
 
-pub enum TlsConfig<'a> {
-    Options(TlsOptions<'a>),
-    #[cfg(feature = "_tls-rustls")]
-    PrebuiltRustls(&'a Arc<rustls::ClientConfig>),
-}
-
-pub struct TlsOptions<'a> {
+pub struct TlsConfig<'a> {
     pub accept_invalid_certs: bool,
     pub accept_invalid_hostnames: bool,
     pub root_cert_path: Option<&'a CertificateInput>,
@@ -77,19 +72,6 @@ pub struct TlsOptions<'a> {
 
     #[cfg(feature = "_tls-rustls")]
     pub rustls_crypto_provider: Option<&'a Arc<rustls::crypto::CryptoProvider>>,
-}
-
-#[cfg(feature = "_tls-rustls")]
-impl<'a> From<&'a Arc<rustls::ClientConfig>> for TlsConfig<'a> {
-    fn from(value: &'a Arc<rustls::ClientConfig>) -> Self {
-        TlsConfig::PrebuiltRustls(value)
-    }
-}
-
-impl<'a> From<TlsOptions<'a>> for TlsConfig<'a> {
-    fn from(value: TlsOptions<'a>) -> Self {
-        TlsConfig::Options(value)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,16 +130,17 @@ impl<Opts> WithCachedTlsConnector<Opts> {
 }
 
 pub async fn connector(config: TlsConfig<'_>) -> crate::Result<TlsConnector> {
-    // New behavior: `rustls` takes precedent if an explicit `rustls::ClientConfig` is set
-    match config {
-        #[cfg(feature = "_tls-native-tls")]
-        TlsConfig::Options(options) => Ok(TlsConnector::NativeTls(
-            tls_native_tls::connector(options).await?,
-        )),
-        #[cfg(feature = "_tls-rustls")]
-        _ => Ok(TlsConnector::Rustls(tls_rustls::connector(config).await?)),
-        #[cfg(not(any(feature = "_tls-native-tls", feature = "_tls-rustls")))]
-        _ => Ok(TlsConnector::Noop),
+    cfg_if! {
+        if #[cfg(feature = "_tls-native-tls")] {
+            Ok(TlsConnector::NativeTls(
+                tls_native_tls::connector(config).await?,
+            ))
+        } else if #[cfg(feature = "_tls-rustls")] {
+            Ok(TlsConnector::Rustls(tls_rustls::connector(config).await?))
+        } else {
+            let _ = config;
+            Ok(TlsConnector::Noop)
+        }
     }
 }
 
