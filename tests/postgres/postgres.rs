@@ -2033,6 +2033,29 @@ async fn test_issue_4305() -> anyhow::Result<()> {
 }
 
 #[sqlx_macros::test]
+async fn test_issue_4554() -> anyhow::Result<()> {
+    let url = dotenvy::var("DATABASE_URL")?;
+    let opts: PgConnectOptions = url.parse::<PgConnectOptions>()?.statement_cache_capacity(0);
+    let mut conn = PgConnection::connect_with(&opts).await?;
+
+    let mut tx = conn.begin().await?;
+    tx.execute(
+        "DROP TYPE IF EXISTS issue_4554 CASCADE; CREATE TYPE issue_4554 AS ENUM ('foo', 'bar')",
+    )
+    .await?;
+
+    // With statement_cache_capacity(0), persistent queries still use the unnamed
+    // prepared statement; inside a transaction this cannot retry on SQLSTATE 26000.
+    sqlx::query("SELECT $1::int4 AS n, 'foo'::issue_4554 AS m")
+        .bind(1_i32)
+        .fetch_one(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+
+#[sqlx_macros::test]
 async fn test_advisory_locks() -> anyhow::Result<()> {
     let pool = PgPoolOptions::new()
         .max_connections(2)
