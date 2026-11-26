@@ -94,8 +94,10 @@ async fn prepare(
 
     // Resolving custom-type OIDs above goes through the simple query protocol, which
     // destroys the unnamed prepared statement. Re-parse it so the Bind that follows can
-    // reference it; named (persistent) statements are unaffected. See #4305.
-    if !persistent && ran_catalog_query {
+    // reference it; named statements (persistent with statement cache enabled) are
+    // unaffected. Note that persistent queries also use the unnamed statement when the
+    // statement cache is disabled (`statement_cache_capacity(0)`). See #4305, #4554.
+    if id == StatementId::UNNAMED && ran_catalog_query {
         conn.inner.stream.write_msg(Parse {
             param_types: &param_types,
             query: sql,
@@ -568,5 +570,243 @@ fn check_stale_plan(error: &Error) -> Option<bool> {
         // DISCARD ALL / DEALLOCATE / pgbouncer
         ("26000", _) => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare;
+    use crate::common::StatementCache;
+    use crate::connection::{PgConnectionInner, PgStream};
+    use crate::io::StatementId;
+    use crate::message::TransactionStatus;
+    use crate::{HashMap, PgConnection, PgTypeInfo};
+    use sqlx_core::io::ReadBuf;
+    use sqlx_core::net::Socket;
+    use std::collections::{BTreeMap, VecDeque};
+    use std::future::Future;
+    use std::io;
+    use std::pin::pin;
+    use std::sync::{Arc, Mutex};
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    #[derive(Default)]
+    struct MockPgState {
+        inbound: Vec<u8>,
+        outbound: VecDeque<u8>,
+        unnamed_active: bool,
+        unnamed_parse_count: usize,
+        named_parse_count: usize,
+        simple_query_count: usize,
+    }
+
+    impl MockPgState {
+        fn push_backend_msg(&mut self, tag: u8, body: &[u8]) {
+            let len = u32::try_from(body.len() + 4).expect("mock message too large");
+            self.outbound.push_back(tag);
+            self.outbound.extend(&len.to_be_bytes());
+            self.outbound.extend(body);
+        }
+
+        fn process_packets(&mut self) {
+            while self.inbound.len() >= 5 {
+                let tag = self.inbound[0];
+                let len = u32::from_be_bytes(self.inbound[1..5].try_into().unwrap()) as usize;
+                let total = 1 + len;
+                if self.inbound.len() < total {
+                    break;
+                }
+                let body: Vec<u8> = self.inbound.drain(..total).skip(5).collect();
+                match tag {
+                    b'P' => {
+                        let stmt_name = body.split(|&b| b == 0).next().unwrap_or_default();
+                        if stmt_name.is_empty() {
+                            self.unnamed_active = true;
+                            self.unnamed_parse_count += 1;
+                        } else {
+                            self.named_parse_count += 1;
+                        }
+                        self.push_backend_msg(b'1', &[]);
+                    }
+                    b'D' => {
+                        // ParameterDescription: 1 x INT4 (OID 23)
+                        let mut param_desc = Vec::with_capacity(6);
+                        param_desc.extend_from_slice(&1_u16.to_be_bytes());
+                        param_desc.extend_from_slice(&23_u32.to_be_bytes());
+                        self.push_backend_msg(b't', &param_desc);
+
+                        // RowDescription: 1 column "m" with uncached custom OID 99_999
+                        let mut row_desc = Vec::new();
+                        row_desc.extend_from_slice(&1_u16.to_be_bytes());
+                        row_desc.extend_from_slice(b"m\0");
+                        row_desc.extend_from_slice(&0_u32.to_be_bytes());
+                        row_desc.extend_from_slice(&0_i16.to_be_bytes());
+                        row_desc.extend_from_slice(&99_999_u32.to_be_bytes());
+                        row_desc.extend_from_slice(&4_i16.to_be_bytes());
+                        row_desc.extend_from_slice(&(-1_i32).to_be_bytes());
+                        row_desc.extend_from_slice(&1_i16.to_be_bytes());
+                        self.push_backend_msg(b'T', &row_desc);
+                    }
+                    b'Q' => {
+                        // Executing a simple query destroys the unnamed prepared statement.
+                        self.unnamed_active = false;
+                        self.simple_query_count += 1;
+                        self.push_backend_msg(b'C', b"SELECT 0\0");
+                        self.push_backend_msg(b'Z', b"T");
+                    }
+                    b'S' => {
+                        self.push_backend_msg(b'Z', b"T");
+                    }
+                    other => panic!("unexpected frontend message: {:?}", other as char),
+                }
+            }
+        }
+    }
+
+    struct MockPgSocket {
+        state: Arc<Mutex<MockPgState>>,
+    }
+
+    impl Socket for MockPgSocket {
+        fn try_read(&mut self, buf: &mut dyn ReadBuf) -> io::Result<usize> {
+            let mut state = self.state.lock().unwrap();
+            if state.outbound.is_empty() {
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            let slice = buf.init_mut();
+            let mut read = 0;
+            while read < slice.len() {
+                if let Some(byte) = state.outbound.pop_front() {
+                    slice[read] = byte;
+                    read += 1;
+                } else {
+                    break;
+                }
+            }
+            Ok(read)
+        }
+
+        fn try_write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut state = self.state.lock().unwrap();
+            state.inbound.extend_from_slice(buf);
+            state.process_packets();
+            Ok(buf.len())
+        }
+
+        fn poll_read_ready(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_write_ready(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    fn block_on_ready<F: Future>(fut: F) -> F::Output {
+        const VTABLE: RawWakerVTable =
+            RawWakerVTable::new(|p| RawWaker::new(p, &VTABLE), |_| {}, |_| {}, |_| {});
+        // SAFETY: the mock socket is purely synchronous in-memory, so the waker is never invoked.
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let mut cx = Context::from_waker(&waker);
+        let mut fut = pin!(fut);
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(out) => out,
+            Poll::Pending => panic!("unexpected Poll::Pending on synchronous mock socket"),
+        }
+    }
+
+    fn mock_conn(cache_capacity: usize) -> (PgConnection, Arc<Mutex<MockPgState>>) {
+        let state = Arc::new(Mutex::new(MockPgState::default()));
+        let socket = MockPgSocket {
+            state: Arc::clone(&state),
+        };
+        let conn = PgConnection {
+            inner: Box::new(PgConnectionInner {
+                stream: PgStream::from_socket(Box::new(socket)),
+                process_id: 1,
+                secret_key: 1,
+                next_statement_id: StatementId::NAMED_START,
+                cache_statement: StatementCache::new(cache_capacity),
+                cache_type_info: HashMap::new(),
+                cache_type_oid: HashMap::new(),
+                cache_elem_type_to_array: HashMap::new(),
+                cache_table_data: BTreeMap::new().into_iter().collect(),
+                pending_ready_for_query_count: 0,
+                transaction_status: TransactionStatus::Transaction,
+                transaction_depth: 1,
+                log_settings: Default::default(),
+            }),
+        };
+        (conn, state)
+    }
+
+    #[test]
+    fn prepare_reparses_unnamed_statement_when_statement_cache_disabled() {
+        let (mut conn, state) = mock_conn(0);
+        let arg_types = [PgTypeInfo::INT4];
+
+        let (id, _) = block_on_ready(prepare(
+            &mut conn,
+            "SELECT $1::int4, 'foo'::foobar",
+            &arg_types,
+            None,
+            true,
+            false,
+        ))
+        .expect("prepare should succeed");
+
+        assert_eq!(id, StatementId::UNNAMED);
+        let state = state.lock().unwrap();
+        assert_eq!(state.simple_query_count, 1);
+        assert_eq!(state.unnamed_parse_count, 2);
+        assert!(state.unnamed_active);
+    }
+
+    #[test]
+    fn prepare_reparses_unnamed_statement_when_non_persistent() {
+        let (mut conn, state) = mock_conn(16);
+        let arg_types = [PgTypeInfo::INT4];
+
+        let (id, _) = block_on_ready(prepare(
+            &mut conn,
+            "SELECT $1::int4, 'foo'::foobar",
+            &arg_types,
+            None,
+            false,
+            false,
+        ))
+        .expect("prepare should succeed");
+
+        assert_eq!(id, StatementId::UNNAMED);
+        let state = state.lock().unwrap();
+        assert_eq!(state.simple_query_count, 1);
+        assert_eq!(state.unnamed_parse_count, 2);
+        assert!(state.unnamed_active);
+    }
+
+    #[test]
+    fn prepare_does_not_reparse_named_statement() {
+        let (mut conn, state) = mock_conn(16);
+        let arg_types = [PgTypeInfo::INT4];
+
+        let (id, _) = block_on_ready(prepare(
+            &mut conn,
+            "SELECT $1::int4, 'foo'::foobar",
+            &arg_types,
+            None,
+            true,
+            false,
+        ))
+        .expect("prepare should succeed");
+
+        assert_ne!(id, StatementId::UNNAMED);
+        let state = state.lock().unwrap();
+        assert_eq!(state.simple_query_count, 1);
+        assert_eq!(state.named_parse_count, 1);
+        assert_eq!(state.unnamed_parse_count, 0);
     }
 }

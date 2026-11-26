@@ -65,6 +65,16 @@ impl PgStream {
         })
     }
 
+    #[cfg(test)]
+    pub(super) fn from_socket(socket: Box<dyn Socket>) -> Self {
+        Self {
+            inner: BufferedSocket::new(socket),
+            notifications: None,
+            parameter_statuses: BTreeMap::default(),
+            server_version_num: None,
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn write_msg(&mut self, message: impl FrontendMessage) -> Result<(), Error> {
         self.write(EncodeMessage(message))
