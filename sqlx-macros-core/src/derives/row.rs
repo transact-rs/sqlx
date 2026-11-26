@@ -5,6 +5,8 @@ use syn::{
     Fields, FieldsNamed, FieldsUnnamed, Lifetime, Stmt,
 };
 
+use crate::derives::attributes::Flatten;
+
 use super::{
     attributes::{parse_child_attributes, parse_container_attributes, JsonAttribute},
     rename_all,
@@ -99,7 +101,7 @@ fn expand_derive_from_row_struct(
 
             let expr: Expr = match (attributes.flatten, attributes.try_from, attributes.json) {
                 // <No attributes>
-                (false, None, None) => {
+                (None, None, None) => {
                     predicates
                         .push(parse_quote!(#ty: ::sqlx::decode::Decode<#lifetime, R::Database>));
                     predicates.push(parse_quote!(#ty: ::sqlx::types::Type<R::Database>));
@@ -107,34 +109,82 @@ fn expand_derive_from_row_struct(
                     parse_quote!(__row.try_get(#id_s))
                 }
                 // Flatten
-                (true, None, None) => {
-                    predicates.push(parse_quote!(#ty: ::sqlx::FromRow<#lifetime, R>));
-                    parse_quote!(<#ty as ::sqlx::FromRow<#lifetime, R>>::from_row(__row))
+                (Some(flatten), None, None) => {
+                    match flatten {
+                        Flatten::NonNullable => {
+                            predicates.push(parse_quote!(#ty: ::sqlx::FromRow<#lifetime, R>));
+                            parse_quote!(<#ty as ::sqlx::FromRow<#lifetime, R>>::from_row(__row))
+                        },
+                        Flatten::Nullable => {
+                            predicates.push(parse_quote!(#ty: ::sqlx::OptionOf));
+                            predicates.push(parse_quote!(<#ty as ::sqlx::OptionOf>::Inner: ::sqlx::FromRow<#lifetime, R>));
+                            parse_quote! {
+                                match <<#ty as ::sqlx::OptionOf>::Inner as ::sqlx::FromRow<#lifetime, R>>::from_row(__row) {
+                                    ::std::result::Result::Ok(v) => ::std::result::Result::Ok(::std::option::Option::Some(v)),
+                                    ::std::result::Result::Err(::sqlx::Error::ColumnDecode { source, .. })
+                                        if source.is::<::sqlx::error::UnexpectedNullError>() =>
+                                    {
+                                        ::std::result::Result::Ok(::std::option::Option::None)
+                                    }
+                                    ::std::result::Result::Err(e) => ::std::result::Result::Err(e),
+                                }
+                            }
+                        },
+                    }
                 }
                 // Flatten + Try from
-                (true, Some(try_from), None) => {
-                    predicates.push(parse_quote!(#try_from: ::sqlx::FromRow<#lifetime, R>));
-                    parse_quote!(
-                        <#try_from as ::sqlx::FromRow<#lifetime, R>>::from_row(__row)
-                            .and_then(|v| {
-                                <#ty as ::std::convert::TryFrom::<#try_from>>::try_from(v)
-                                    .map_err(|e| {
-                                        // Triggers a lint warning if `TryFrom::Err = Infallible`
-                                        #[allow(unreachable_code)]
-                                        ::sqlx::Error::ColumnDecode {
-                                            index: #id_s.to_string(),
-                                            source: sqlx::__spec_error!(e),
-                                        }
+                (Some(flatten), Some(try_from), None) => {
+                    match flatten {
+                        Flatten::NonNullable => {
+                            predicates.push(parse_quote!(#try_from: ::sqlx::FromRow<#lifetime, R>));
+                            parse_quote!(
+                                <#try_from as ::sqlx::FromRow<#lifetime, R>>::from_row(__row)
+                                    .and_then(|v| {
+                                        <#ty as ::std::convert::TryFrom::<#try_from>>::try_from(v)
+                                            .map_err(|e| {
+                                                // Triggers a lint warning if `TryFrom::Err = Infallible`
+                                                #[allow(unreachable_code)]
+                                                ::sqlx::Error::ColumnDecode {
+                                                    index: #id_s.to_string(),
+                                                    source: sqlx::__spec_error!(e),
+                                                }
+                                            })
                                     })
-                            })
-                    )
+                            )
+                        },
+                        Flatten::Nullable => {
+                            predicates.push(parse_quote!(#ty: ::sqlx::OptionOf));
+                            predicates.push(parse_quote!(#try_from: ::sqlx::FromRow<#lifetime, R>));
+                            parse_quote!(
+                                    match <#try_from as ::sqlx::FromRow<#lifetime, R>>::from_row(__row) {
+                                        ::std::result::Result::Ok(v) => {
+                                            <<#ty as ::sqlx::OptionOf>::Inner as ::std::convert::TryFrom::<#try_from>>::try_from(v)
+                                                .map(::std::option::Option::Some)
+                                                .map_err(|e| {
+                                                    #[allow(unreachable_code)]
+                                                    ::sqlx::Error::ColumnDecode {
+                                                        index: #id_s.to_string(),
+                                                        source: sqlx::__spec_error!(e),
+                                                    }
+                                                })
+                                        }
+                                        ::std::result::Result::Err(::sqlx::Error::ColumnDecode { source, .. })
+                                            if source.is::<::sqlx::error::UnexpectedNullError>() =>
+                                        {
+                                            ::std::result::Result::Ok(::std::option::Option::None)
+                                        }
+                                        ::std::result::Result::Err(e) => ::std::result::Result::Err(e),
+                                    }
+                                )
+                        },
+                    }
                 }
                 // Flatten + Json
-                (true, _, Some(_)) => {
+                (Some(_), _, Some(_)) => {
                     panic!("Cannot use both flatten and json")
                 }
                 // Try from
-                (false, Some(try_from), None) => {
+                (None, Some(try_from), None) => {
                     predicates
                         .push(parse_quote!(#try_from: ::sqlx::decode::Decode<#lifetime, R::Database>));
                     predicates.push(parse_quote!(#try_from: ::sqlx::types::Type<R::Database>)); 
@@ -155,7 +205,7 @@ fn expand_derive_from_row_struct(
                     )
                 }
                 // Try from + Json mandatory
-                (false, Some(try_from), Some(JsonAttribute::NonNullable)) => {
+                (None, Some(try_from), Some(JsonAttribute::NonNullable)) => {
                     predicates
                         .push(parse_quote!(::sqlx::types::Json<#try_from>: ::sqlx::decode::Decode<#lifetime, R::Database>));
                     predicates.push(parse_quote!(::sqlx::types::Json<#try_from>: ::sqlx::types::Type<R::Database>));
@@ -176,18 +226,18 @@ fn expand_derive_from_row_struct(
                     )
                 },
                 // Try from + Json nullable
-                (false, Some(_), Some(JsonAttribute::Nullable)) => {
+                (None, Some(_), Some(JsonAttribute::Nullable)) => {
                     panic!("Cannot use both try from and json nullable")
                 },
                 // Json
-                (false, None, Some(JsonAttribute::NonNullable)) => {
+                (None, None, Some(JsonAttribute::NonNullable)) => {
                     predicates
                         .push(parse_quote!(::sqlx::types::Json<#ty>: ::sqlx::decode::Decode<#lifetime, R::Database>));
                     predicates.push(parse_quote!(::sqlx::types::Json<#ty>: ::sqlx::types::Type<R::Database>));
 
                     parse_quote!(__row.try_get::<::sqlx::types::Json<_>, _>(#id_s).map(|x| x.0))
                 },
-                (false, None, Some(JsonAttribute::Nullable)) => {
+                (None, None, Some(JsonAttribute::Nullable)) => {
                     predicates
                         .push(parse_quote!(::core::option::Option<::sqlx::types::Json<#ty>>: ::sqlx::decode::Decode<#lifetime, R::Database>));
                     predicates.push(parse_quote!(::core::option::Option<::sqlx::types::Json<#ty>>: ::sqlx::types::Type<R::Database>));
