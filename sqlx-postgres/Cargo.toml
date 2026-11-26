@@ -15,6 +15,13 @@ json = ["dep:serde", "dep:serde_json", "sqlx-core/json"]
 migrate = ["sqlx-core/migrate", "dep:crc"]
 offline = ["json", "sqlx-core/offline", "smallvec/serde"]
 
+# for conditional compilation
+_tls-rustls-aws-lc-rs = ["_tls-rustls", "sqlx-core/_tls-rustls-aws-lc-rs"]
+_tls-rustls-aws-lc-rs-native-roots = ["_tls-rustls", "sqlx-core/_tls-rustls-aws-lc-rs-native-roots"]
+_tls-rustls-ring-webpki = ["_tls-rustls", "sqlx-core/_tls-rustls-ring-webpki"]
+_tls-rustls-ring-native-roots = ["_tls-rustls", "sqlx-core/_tls-rustls-ring-native-roots"]
+_tls-rustls = ["sqlx-core/_tls-rustls"]
+
 # Type Integration features
 bigdecimal = ["dep:bigdecimal", "dep:num-bigint", "sqlx-core/bigdecimal"]
 bit-vec = ["dep:bit-vec", "sqlx-core/bit-vec"]
