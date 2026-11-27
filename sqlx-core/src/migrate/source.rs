@@ -91,6 +91,9 @@ pub struct ResolveError {
 pub struct ResolveConfig {
     ignored_chars: BTreeSet<char>,
     unrecognized_sql_files: UnrecognizedSqlFiles,
+    // When true, traverse subdirectories of the migrations directory and include
+    // any files that match the migration filename pattern.
+    recursive: bool,
 }
 
 impl ResolveConfig {
@@ -99,6 +102,7 @@ impl ResolveConfig {
         ResolveConfig {
             ignored_chars: BTreeSet::new(),
             unrecognized_sql_files: UnrecognizedSqlFiles::default(),
+            recursive: false,
         }
     }
 
@@ -158,6 +162,12 @@ impl ResolveConfig {
     pub fn ignored_chars(&self) -> impl Iterator<Item = char> + '_ {
         self.ignored_chars.iter().copied()
     }
+
+    /// Enable or disable recursive directory traversal when resolving migrations.
+    pub fn set_recursive(&mut self, recursive: bool) -> &mut Self {
+        self.recursive = recursive;
+        self
+    }
 }
 
 // FIXME: paths should just be part of `Migration` but we can't add a field backwards compatibly
@@ -177,116 +187,133 @@ pub fn resolve_blocking_with_config(
         source: Some(e),
     })?;
 
-    let s = fs::read_dir(&path).map_err(|e| ResolveError {
-        message: format!("error reading migration directory {}", path.display()),
-        source: Some(e),
-    })?;
-
     let mut migrations = Vec::new();
 
-    for res in s {
-        let entry = res.map_err(|e| ResolveError {
-            message: format!(
-                "error reading contents of migration directory {}",
-                path.display()
-            ),
+    fn collect_dir(
+        dir: &Path,
+        config: &ResolveConfig,
+        out: &mut Vec<(Migration, PathBuf)>,
+    ) -> Result<(), ResolveError> {
+        let s = fs::read_dir(dir).map_err(|e| ResolveError {
+            message: format!("error reading migration directory {}", dir.display()),
             source: Some(e),
         })?;
 
-        let entry_path = entry.path();
+        for res in s {
+            let entry = res.map_err(|e| ResolveError {
+                message: format!(
+                    "error reading contents of migration directory {}",
+                    dir.display()
+                ),
+                source: Some(e),
+            })?;
 
-        let metadata = fs::metadata(&entry_path).map_err(|e| ResolveError {
-            message: format!(
-                "error getting metadata of migration path {}",
-                entry_path.display()
-            ),
-            source: Some(e),
-        })?;
+            let entry_path = entry.path();
 
-        if !metadata.is_file() {
-            // not a file; ignore
-            continue;
-        }
+            let metadata = fs::metadata(&entry_path).map_err(|e| ResolveError {
+                message: format!(
+                    "error getting metadata of migration path {}",
+                    entry_path.display()
+                ),
+                source: Some(e),
+            })?;
 
-        let file_name = entry.file_name();
-        // This is arguably the wrong choice,
-        // but it really only matters for parsing the version and description.
-        //
-        // Using `.to_str()` and returning an error if the filename is not UTF-8
-        // would be a breaking change.
-        let file_name = file_name.to_string_lossy();
-
-        let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
-
-        if parts.len() != 2 || !parts[1].ends_with(".sql") {
-            // A `.sql` file that doesn't parse is usually a migration that was named
-            // incorrectly, so erroring is more useful than skipping it without a word.
-            // Projects that keep other SQL scripts here can opt out.
-            if file_name.ends_with(".sql") {
-                match config.unrecognized_sql_files {
-                    UnrecognizedSqlFiles::Error => {
-                        return Err(ResolveError {
-                            message: format!(
-                                "error parsing migration filename {file_name:?}; \
-                                 expected the format `<VERSION>_<DESCRIPTION>.sql` \
-                                 (e.g. `01_foo.sql`)"
-                            ),
-                            source: None,
-                        });
-                    }
-                    UnrecognizedSqlFiles::Warn => {
-                        tracing::warn!(
-                            "skipping {file_name:?}: not of the format \
-                             `<VERSION>_<DESCRIPTION>.sql` (e.g. `01_foo.sql`)"
-                        );
-                    }
-                    UnrecognizedSqlFiles::Ignore => {}
+            if metadata.is_dir() {
+                if config.recursive {
+                    collect_dir(&entry_path, config, out)?;
                 }
+                continue;
             }
 
-            // not of the format: <VERSION>_<DESCRIPTION>.<REVERSIBLE_DIRECTION>.sql; ignore
-            continue;
-        }
+            if !metadata.is_file() {
+                continue;
+            }
 
-        let version: i64 = parts[0].parse()
-            .map_err(|_e| ResolveError {
-                message: format!("error parsing migration filename {file_name:?}; expected integer version prefix (e.g. `01_foo.sql`)"),
+            let file_name = entry.file_name();
+            // This is arguably the wrong choice,
+            // but it really only matters for parsing the version and description.
+            //
+            // Using `.to_str()` and returning an error if the filename is not UTF-8
+            // would be a breaking change.
+            let file_name = file_name.to_string_lossy();
+
+            let parts = file_name.splitn(2, '_').collect::<Vec<_>>();
+
+            if parts.len() != 2 || !parts[1].ends_with(".sql") {
+                // A `.sql` file that doesn't parse is usually a migration that was named
+                // incorrectly, so erroring is more useful than skipping it without a word.
+                // Projects that keep other SQL scripts here can opt out.
+                if file_name.ends_with(".sql") {
+                    match config.unrecognized_sql_files {
+                        UnrecognizedSqlFiles::Error => {
+                            return Err(ResolveError {
+                                message: format!(
+                                    "error parsing migration filename {file_name:?}; \
+                                     expected the format `<VERSION>_<DESCRIPTION>.sql` \
+                                     (e.g. `01_foo.sql`)"
+                                ),
+                                source: None,
+                            });
+                        }
+                        UnrecognizedSqlFiles::Warn => {
+                            tracing::warn!(
+                                "skipping {file_name:?}: not of the format \
+                                 `<VERSION>_<DESCRIPTION>.sql` (e.g. `01_foo.sql`)"
+                            );
+                        }
+                        UnrecognizedSqlFiles::Ignore => {}
+                    }
+                }
+
+                // not of the format: <VERSION>_<DESCRIPTION>.<REVERSIBLE_DIRECTION>.sql; ignore
+                continue;
+            }
+
+            let version: i64 = parts[0].parse().map_err(|_e| ResolveError {
+                message: format!(
+                    "error parsing migration filename {file_name:?}; expected integer version prefix (e.g. `01_foo.sql`)"
+                ),
                 source: None,
             })?;
 
-        let migration_type = MigrationType::from_filename(parts[1]);
+            let migration_type = MigrationType::from_filename(parts[1]);
 
-        // remove the `.sql` and replace `_` with ` `
-        let description = parts[1]
-            .trim_end_matches(migration_type.suffix())
-            .replace('_', " ")
-            .to_owned();
+            // remove the `.sql` and replace `_` with ` `
+            let description = parts[1]
+                .trim_end_matches(migration_type.suffix())
+                .replace('_', " ")
+                .to_owned();
 
-        let sql = fs::read_to_string(&entry_path).map_err(|e| ResolveError {
-            message: format!(
-                "error reading contents of migration {}: {e}",
-                entry_path.display()
-            ),
-            source: Some(e),
-        })?;
+            let sql = fs::read_to_string(&entry_path).map_err(|e| ResolveError {
+                message: format!(
+                    "error reading contents of migration {}: {e}",
+                    entry_path.display()
+                ),
+                source: Some(e),
+            })?;
 
-        // opt-out of migration transaction
-        let no_tx = sql.starts_with("-- no-transaction");
+            // opt-out of migration transaction
+            let no_tx = sql.starts_with("-- no-transaction");
 
-        let checksum = checksum_with(&sql, &config.ignored_chars);
+            let checksum = checksum_with(&sql, &config.ignored_chars);
 
-        migrations.push((
-            Migration::with_checksum(
-                version,
-                Cow::Owned(description),
-                migration_type,
-                AssertSqlSafe(sql).into_sql_str(),
-                checksum.into(),
-                no_tx,
-            ),
-            entry_path,
-        ));
+            out.push((
+                Migration::with_checksum(
+                    version,
+                    Cow::Owned(description),
+                    migration_type,
+                    AssertSqlSafe(sql).into_sql_str(),
+                    checksum.into(),
+                    no_tx,
+                ),
+                entry_path,
+            ));
+        }
+
+        Ok(())
     }
+
+    collect_dir(&path, config, &mut migrations)?;
 
     migrations.sort();
 
@@ -335,6 +362,72 @@ fn checksum_with_ignored_chars() {
     let digest_stripped = migration::checksum(&stripped_sql);
 
     assert_eq!(digest_ignored, digest_stripped);
+}
+
+#[cfg(test)]
+mod recursive_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn non_recursive_ignores_subdirs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        // top-level migration
+        fs::write(root.join("1_top.sql"), "-- top\nSELECT 1;\n").expect("write top");
+        // subdir migration
+        let sub = root.join("nested");
+        fs::create_dir(&sub).expect("create nested");
+        fs::write(sub.join("2_sub.sql"), "-- sub\nSELECT 2;\n").expect("write sub");
+
+        let cfg = ResolveConfig::new();
+        let got = resolve_blocking_with_config(root, &cfg).expect("resolve ok");
+        // should only see the top-level one
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].0.version, 1);
+    }
+
+    #[test]
+    fn recursive_preserves_unrecognized_sql_file_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sub = tmp.path().join("nested");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("schema.sql"), "SELECT 1;").unwrap();
+        fs::write(sub.join("1_valid.sql"), "SELECT 1;").unwrap();
+        let mut cfg = ResolveConfig::new();
+        cfg.set_recursive(true);
+        assert!(resolve_blocking_with_config(tmp.path(), &cfg)
+            .unwrap_err()
+            .to_string()
+            .contains("schema.sql"));
+        for behavior in [UnrecognizedSqlFiles::Warn, UnrecognizedSqlFiles::Ignore] {
+            cfg.unrecognized_sql_files(behavior);
+            let migrations = resolve_blocking_with_config(tmp.path(), &cfg).unwrap();
+            assert_eq!(migrations.len(), 1);
+            assert_eq!(migrations[0].0.version, 1);
+        }
+    }
+
+    #[test]
+    fn recursive_finds_subdirs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        fs::write(root.join("3_top.sql"), "-- top\nSELECT 3;\n").expect("write top");
+        let sub = root.join("nested");
+        fs::create_dir(&sub).expect("create nested");
+        fs::write(sub.join("2_sub.sql"), "-- sub\nSELECT 2;\n").expect("write sub");
+
+        let mut cfg = ResolveConfig::new();
+        cfg.set_recursive(true);
+        let deep = sub.join("deep");
+        fs::create_dir(&deep).expect("create deep");
+        fs::write(deep.join("1_first.sql"), "SELECT 1;").expect("write deep");
+        let got = resolve_blocking_with_config(root, &cfg).expect("resolve deep");
+        assert_eq!(
+            got.iter().map(|(m, _)| m.version).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
 }
 
 #[test]
