@@ -22,7 +22,8 @@ pub trait TestSupport: Database {
     ///   on the database server.
     /// * each invocation results in a different temporary database.
     ///
-    /// The implementation may require `DATABASE_URL` to be set in order to manage databases.
+    /// The implementation may require the environment variable named by
+    /// [`TestArgs::database_url_var`] to be set in order to manage databases.
     /// The user credentials it contains must have the privilege to create and drop databases.
     fn test_context(
         args: &TestArgs,
@@ -34,9 +35,12 @@ pub trait TestSupport: Database {
     ///
     /// Returns a count of the databases deleted, if possible.
     ///
-    /// The implementation may require `DATABASE_URL` to be set in order to manage databases.
+    /// The implementation may require the environment variable `database_url_var`
+    /// (usually `DATABASE_URL`) to be set in order to manage databases.
     /// The user credentials it contains must have the privilege to create and drop databases.
-    fn cleanup_test_dbs() -> impl Future<Output = Result<Option<usize>, Error>> + Send + 'static;
+    fn cleanup_test_dbs(
+        database_url_var: &str,
+    ) -> impl Future<Output = Result<Option<usize>, Error>> + Send + '_;
 
     /// Take a snapshot of the current state of the database (data only).
     ///
@@ -66,6 +70,10 @@ pub struct TestArgs {
     pub test_path: &'static str,
     pub migrator: Option<&'static Migrator>,
     pub fixtures: &'static [TestFixture],
+    /// The name of the environment variable that holds the database URL.
+    ///
+    /// `#[sqlx::test]` sets this from `common.database-url-var` in `sqlx.toml`.
+    pub database_url_var: &'static str,
 }
 
 pub trait TestFn {
@@ -158,7 +166,12 @@ impl TestArgs {
             test_path,
             migrator: None,
             fixtures: &[],
+            database_url_var: "DATABASE_URL",
         }
+    }
+
+    pub fn database_url_var(&mut self, database_url_var: &'static str) {
+        self.database_url_var = database_url_var;
     }
 
     pub fn migrator(&mut self, migrator: &'static Migrator) {
