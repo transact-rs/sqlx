@@ -52,6 +52,7 @@ mac_address = ["sqlx-macros-core/mac_address"]
 rust_decimal = ["sqlx-macros-core/rust_decimal"]
 time = ["sqlx-macros-core/time"]
 uuid = ["sqlx-macros-core/uuid"]
+whoami = ["sqlx-macros-core/whoami"]
 json = ["sqlx-macros-core/json"]
 
 [dependencies]

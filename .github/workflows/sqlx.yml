@@ -313,7 +313,7 @@ jobs:
           done
           cargo test \
             --no-default-features \
-            --features any,postgres,macros,migrate,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
+            --features any,postgres,macros,migrate,whoami,_unstable-all-types,runtime-${{ matrix.runtime }},tls-${{ matrix.tls }} \
             -- \
             "${SKIP_ARGS[@]}"
         env:
