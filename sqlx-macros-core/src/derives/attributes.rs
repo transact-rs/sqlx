@@ -61,6 +61,7 @@ pub struct SqlxContainerAttributes {
     pub repr_c: Option<Ident>,
     pub no_pg_array: bool,
     pub default: bool,
+    pub try_from: Option<Type>,
 }
 
 pub enum JsonAttribute {
@@ -85,6 +86,7 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
     let mut rename_all = None;
     let mut no_pg_array = None;
     let mut default = None;
+    let mut try_from = None;
 
     for attr in input {
         if attr.path().is_ident("sqlx") {
@@ -95,6 +97,10 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
                     try_set!(no_pg_array, true, attr);
                 } else if meta.path.is_ident("default") {
                     try_set!(default, true, attr);
+                } else if meta.path.is_ident("try_from") {
+                    meta.input.parse::<Token![=]>()?;
+                    let val: LitStr = meta.input.parse()?;
+                    try_set!(try_from, val.parse()?, val);
                 } else if meta.path.is_ident("rename_all") {
                     meta.input.parse::<Token![=]>()?;
                     let lit: LitStr = meta.input.parse()?;
@@ -153,6 +159,7 @@ pub fn parse_container_attributes(input: &[Attribute]) -> syn::Result<SqlxContai
         rename_all,
         no_pg_array: no_pg_array.unwrap_or(false),
         default: default.unwrap_or(false),
+        try_from,
     })
 }
 
