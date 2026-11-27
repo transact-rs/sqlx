@@ -737,6 +737,60 @@ async fn concurrent_read_and_write() {
     write.await;
 }
 
+// https://github.com/transact-rs/sqlx/issues/4557
+#[sqlx_macros::test]
+async fn it_does_not_deadlock_on_back_to_back_lock_handle() -> anyhow::Result<()> {
+    use std::time::Duration;
+
+    // Keep the CPU busy so worker threads get descheduled between releasing
+    // and re-acquiring the connection mutex.
+    let stop = Arc::new(AtomicBool::new(false));
+    let hogs: Vec<_> = (0..std::thread::available_parallelism()?.get() * 2)
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    std::hint::spin_loop();
+                }
+            })
+        })
+        .collect();
+
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let mut conn = SqliteConnection::connect("sqlite::memory:").await?;
+        tasks.push(sqlx_core::rt::spawn(async move {
+            for i in 0..200_000 {
+                let res = sqlx_core::rt::timeout(Duration::from_secs(30), async {
+                    let mut handle = conn.lock_handle().await.unwrap();
+                    let _ = handle.as_raw_handle();
+                })
+                .await;
+                if res.is_err() {
+                    return Err(format!("lock_handle() hung on iteration {i}"));
+                }
+            }
+            Ok(())
+        }));
+    }
+
+    let mut results = Vec::new();
+    for task in tasks {
+        results.push(task.await);
+    }
+
+    stop.store(true, Ordering::Relaxed);
+    for hog in hogs {
+        hog.join().unwrap();
+    }
+
+    for res in results {
+        res.map_err(anyhow::Error::msg)?;
+    }
+
+    Ok(())
+}
+
 #[sqlx_macros::test]
 async fn test_query_with_progress_handler() -> anyhow::Result<()> {
     let mut conn = new::<Sqlite>().await?;
