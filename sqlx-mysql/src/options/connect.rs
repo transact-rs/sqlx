@@ -4,7 +4,7 @@ use crate::executor::Executor;
 use crate::{MySqlConnectOptions, MySqlConnection};
 use log::LevelFilter;
 use sqlx_core::sql_str::AssertSqlSafe;
-use sqlx_core::Url;
+use sqlx_core::{config, Url};
 use std::time::Duration;
 
 impl ConnectOptions for MySqlConnectOptions {
@@ -245,5 +245,12 @@ mod tests {
         assert_eq!(quote_string_literal("a\\'b"), "'a\\\\''b'");
         assert_eq!(quote_string_literal("plain"), "'plain'");
         assert_eq!(quote_string_literal("it's"), "'it''s'");
+    }
+
+    fn __unstable_apply_driver_config(
+        self,
+        config: &config::drivers::Config,
+    ) -> crate::Result<Self> {
+        self.apply_driver_config(&config.mysql)
     }
 }
