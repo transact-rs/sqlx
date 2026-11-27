@@ -130,6 +130,17 @@ enum Mood {
     Sad,
 }
 
+// Stale enum type that can absorb any unknown variants
+#[derive(PartialEq, Debug, sqlx::Type)]
+#[sqlx(type_name = "operation")]
+#[sqlx(rename_all = "lowercase")]
+enum SafeOperation {
+    Add,
+    Subtract,
+    #[sqlx(other)]
+    Unknown(String),
+}
+
 // Records must map to a custom type
 // Note that all types are types in Postgres
 #[derive(PartialEq, Debug, sqlx::Type)]
@@ -206,7 +217,11 @@ async fn test_enum_type() -> anyhow::Result<()> {
         r#"
 DROP TABLE IF EXISTS people;
 
+DROP TABLE IF EXISTS ops;
+
 DROP TYPE IF EXISTS mood CASCADE;
+
+DROP TYPE IF EXISTS operation CASCADE;
 
 CREATE TYPE mood AS ENUM ( 'ok', 'happy', 'sad' );
 
@@ -227,10 +242,16 @@ CREATE TYPE color_kebab_case AS ENUM ( 'red-green', 'blue-black' );
 CREATE TYPE color_mixed_case AS ENUM ( 'redGreen', 'blueBlack' );
 CREATE TYPE color_camel_case AS ENUM ( 'RedGreen', 'BlueBlack' );
 
+CREATE TYPE operation AS ENUM ( 'add', 'subtract', 'multiply' );
 
 CREATE TABLE people (
     id      serial PRIMARY KEY,
     mood    mood not null
+);
+
+CREATE TABLE ops (
+    id serial PRIMARY KEY,
+    op operation NOT NULL
 );
     "#,
     )
@@ -388,6 +409,33 @@ SELECT id, mood FROM people WHERE id = $1
 
     assert!(rec.0);
     assert_eq!(rec.1, ColorPascalCase::RedGreen);
+
+    let id: i32 = sqlx::query_scalar("INSERT INTO ops (op) VALUES ('multiply') RETURNING id")
+        .fetch_one(&mut conn)
+        .await?;
+
+    #[derive(sqlx::FromRow)]
+    struct OpRow {
+        id: i32,
+        op: SafeOperation,
+    }
+
+    let row: OpRow = sqlx::query_as("SELECT id, op FROM ops WHERE id = $1")
+        .bind(id)
+        .fetch_one(&mut conn)
+        .await?;
+
+    assert_eq!(row.id, id);
+    assert_eq!(row.op, SafeOperation::Unknown("multiply".to_owned()));
+
+    let id: Option<i32> =
+        sqlx::query_scalar("UPDATE ops SET op = $2 WHERE id = $1 AND op <> $2 RETURNING id")
+            .bind(id)
+            .bind(row.op)
+            .fetch_optional(&mut conn)
+            .await?;
+
+    assert!(id.is_none());
 
     Ok(())
 }
