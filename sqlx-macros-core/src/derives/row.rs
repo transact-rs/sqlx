@@ -97,6 +97,13 @@ fn expand_derive_from_row_struct(
                 }
             };
 
+            let id_s = if let Some(ordinal) = attributes.ordinal {
+                predicates.push(parse_quote!(::std::primitive::usize: ::sqlx::ColumnIndex<R>));
+                quote!(#ordinal)
+            } else {
+                quote!(#id_s)
+            };
+
             let expr: Expr = match (attributes.flatten, attributes.try_from, attributes.json) {
                 // <No attributes>
                 (false, None, None) => {
@@ -137,7 +144,7 @@ fn expand_derive_from_row_struct(
                 (false, Some(try_from), None) => {
                     predicates
                         .push(parse_quote!(#try_from: ::sqlx::decode::Decode<#lifetime, R::Database>));
-                    predicates.push(parse_quote!(#try_from: ::sqlx::types::Type<R::Database>)); 
+                    predicates.push(parse_quote!(#try_from: ::sqlx::types::Type<R::Database>));
 
                     parse_quote!(
                         __row.try_get(#id_s)
