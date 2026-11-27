@@ -506,6 +506,15 @@ impl ConnectionWorker {
     }
 
     pub(crate) async fn unlock_db(&mut self) -> Result<MutexGuard<'_, ConnectionState>, Error> {
+        // Wait until the worker has processed every earlier command. It only releases the
+        // lock while handling `UnlockDb` and re-locks before the next command, so once the
+        // ping is answered it holds the lock and the `lock()` below queues behind it.
+        //
+        // Without this, the lock can be free while the worker is between releasing and
+        // re-locking, our `UnlockDb` is never consumed, and enough of them fill the
+        // command channel and deadlock: https://github.com/transact-rs/sqlx/issues/4557
+        self.ping().await?;
+
         let (guard, res) = futures_util::future::join(
             // we need to join the wait queue for the lock before we send the message
             self.shared.conn.lock(),

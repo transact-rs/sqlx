@@ -737,7 +737,7 @@ async fn concurrent_read_and_write() {
     write.await;
 }
 
-// https://github.com/transact-rs/sqlx/issues/4557
+// Regression test for https://github.com/transact-rs/sqlx/issues/4557
 #[sqlx_macros::test]
 async fn it_does_not_deadlock_on_back_to_back_lock_handle() -> anyhow::Result<()> {
     use std::time::Duration;
