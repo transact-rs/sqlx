@@ -804,3 +804,105 @@ async fn test_client_found_rows() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[sqlx_macros::test]
+async fn it_reports_the_server_status_before_the_first_query() -> anyhow::Result<()> {
+    // Without these options, connecting runs no statement: the status comes from the
+    // handshake.
+    let options = env::var("DATABASE_URL")?
+        .parse::<MySqlConnectOptions>()?
+        .pipes_as_concat(false)
+        .no_engine_substitution(false)
+        .timezone(None)
+        .set_names(false);
+    let conn = options.connect().await?;
+    assert!(conn.server_autocommit());
+    assert!(!conn.server_in_transaction());
+    conn.close().await?;
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_reports_the_server_transaction_status() -> anyhow::Result<()> {
+    let mut conn = new::<MySql>().await?;
+    assert!(!conn.server_in_transaction());
+    assert!(conn.server_autocommit());
+
+    conn.execute("START TRANSACTION").await?;
+    assert!(conn.server_in_transaction());
+    // SQLx did not begin this transaction, so it does not count it.
+    assert!(!conn.is_in_transaction());
+    conn.execute("COMMIT").await?;
+    assert!(!conn.server_in_transaction());
+
+    // A transaction begun inside a stored procedure.
+    conn.execute("DROP PROCEDURE IF EXISTS sqlx_begin_in_procedure")
+        .await?;
+    conn.execute("CREATE PROCEDURE sqlx_begin_in_procedure() START TRANSACTION")
+        .await?;
+    conn.execute("CALL sqlx_begin_in_procedure()").await?;
+    assert!(conn.server_in_transaction());
+    conn.execute("ROLLBACK").await?;
+    conn.execute("DROP PROCEDURE sqlx_begin_in_procedure")
+        .await?;
+    assert!(!conn.server_in_transaction());
+
+    conn.execute("SET autocommit = 0").await?;
+    assert!(!conn.server_autocommit());
+    conn.execute("SET autocommit = 1").await?;
+    assert!(conn.server_autocommit());
+
+    Ok(())
+}
+
+#[sqlx_macros::test]
+async fn it_reads_the_transaction_status_again_on_ping_after_a_deadlock() -> anyhow::Result<()> {
+    use std::time::Duration;
+
+    let mut setup = new::<MySql>().await?;
+    setup
+        .execute("DROP TABLE IF EXISTS sqlx_status_deadlock")
+        .await?;
+    setup
+        .execute("CREATE TABLE sqlx_status_deadlock (id INT PRIMARY KEY, v INT) ENGINE = InnoDB")
+        .await?;
+    setup
+        .execute("INSERT INTO sqlx_status_deadlock VALUES (1, 0), (2, 0)")
+        .await?;
+
+    let mut a = new::<MySql>().await?;
+    let mut b = new::<MySql>().await?;
+    a.execute("START TRANSACTION").await?;
+    b.execute("START TRANSACTION").await?;
+    a.execute("UPDATE sqlx_status_deadlock SET v = 1 WHERE id = 1")
+        .await?;
+    b.execute("UPDATE sqlx_status_deadlock SET v = 1 WHERE id = 2")
+        .await?;
+
+    // Each waits for the other's row; InnoDB rolls one of them back.
+    let (first, second) = futures_util::future::join(
+        a.execute("UPDATE sqlx_status_deadlock SET v = 2 WHERE id = 2"),
+        async {
+            sqlx_core::rt::sleep(Duration::from_millis(300)).await;
+            b.execute("UPDATE sqlx_status_deadlock SET v = 2 WHERE id = 1")
+                .await
+        },
+    )
+    .await;
+    let (victim, survivor) = match (first.is_err(), second.is_err()) {
+        (true, false) => (&mut a, &mut b),
+        (false, true) => (&mut b, &mut a),
+        outcome => panic!("expected exactly one deadlock victim, got {outcome:?}"),
+    };
+
+    // The ERR packet carries no status; a ping reads it again.
+    victim.ping().await?;
+    assert!(!victim.server_in_transaction());
+    assert!(survivor.server_in_transaction());
+    survivor.execute("ROLLBACK").await?;
+
+    setup.execute("DROP TABLE sqlx_status_deadlock").await?;
+
+    Ok(())
+}

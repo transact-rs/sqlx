@@ -10,8 +10,8 @@ use crate::error::Error;
 use crate::ext::ustr::UStr;
 use crate::io::StatementId;
 use crate::message::{
-    BackendMessageFormat, Close, Query, ReadyForQuery, ReceivedMessage, Terminate,
-    TransactionStatus,
+    BackendMessageFormat, Close, PgTransactionStatus, Query, ReadyForQuery, ReceivedMessage,
+    Terminate,
 };
 use crate::statement::PgStatementMetadata;
 use crate::transaction::Transaction;
@@ -72,7 +72,7 @@ pub struct PgConnectionInner {
     pub(crate) pending_ready_for_query_count: usize,
 
     // current transaction status
-    transaction_status: TransactionStatus,
+    transaction_status: PgTransactionStatus,
     pub(crate) transaction_depth: usize,
 
     log_settings: LogSettings,
@@ -88,6 +88,22 @@ impl PgConnection {
     /// the version number of the server in `libpq` format
     pub fn server_version_num(&self) -> Option<u32> {
         self.inner.stream.server_version_num
+    }
+
+    /// The transaction status of the session, as the server reported it in its last
+    /// `ReadyForQuery` message.
+    ///
+    /// Unlike [`Connection::is_in_transaction()`], which only counts the transactions begun
+    /// through SQLx, this reflects every statement the session ran: a `BEGIN` or `COMMIT`
+    /// sent as a query, a `COMMIT AND CHAIN`, or a statement that failed inside a
+    /// transaction block.
+    ///
+    /// Responses still pending (for example, those of a query whose stream was dropped before
+    /// it finished) are read first, so the status is current. No query is sent.
+    pub async fn transaction_status(&mut self) -> Result<PgTransactionStatus, Error> {
+        self.wait_until_ready().await?;
+
+        Ok(self.inner.transaction_status)
     }
 
     // will return when the connection is ready for another query
@@ -142,8 +158,8 @@ impl PgConnection {
 
     pub(crate) fn in_transaction(&self) -> bool {
         match self.inner.transaction_status {
-            TransactionStatus::Transaction => true,
-            TransactionStatus::Error | TransactionStatus::Idle => false,
+            PgTransactionStatus::Transaction => true,
+            PgTransactionStatus::Error | PgTransactionStatus::Idle => false,
         }
     }
 
