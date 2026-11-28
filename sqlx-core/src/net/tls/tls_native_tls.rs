@@ -80,9 +80,17 @@ pub async fn connector(config: TlsConfig<'_>) -> crate::Result<NativeTlsConnecto
         // `disable_built_in_roots` is what makes the bundle exclusive. It is
         // set only when a bundle is supplied — a caller that supplies none
         // keeps the system roots exactly as before.
+        // NOT UNIT-TESTABLE, AND SAID SO: `native_tls::TlsConnectorBuilder`
+        // exposes no getter, so no test can observe this line — deleting it
+        // would leave every test in this file green while restoring the
+        // additive system roots. It is held by review and by the Android
+        // refusal above, which exists because this flag is defeated there.
         builder.disable_built_in_roots(true);
         for root in roots {
-            builder.add_root_certificate(root);
+            let certificate = native_tls::Certificate::from_der(&root).map_err(|err| {
+                Error::Tls(format!("Invalid certificate {root_cert_path}: {err}").into())
+            })?;
+            builder.add_root_certificate(certificate);
         }
     }
 
@@ -140,7 +148,7 @@ pub async fn handshake<S: Socket>(
 fn supplied_roots(
     data: &[u8],
     source: &crate::net::tls::CertificateInput,
-) -> Result<Vec<native_tls::Certificate>, Error> {
+) -> Result<Vec<Vec<u8>>, Error> {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
 
@@ -205,9 +213,14 @@ fn supplied_roots(
             .decode(body.as_bytes())
             .map_err(|err| Error::Tls(format!("Invalid certificate {source}: {err}").into()))?;
         if kind == "CERTIFICATE" {
-            roots.push(native_tls::Certificate::from_der(&decoded).map_err(|err| {
-                Error::Tls(format!("Invalid certificate {source}: {err}").into())
-            })?);
+            // VALIDATED HERE, CONSTRUCTED AT THE CALL SITE: `from_der` is what
+            // proves the bytes are a certificate, and returning the DER lets the
+            // tests prove the roots are DISTINCT — `native_tls::Certificate`
+            // exposes no identity, so a parser that pushed the same certificate
+            // twice would satisfy a length-only assertion.
+            native_tls::Certificate::from_der(&decoded)
+                .map_err(|err| Error::Tls(format!("Invalid certificate {source}: {err}").into()))?;
+            roots.push(decoded);
         }
     }
 
@@ -236,7 +249,13 @@ mod supplied_roots_tests {
     fn a_bundle_yields_every_certificate() {
         let bundle = format!("{CA_A}\n{CA_B}\n");
         let input = CertificateInput::Inline(bundle.clone().into_bytes());
-        assert_eq!(supplied_roots(bundle.as_bytes(), &input).unwrap().len(), 2);
+        let roots = supplied_roots(bundle.as_bytes(), &input).unwrap();
+        assert_eq!(roots.len(), 2);
+        assert_ne!(
+            roots[0], roots[1],
+            "the two roots must be DISTINCT: a parser that pushed the same certificate twice \
+             would satisfy a length-only assertion"
+        );
 
         let empty = CertificateInput::Inline(Vec::new());
         assert_eq!(supplied_roots(b"", &empty).unwrap().len(), 0);
@@ -289,8 +308,6 @@ mod supplied_roots_tests {
     #[test]
     fn a_bundle_with_no_certificate_is_refused() {
         let input = CertificateInput::Inline(b"not a certificate\n".to_vec());
-        // `native_tls::Certificate` is not Debug, so `unwrap_err()` cannot be
-        // used here; take the error through Option instead.
         let error = supplied_roots(b"not a certificate\n", &input)
             .err()
             .expect("a bundle with no certificate must be refused");
