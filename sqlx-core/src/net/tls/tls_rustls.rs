@@ -156,19 +156,7 @@ pub async fn connector(tls_config: TlsConfig<'_>) -> Result<RustlsConnector, Err
                 .with_no_client_auth()
         }
     } else {
-        let mut cert_store = import_root_certs();
-
-        if let Some(ca) = tls_config.root_cert_path {
-            let data = ca.data().await?;
-
-            for result in CertificateDer::pem_slice_iter(&data) {
-                let Ok(cert) = result else {
-                    return Err(Error::Tls(format!("Invalid certificate {ca}").into()));
-                };
-
-                cert_store.add(cert).map_err(|err| Error::Tls(err.into()))?;
-            }
-        }
+        let cert_store = root_cert_store(tls_config.root_cert_path).await?;
 
         if tls_config.accept_invalid_hostnames {
             let verifier = WebPkiServerVerifier::builder(Arc::new(cert_store))
@@ -238,6 +226,48 @@ fn private_key_from_pem(pem: Vec<u8>) -> Result<PrivateKeyDer<'static>, Error> {
         Err(pem::Error::NoItemsFound) => Err(Error::Configuration("no keys found pem file".into())),
         Err(e) => Err(Error::Configuration(e.to_string().into())),
     }
+}
+
+/// The trust store a connection is built on.
+///
+/// A SUPPLIED BUNDLE IS THE WHOLE STORE. Seeding the ambient roots and then
+/// adding the caller's certificate makes a configured CA ADDITIVE: a chain to
+/// any public root would then be accepted for the configured hostname. So:
+///
+///   * no bundle      -> the ambient roots, exactly as before;
+///   * a bundle       -> exactly the certificates in it, and nothing else;
+///   * an EMPTY       -> an empty store: fail-closed at connect, never a quiet
+///     bundle            fall back to the public roots;
+///   * a bundle that  -> refused by name. `pem_slice_iter` silently yields NO
+///     yields no          items for input that is not PEM at all, so without
+///     certificate        this arm a misconfigured path would build an empty
+///                        store and fail every handshake with no diagnostic
+///                        naming the certificate.
+async fn root_cert_store(
+    root: Option<&crate::net::tls::CertificateInput>,
+) -> Result<RootCertStore, Error> {
+    let Some(ca) = root else {
+        return Ok(import_root_certs());
+    };
+
+    let data = ca.data().await?;
+    let mut store = RootCertStore::empty();
+    let mut added = 0usize;
+
+    for result in CertificateDer::pem_slice_iter(&data) {
+        let Ok(cert) = result else {
+            return Err(Error::Tls(format!("Invalid certificate {ca}").into()));
+        };
+
+        store.add(cert).map_err(|err| Error::Tls(err.into()))?;
+        added += 1;
+    }
+
+    if added == 0 && !data.iter().all(u8::is_ascii_whitespace) {
+        return Err(Error::Tls(format!("No certificate found in {ca}").into()));
+    }
+
+    Ok(store)
 }
 
 #[cfg(all(feature = "webpki-roots", not(feature = "rustls-native-certs")))]
@@ -514,5 +544,109 @@ MC4CAQAwBQYDK2VwBCIEID8jex+k7LAgC5JfhRHaleP+dhL1s4NemFDa1CMKvcuu
         server.reader().read_to_end(&mut received).unwrap();
         assert_eq!(received, b"ping");
         assert!(server.process_new_packets().unwrap().peer_has_closed());
+    }
+}
+
+#[cfg(all(test, feature = "_tls-rustls-ring-webpki"))]
+mod exclusive_root_tests {
+    use super::*;
+    use crate::net::tls::CertificateInput;
+
+    // Two self-signed certificates, for the trust-store tests only.
+    const CA_A: &str = "-----BEGIN CERTIFICATE-----\nMIIDAjCCAeqgAwIBAgIUC2yl3UmpqaiPbRPW6cYDudJqO7cwDQYJKoZIhvcNAQEL\nBQAwGTEXMBUGA1UEAwwOc3FseC10ZXN0LWNhLTEwHhcNMjYxMTI3MDg1MTI0WhcN\nMzYxMTI0MDg1MTI0WjAZMRcwFQYDVQQDDA5zcWx4LXRlc3QtY2EtMTCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALU1ME00bOX20WVlUSbMO/EkcmToBhNN\nwZeejxMBCSe+lWyZRd35qtR0wjiAIw9/29eQ+RlbDCz+Ur3kpOJ+f6P4of0zk1Dg\n5561/f9QgVIsJ1mO7Ldy/juq5SWV4/82TE4k+gvMoEHRuMutVET1tsyX+9ia9B9z\nZeRT8b0fRsyEeUQZZqEzbFXhxB15Yc/ScXSxp+aZEibMydUsAM8N/+zzxeYKFUTD\nCSuVOtxCNdDcgSF21RrVTafEOKX8MU9C1WH0mO7K1YVi3ms1bkmIrBagm2ldM9Fb\nxcsK2dYozmWRxRXIu0umH2j06kRH3NUrkZv+ehUozZOC5PPvckkIcT8CAwEAAaNC\nMEAwHQYDVR0OBBYEFKm40mqfkLJLWaBAMzJ1aMoRuC85MA8GA1UdEwEB/wQFMAMB\nAf8wDgYDVR0PAQH/BAQDAgEGMA0GCSqGSIb3DQEBCwUAA4IBAQAhmOwHf6kUZc4L\nznzOSNrV0pDs9vx/oYvR53PgCFT14QPAcAC1bp3ZLUnZmlzXcYK/Wt+pcgyMXhxk\nEM1LzmvvutK6auiSDfQ0jPnvAtSDbpD6winZ6BdnjxmH5DnV0Hody3gILnbxg4Qh\ncxgn3IsjrAm9BLdssoO8WgNM9tvwBqcGkhByQm6OoFi5CAHeBh1XAdK/XdM/AyvL\n4QcB9zWLd57RLltz4Brbmh8twhksE51/gi2CzfzQ10rffEhsfEDyXALJ/KIBtJLA\nH8n3JMrggTzkQc8Y1TepkeevpeZ9cXXBDFWPvvd4os2fCxnc9oLvn9dLIX51I066\n1cOckJhQ\n-----END CERTIFICATE-----";
+    const CA_B: &str = "-----BEGIN CERTIFICATE-----\nMIIDAjCCAeqgAwIBAgIUSw5EoL3n8Xx0a8u1YHtrh3JrKNkwDQYJKoZIhvcNAQEL\nBQAwGTEXMBUGA1UEAwwOc3FseC10ZXN0LWNhLTIwHhcNMjYxMTI3MDg1MTI1WhcN\nMzYxMTI0MDg1MTI1WjAZMRcwFQYDVQQDDA5zcWx4LXRlc3QtY2EtMjCCASIwDQYJ\nKoZIhvcNAQEBBQADggEPADCCAQoCggEBALacNkNHSwqSgquVXyiwTgN/Ps5zAiOi\nI9+ze/mSdeUHloBhsRh8AShC14V1yr4PUufXGOEnmihQAiuE3rYiGt3mkXecRMXe\n5rwQNNYA04kaLXXFWSrMErtE9WRVk1vnnVHyhg7ieVtj92+NqYx6uYWmf7RkcA+6\n9S9cXuzjuzHMqG4qUvC2qFPJjLrJETMkgVEXkPyflwDyRkyAuig5K1tnqWsYt1wr\nK9a1pIpi2sBjrvUBBVIYkbOKac6RTUyx91+ELQPjj/HZM+Z3WbkEECbvV4SbuF7C\nmVrvtZNievG2X7/gbWJ6QfqKvfIJ+pTK0nK3r7nfW3cWXik32D0y9isCAwEAAaNC\nMEAwHQYDVR0OBBYEFJ8PSXoDC5QaS6XU3AwLq/vjM6wFMA8GA1UdEwEB/wQFMAMB\nAf8wDgYDVR0PAQH/BAQDAgEGMA0GCSqGSIb3DQEBCwUAA4IBAQClHE5ixzZy9nh7\na8laOznmud6JzJ3ni/HprNnQCguU25SAFmueh93ZW5izBpA2S1ViwaFS9bR4C2fY\ni83iISmbGX1iXn6YDQuTa4BWPXbf9invw0fK2ASu5W8IF6m85j9A4faDBmhSyXmR\nq6bswWDoOtYNUaojDXUOysjQIYzmy5zhiNvrzaHrvBH5s+4s/MzkPonOqTX5fLjn\ngCGliRK2GizeaRUmPgI4oPtCZFWhR4qGm45jl906AQQyFlFJKSOVhLjjeUo6jROu\n4MJG7V1rgTs2mI8gCwKUOBYplXfX2gh4lnF+pzz73Z4AXTKg4aEVdN5v94m09OcA\nBjZVB0yH\n-----END CERTIFICATE-----";
+
+    /// No new dev-dependency (`tokio`'s `macros` feature is off in this
+    /// crate): a current-thread runtime built by hand runs each case.
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a current-thread runtime")
+            .block_on(f)
+    }
+
+    fn bundle() -> CertificateInput {
+        CertificateInput::Inline(format!("{CA_A}\n{CA_B}\n").into_bytes())
+    }
+
+    /// THE PROPERTY: a supplied bundle is the WHOLE store.
+    ///
+    /// The length check alone would pass on a store that happened to hold two
+    /// ambient roots and the bundle were ignored, so the second half asserts
+    /// directly that no root from the real public set is present — this is as
+    /// close as an offline test can come to "a publicly-rooted chain for the
+    /// configured hostname is refused": the root is not in the store, so no
+    /// chain to it can verify.
+    #[test]
+    fn a_supplied_bundle_is_the_whole_store() {
+        let store = block_on(root_cert_store(Some(&bundle()))).unwrap();
+        assert_eq!(
+            store.roots.len(),
+            2,
+            "the store must hold exactly the bundle's two certificates"
+        );
+
+        for ambient in webpki_roots::TLS_SERVER_ROOTS.iter() {
+            assert!(
+                !store
+                    .roots
+                    .iter()
+                    .any(|present| present.subject == ambient.subject),
+                "an ambient public root is present in a store built from a supplied bundle"
+            );
+        }
+    }
+
+    /// The control: no bundle means the ambient roots, exactly as today. The
+    /// `> 2` half is what makes the test above RED rather than trivially true
+    /// in a build with no ambient roots at all.
+    #[test]
+    fn with_no_bundle_the_ambient_roots_remain() {
+        let store = block_on(root_cert_store(None)).unwrap();
+        assert_eq!(store.roots.len(), import_root_certs().roots.len());
+        assert!(
+            store.roots.len() > 2,
+            "this build must carry ambient roots for the bundle test to be meaningful"
+        );
+    }
+
+    /// Fail-closed: a valid-but-empty bundle is an EMPTY store, never a quiet
+    /// fallback to the public roots.
+    #[test]
+    fn an_empty_bundle_is_an_empty_store() {
+        let empty = CertificateInput::Inline(Vec::new());
+        let store = block_on(root_cert_store(Some(&empty))).unwrap();
+        assert_eq!(store.roots.len(), 0);
+    }
+
+    /// A bundle that is NOT PEM AT ALL yields no certificate items from
+    /// `pem_slice_iter` — it does not error. Without an explicit arm it would
+    /// build an EMPTY store and every handshake would fail with no diagnostic
+    /// naming the file, so it is refused by name instead.
+    #[test]
+    fn a_bundle_with_no_certificate_is_refused() {
+        let garbage = CertificateInput::Inline(b"not a certificate\n".to_vec());
+        let error = block_on(root_cert_store(Some(&garbage))).unwrap_err();
+        let rendered = format!("{error}");
+        assert!(
+            rendered.contains("No certificate found"),
+            "a bundle holding no certificate must be refused naming the input, got: {rendered}"
+        );
+    }
+
+    /// A PEM-SHAPED but invalid body is refused by the parser, and the arm
+    /// says which certificate failed.
+    #[test]
+    fn a_pem_shaped_invalid_certificate_is_refused() {
+        let broken = CertificateInput::Inline(
+            b"-----BEGIN CERTIFICATE-----\nnot base64!\n-----END CERTIFICATE-----\n".to_vec(),
+        );
+        let error = block_on(root_cert_store(Some(&broken))).unwrap_err();
+        let rendered = format!("{error}");
+        assert!(
+            rendered.contains("Invalid certificate"),
+            "a PEM-shaped invalid certificate must be refused naming it, got: {rendered}"
+        );
     }
 }
